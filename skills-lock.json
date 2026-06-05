@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "openpets": {
+      "source": "alvinunreal/openpets",
+      "sourceType": "github",
+      "skillPath": "skills/openpets/SKILL.md",
+      "computedHash": "c0ff7d4c61f18773ca6be498cdcd735fb2202d7be5044b0056d53a76fc738608"
+    }
+  }
+}

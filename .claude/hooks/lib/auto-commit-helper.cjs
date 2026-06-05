@@ -1,0 +1,258 @@
+// t1k-origin: kit=theonekit-core | repo=The1Studio/theonekit-core | module=null | protected=true
+/**
+ * auto-commit-helper.cjs — Extracted from check-kit-updates.cjs:~483-514.
+ *
+ * Phase 03 of 260418-1942-t1k-ecosystem-fixes. Commits `.claude/` changes
+ * produced by the auto-update pipeline. Gated on `features.autoCommitKitSync`
+ * (default OFF) so the pre-existing always-on behavior is preserved as opt-in.
+ *
+ * Risk #2 mitigation: when `options.expectedFiles` is supplied, the helper
+ * asserts every staged `.claude/` path appears in that list and ABORTS on any
+ * extra — preventing the auto-commit from bundling the user's unrelated
+ * `.claude/` work. The list is produced by t1k-update-runner.cjs (Phase 02)
+ * and persisted to `~/.claude/.kit-update.status` → `filesChanged[]`.
+ *
+ * `--no-verify --no-gpg-sign` is a DOCUMENTED EXCEPTION for this path only:
+ * the hook may run inside a TTY-less detached background process, where
+ * Pinentry / GPG-SSH prompts would hang forever. See
+ * `skills/t1k-kit/references/cli-auto-update.md` → "--no-verify exception".
+ *
+ * Cross-platform: no shell syntax, no `2>/dev/null`, no `/dev/stdin`.
+ */
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { execSync, execFileSync } = require('child_process');
+
+const DEFAULT_COMMIT_MESSAGE = 'chore(t1k): sync kit modules';
+const DEBUG = process.env.T1K_DEBUG_AUTOCOMMIT === '1';
+
+function dbg(msg) {
+  if (!DEBUG) return;
+  try { process.stderr.write(`[t1k:auto-commit-helper] ${msg}\n`); } catch { /* ok */ }
+}
+
+/**
+ * Parse `git status --porcelain` output into repo-root-relative file paths.
+ * Handles quoted paths (spaces / unicode) by stripping surrounding quotes.
+ * @param {string} raw stdout of `git status --porcelain`
+ * @returns {string[]} file paths (may be empty)
+ */
+function parsePorcelainPaths(raw) {
+  return raw.split('\n')
+    .filter(l => l.length >= 4)
+    .map(l => l.substring(3).trimEnd().replace(/^"(.*)"$/, '$1'));
+}
+
+/**
+ * True if the repo is mid-merge / mid-rebase. We never auto-commit over those.
+ * @param {string} cwd
+ */
+function isMidMergeOrRebase(cwd) {
+  const gitDir = path.join(cwd, '.git');
+  return fs.existsSync(path.join(gitDir, 'MERGE_HEAD'))
+      || fs.existsSync(path.join(gitDir, 'rebase-merge'))
+      || fs.existsSync(path.join(gitDir, 'rebase-apply'));
+}
+
+/**
+ * Build the commit message. When `kits[]` is non-empty, produce
+ * `chore(t1k): sync <kit1>,<kit2> kit modules` to match the user's manual
+ * convention; otherwise use `options.commitMessage` or the default.
+ *
+ * @param {{ commitMessage?: string, kits?: string[] }} options
+ * @returns {string}
+ */
+function buildCommitMessage(options) {
+  const kits = Array.isArray(options.kits) ? options.kits.filter(Boolean) : [];
+  if (kits.length > 0) return `chore(t1k): sync ${kits.join(',')} kit modules`;
+  return options.commitMessage || DEFAULT_COMMIT_MESSAGE;
+}
+
+/**
+ * Attempt to auto-commit `.claude/` changes, and optionally push them.
+ *
+ * Behavior matrix:
+ *   flagEnabled=false          → no-op (returns { committed:false, pushed:false, reason:'flag-off' })
+ *   clean working tree         → no-op ('no-changes')
+ *   mid-merge / mid-rebase     → skip ('mid-merge')
+ *   no `.claude/` in status    → skip ('no-claude-changes')
+ *   non-.claude/ also dirty    → skip + warn ('non-claude-dirty')
+ *   expectedFiles mismatch     → abort + warn ('unexpected-files')
+ *   commit succeeds, pushEnabled=false  → return { committed:true, pushed:false, reason:'committed' }
+ *   commit succeeds, push succeeds       → return { committed:true, pushed:true, reason:'pushed' }
+ *   commit succeeds, push fails          → log + return { committed:true, pushed:false, reason:'push-failed' }
+ *
+ * Scope safety: when `options.expectedFiles` is provided, every staged
+ * `.claude/` file MUST appear in that list. Any mismatch aborts without
+ * committing. This prevents bundling unrelated `.claude/` work that
+ * happens to be dirty at hook time.
+ *
+ * Push semantics (only when `options.pushEnabled === true`):
+ *   - If the current branch has an upstream → `git push` (no flags).
+ *   - If no upstream → `git push -u origin HEAD` (sets upstream on current branch).
+ *   - Never `--force` or `--force-with-lease`.
+ *   - Fail-open: push failure logs `[t1k:auto-push]` and retains the commit
+ *     (user can `git push` manually later). The commit is NEVER undone.
+ *
+ * Never amends. Fail-open on any unexpected error: returns
+ * `{ committed:false, pushed:false, reason:'error' }` so the caller keeps running.
+ *
+ * @param {string} cwd repository working directory
+ * @param {object} options
+ * @param {boolean} options.flagEnabled REQUIRED. When false, return early.
+ * @param {boolean} [options.pushEnabled=false] When true AND commit succeeds, run `git push`.
+ * @param {string[]} [options.expectedFiles] repo-relative paths allowed in the commit.
+ * @param {string} [options.commitMessage] custom message (ignored if `kits` present).
+ * @param {string[]} [options.kits] kit short names for message formatting.
+ * @returns {{ committed: boolean, pushed: boolean, reason: string, files?: string[] }}
+ */
+function autoCommitUpdates(cwd, options = {}) {
+  const flagEnabled = !!options.flagEnabled;
+  const pushEnabled = !!options.pushEnabled;
+
+  if (!flagEnabled) {
+    dbg('flag off — no-op');
+    return { committed: false, pushed: false, reason: 'flag-off' };
+  }
+
+  try {
+    // -uall enumerates untracked files individually (default collapses them
+    // to the parent directory, which defeats the scope-safety gate).
+    const gitStatus = execSync('git status --porcelain -uall', {
+      encoding: 'utf8', cwd, timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'],
+    });
+
+    if (!gitStatus.trim()) {
+      dbg('clean working tree');
+      return { committed: false, pushed: false, reason: 'no-changes' };
+    }
+
+    if (isMidMergeOrRebase(cwd)) {
+      dbg('mid-merge / mid-rebase — skipping');
+      return { committed: false, pushed: false, reason: 'mid-merge' };
+    }
+
+    const allPaths = parsePorcelainPaths(gitStatus);
+    const claudePaths = allPaths.filter(p => p.startsWith('.claude/'));
+    const nonClaudeDirty = allPaths.some(p => !p.startsWith('.claude/'));
+
+    if (claudePaths.length === 0) {
+      dbg('no .claude/ changes in porcelain output');
+      return { committed: false, pushed: false, reason: 'no-claude-changes' };
+    }
+
+    if (nonClaudeDirty) {
+      // Scope safety: if ANY non-.claude/ file is dirty we skip — a blanket
+      // `git add .claude/` is still safe, but mixing auto-commits with the
+      // user's unrelated work-in-progress has burned users before, so
+      // conservative skip + warn is the documented behavior.
+      console.log('[t1k:auto-commit] skip — non-.claude/ changes present; run manually when ready');
+      return { committed: false, pushed: false, reason: 'non-claude-dirty', files: claudePaths };
+    }
+
+    if (Array.isArray(options.expectedFiles)) {
+      const allowed = new Set(options.expectedFiles);
+      const extras = claudePaths.filter(p => !allowed.has(p));
+      if (extras.length > 0) {
+        console.log(`[t1k:auto-commit] abort — ${extras.length} .claude/ file(s) not in expectedFiles: ${extras.slice(0, 5).join(', ')}${extras.length > 5 ? '…' : ''}`);
+        return { committed: false, pushed: false, reason: 'unexpected-files', files: extras };
+      }
+    }
+
+    execSync('git add .claude/', { cwd, timeout: 5000 });
+
+    let diffSummary = '';
+    try {
+      diffSummary = execSync('git diff --cached --name-only', {
+        encoding: 'utf8', cwd, timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'],
+      }).trim();
+    } catch { /* ok */ }
+    if (!diffSummary) {
+      dbg('nothing staged after git add .claude/');
+      return { committed: false, pushed: false, reason: 'no-changes' };
+    }
+
+    const stagedFiles = diffSummary.split('\n').filter(Boolean);
+    const msg = buildCommitMessage(options);
+
+    // --no-verify --no-gpg-sign: TTY-less detached hook exception documented
+    // in skills/t1k-kit/references/cli-auto-update.md. Pinentry / GPG-SSH
+    // prompts would otherwise hang the background runner forever.
+    execFileSync('git', ['commit', '-m', msg, '--no-verify', '--no-gpg-sign'], {
+      cwd, timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
+    });
+
+    console.log(`[t1k:auto-commit] Committed ${stagedFiles.length} .claude/ file(s)`);
+
+    if (!pushEnabled) {
+      return { committed: true, pushed: false, reason: 'committed', files: stagedFiles };
+    }
+
+    // Sibling auto-push step. Gated on options.pushEnabled (caller reads
+    // features.autoPushKitSync and threads it through). Fail-open on any
+    // push error — the commit is RETAINED so the user can `git push`
+    // manually later. Never --force / --force-with-lease.
+    return tryPush(cwd, stagedFiles);
+  } catch (err) {
+    dbg(`error: ${err && err.message}`);
+    return { committed: false, pushed: false, reason: 'error' };
+  }
+}
+
+/**
+ * Push the just-committed change. Called only after `git commit` succeeded
+ * AND `options.pushEnabled` was true. Returns the final result object.
+ *
+ * Behavior:
+ *   - Detect upstream via `git rev-parse --abbrev-ref --symbolic-full-name @{u}`.
+ *   - If upstream present → `git push` (no flags).
+ *   - Otherwise → `git push -u origin HEAD` (set upstream on current branch).
+ *   - On any error → log `[t1k:auto-push] push failed: <msg>` and return
+ *     `{ committed:true, pushed:false, reason:'push-failed' }`. The commit
+ *     is preserved — the runner does NOT attempt to revert.
+ *
+ * TTY-less constraints match the commit step: windowsHide, stdio piped/ignored,
+ * timeout 30s (network deserves more headroom than the 10s commit).
+ *
+ * @param {string} cwd
+ * @param {string[]} stagedFiles
+ * @returns {{ committed: boolean, pushed: boolean, reason: string, files: string[] }}
+ */
+function tryPush(cwd, stagedFiles) {
+  let upstream = '';
+  try {
+    upstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
+      cwd, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
+    }).trim();
+  } catch { upstream = ''; }
+
+  let branchName = '';
+  try {
+    branchName = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
+    }).trim();
+  } catch { branchName = 'HEAD'; }
+
+  const pushArgs = upstream ? ['push'] : ['push', '-u', 'origin', 'HEAD'];
+
+  try {
+    execFileSync('git', pushArgs, {
+      cwd, timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
+    });
+    console.log(`[t1k:auto-push] Pushed ${stagedFiles.length} commit(s) to ${branchName}`);
+    return { committed: true, pushed: true, reason: 'pushed', files: stagedFiles };
+  } catch (err) {
+    const msg = (err && err.message) ? err.message.split('\n')[0] : 'unknown';
+    console.log(`[t1k:auto-push] push failed: ${msg} — commit retained, push manually`);
+    return { committed: true, pushed: false, reason: 'push-failed', files: stagedFiles };
+  }
+}
+
+module.exports = {
+  autoCommitUpdates,
+  // Exported for unit tests only.
+  _internal: { parsePorcelainPaths, isMidMergeOrRebase, buildCommitMessage, tryPush, DEFAULT_COMMIT_MESSAGE },
+};

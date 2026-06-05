@@ -1,0 +1,23 @@
+{
+  "registryVersion": 1,
+  "priority": 50,
+  "description": "Designer kit routing — maps roles to game design agents. Priority 50 (below engine kits at 90).",
+  "roles": {
+    "implementer": "t1k-designer-game-designer",
+    "reviewer": "t1k-designer-game-producer",
+    "debugger": "t1k-designer-game-designer",
+    "optimizer": "t1k-designer-game-producer",
+    "brainstormer": "t1k-designer-brainstormer"
+  },
+  "errorRecovery": {
+    "compilation": "implementer",
+    "design-inconsistency": "reviewer",
+    "balance-issue": "optimizer"
+  },
+  "_origin": {
+    "kit": "theonekit-designer",
+    "repository": "The1Studio/theonekit-designer",
+    "module": null,
+    "protected": false
+  }
+}

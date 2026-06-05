@@ -1,0 +1,57 @@
+%% Narrative Branch — character relationships + branching lanes by Act
+%% classDiagram lets us show BOTH character arcs AND relationships in one view.
+%% Each class = a character (or named arc); members = their beats per Act.
+%% Relationships show allegiance, conflict, and consequence flow.
+%% Render: /t1k:preview --from-file narrative-branch.mmd
+
+classDiagram
+    direction LR
+
+    class Hero {
+      +Act1 : leaves village
+      +Act2 : confronts Elder
+      +Act3 : chooses side
+      -motivation : revenge OR truth
+    }
+
+    class Elder {
+      +Act1 : mentor
+      +Act2 : revealed as antagonist
+      +Act3 : defeated OR redeemed
+    }
+
+    class Rival {
+      +Act1 : ally
+      +Act2 : questions Hero
+      +Act3 : becomes enemy IF Hero chose Elder
+    }
+
+    class Outcasts {
+      +Act2 : offer alliance
+      +Act3 : allies IF Hero refused Elder
+    }
+
+    class Ending_Aligned {
+      +Hero aligned with Elder
+      +Rival becomes enemy
+      +Tragic ending
+    }
+
+    class Ending_Rebel {
+      +Hero joined Outcasts
+      +Elder defeated
+      +Bittersweet ending
+    }
+
+    %% Character relationships
+    Hero "1" --> "1" Elder : mentor / antagonist
+    Hero "1" --> "1" Rival : ally / rival
+    Hero ..> Outcasts : optional alliance
+
+    %% Branching outcomes — dashed lines = conditional paths
+    Hero ..> Ending_Aligned : if trust Elder
+    Hero ..> Ending_Rebel   : if refuse Elder
+
+    %% Consequence layering
+    Rival --> Ending_Aligned : enemy
+    Outcasts --> Ending_Rebel : ally

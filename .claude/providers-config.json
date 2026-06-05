@@ -1,0 +1,224 @@
+{
+  "discoveryUrl": "https://ccs.the1studio.org/providers",
+  "auth": "gh-token",
+  "providers": {
+    "opencode-go": {
+      "enabled": true,
+      "type": "remote-hosted",
+      "endpoint": "https://oc-go-cc.the1studio.org",
+      "auth": "gh-token",
+      "_comment": "Empirically verified catalog (2026-05-25 truth-test): only model names where .model in the response equals the requested name are listed. Every other name silently falls back to kimi-k2.6 (proxy behavior) or another default — listing them would be a lie.",
+      "models": {
+        "glm-5.1": {
+          "enabled": true,
+          "tier": "premium",
+          "context_window": 200000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "long-context",
+            "vision",
+            "tool-use"
+          ]
+        },
+        "glm-5": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 200000,
+          "capabilities": [
+            "text",
+            "long-context",
+            "tool-use"
+          ]
+        },
+        "kimi-k2.6": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 256000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "vision",
+            "tool-use"
+          ]
+        },
+        "kimi-k2.5": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 256000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ]
+        },
+        "mimo-v2-pro": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ]
+        },
+        "mimo-v2-omni": {
+          "enabled": false,
+          "tier": "budget",
+          "context_window": 256000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ]
+        },
+        "qwen3.6-plus": {
+          "enabled": false,
+          "tier": "budget",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ]
+        },
+        "qwen3.5-plus": {
+          "enabled": false,
+          "tier": "budget",
+          "context_window": 128000,
+          "capabilities": [
+            "text"
+          ]
+        },
+        "minimax-m2.7": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 1000000,
+          "capabilities": [
+            "text",
+            "long-context"
+          ]
+        },
+        "minimax-m2.5": {
+          "enabled": false,
+          "tier": "budget",
+          "context_window": 1000000,
+          "capabilities": [
+            "text",
+            "long-context"
+          ]
+        },
+        "deepseek-v4-pro": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "tool-use"
+          ]
+        },
+        "deepseek-v4-flash": {
+          "enabled": false,
+          "tier": "budget",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "tool-use"
+          ]
+        },
+        "qwen3.7-max": {
+          "enabled": true,
+          "tier": "standard",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ],
+          "_comment": "Added 2026-05-28 from kit-owner-supplied oc-go catalog. Caps + tier conservative — verify by querying oc-go-cc /models or via a smoke delegation."
+        }
+      }
+    },
+    "kimi": {
+      "enabled": true,
+      "type": "remote-proxy",
+      "endpoint": "https://ccs.the1studio.org/api/provider/kimi",
+      "auth": "gh-token",
+      "_comment": "Direct Moonshot route via CCS. Adds two Kimi variants that oc-go-cc does NOT honor (kimi-k2-thinking, kimi-k2) — those silently fall back to kimi-k2.6 if requested via oc-go-cc. Use this route to access the actual reasoning-tuned variant.",
+      "models": {
+        "kimi-k2.6": {
+          "enabled": true,
+          "tier": "premium",
+          "context_window": 256000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "vision",
+            "tool-use"
+          ]
+        },
+        "kimi-k2-thinking": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 256000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "tool-use"
+          ]
+        },
+        "kimi-k2.5": {
+          "enabled": false,
+          "tier": "standard",
+          "context_window": 256000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ]
+        },
+        "kimi-k2": {
+          "enabled": false,
+          "tier": "budget",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "tool-use"
+          ]
+        }
+      }
+    },
+    "codex": {
+      "enabled": false,
+      "_disabled_reason": "Upstream auth dead — see #44. All OpenAI-owned models (gpt-5.x, codex-auto-review) return 502. Stays in the config for explicit --provider codex callers (aliveness probe surfaces the failure cleanly); the rule-based selector skips it.",
+      "type": "remote-proxy",
+      "endpoint": "https://ccs.the1studio.org/api/provider/codex",
+      "auth": "gh-token",
+      "models": {
+        "gpt-5.1": {
+          "enabled": false,
+          "tier": "premium",
+          "context_window": 128000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "tool-use"
+          ]
+        },
+        "o3": {
+          "enabled": false,
+          "tier": "premium",
+          "context_window": 200000,
+          "capabilities": [
+            "text",
+            "reasoning",
+            "tool-use"
+          ]
+        }
+      }
+    }
+  },
+  "_comment": "Real-catalog config. Originally 12 oc-go + 4 kimi models verified 2026-05-25. POLICY 2026-05-28 (kit-owner whitelist): only the newest model per family is shipped enabled — glm-5.1 (premium quality), kimi-k2.6 (premium quality, kimi-direct only — opencode-go duplicate disabled to avoid path drift), qwen3.7-max (standard tier, fast+cheap). Everything else is disabled by default. Server has respect_requested_model: true; the .model field in responses is unreliable (upstream-naming quirks: minimax echoes as \"MiniMax-M2.7\"; deepseek may echo as another name) — the router log is the source of truth, NOT the response.model. Consumers can re-enable any disabled model locally but the shipped default is the whitelist.",
+  "_origin": {
+    "kit": "theonekit-model-router",
+    "repository": "The1Studio/theonekit-model-router",
+    "module": null,
+    "protected": false
+  }
+}

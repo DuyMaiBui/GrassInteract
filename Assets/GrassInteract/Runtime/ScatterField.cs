@@ -1,0 +1,673 @@
+#nullable enable
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace GrassInteract
+{
+    /// <summary>
+    /// Genre-neutral scene orchestrator for a multi-layer scatter field. Drives all resources from
+    /// a <see cref="TerrainScatterConfig"/> asset; builds one <see cref="IGrassEngine"/> per
+    /// Grass-kind layer and drives their Step/Submit calls from the player loop.
+    ///
+    /// <see cref="SeedLayers"/> is a virtual extension hook (base no-op) that subclasses may override
+    /// to inject layers before <see cref="Rebuild"/> iterates the list.
+    /// </summary>
+    [ExecuteAlways]
+    [DisallowMultipleComponent]
+    public class ScatterField : MonoBehaviour
+    {
+        // ── Tier selection mode enum ──────────────────────────────────────────
+
+        /// <summary>
+        /// Controls which rendering engine tier is used for Grass-kind layers.
+        /// </summary>
+        public enum GrassTierMode
+        {
+            /// <summary>
+            /// Let <see cref="GrassTierProbe.TryGpu"/> decide: GPU when the device supports it and
+            /// <c>cullCompute</c> + <c>indirectMaterial</c> are assigned; CPU otherwise.
+            /// </summary>
+            Auto,
+
+            /// <summary>Always use the CPU tier (safe fallback; works on all devices).</summary>
+            ForceCpu,
+
+            /// <summary>
+            /// Always use the GPU indirect tier. Only valid when <c>cullCompute</c> +
+            /// <c>indirectMaterial</c> are both assigned; logs an error and falls back to CPU otherwise.
+            /// Development / QA override only — do not ship with this value.
+            /// </summary>
+            ForceGpu,
+        }
+
+        // ── Serialized fields ─────────────────────────────────────────────────
+
+        [Tooltip("Assign a TerrainScatterConfig — required.")]
+        [SerializeField] private TerrainScatterConfig? config;
+
+        [Min(0)]
+        [Tooltip("Instancing slabs to pre-allocate at build. 0 = lazy.")]
+        [SerializeField] private int prewarmSlabs = 0;
+
+        [Tooltip(
+            "Auto: use GrassTierProbe to select the best tier for this device.\n" +
+            "ForceCpu: always use the CPU renderer.\n" +
+            "ForceGpu: always use GPU indirect (development override only).")]
+        [SerializeField] private GrassTierMode forceTier = GrassTierMode.Auto;
+
+        [Tooltip("Extra metres of per-blade cull headroom beyond the automatic blade reach. GPU tier only.")]
+        [SerializeField] private float extraCullMargin = 0f;
+
+        [Tooltip("Optional Unity Terrain: samples height, holes, and slope from TerrainData and centers " +
+                 "the field on the terrain. Leave null to use the legacy Physics.Raycast path.")]
+        [SerializeField] private Terrain? boundTerrain;
+
+        // ── Runtime state ─────────────────────────────────────────────────────
+
+        // Pool is field-owned; its lifetime spans multiple engine rebuilds so slab reuse stays intact.
+        private InstanceBatchPool? pool;
+
+        // One engine per layer (parallel list; null entry = Mesh-kind or failed-build layer).
+        private readonly List<IGrassEngine?> engines = new();
+
+        // ── Public properties ─────────────────────────────────────────────────
+
+        /// <summary>Name of the most recently selected tier across all built layers. Empty before first build.</summary>
+        public string ActiveTierName { get; private set; } = string.Empty;
+
+        /// <summary>The assigned TerrainScatterConfig asset. Null = no config (Required).</summary>
+        public TerrainScatterConfig? Config => this.config;
+
+        /// <summary>
+        /// Read-only view of the active layers list.
+        /// Returns Config.Layers when Config is assigned; otherwise empty.
+        /// </summary>
+        public IReadOnlyList<ScatterLayer> Layers =>
+            this.config != null ? this.config.Layers : System.Array.Empty<ScatterLayer>();
+
+        /// <summary>
+        /// Read-only view of each engine's WorldBounds (parallel to Layers).
+        /// Used by the parity harness and editor gizmos.
+        /// </summary>
+        public IReadOnlyList<Bounds> EngineWorldBounds
+        {
+            get
+            {
+                var result = new Bounds[this.engines.Count];
+                for (int i = 0; i < this.engines.Count; ++i)
+                    result[i] = this.engines[i]?.WorldBounds ?? default;
+                return result;
+            }
+        }
+
+        // ── Serialized terrain reference for subclasses ───────────────────────
+
+        /// <summary>The bound terrain (if any). Readable by subclasses and harnesses.</summary>
+        protected Terrain? BoundTerrain => this.boundTerrain;
+
+        // ── MonoBehaviour lifecycle ───────────────────────────────────────────
+
+        private void OnEnable()
+        {
+            this.Rebuild();
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.update -= this.EditorStepTick;
+            UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= this.OnEditBeginCameraRendering;
+            if (!Application.isPlaying)
+            {
+                UnityEditor.EditorApplication.update += this.EditorStepTick;
+                UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering += this.OnEditBeginCameraRendering;
+            }
+#endif
+        }
+
+        private void OnDisable()
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.update -= this.EditorStepTick;
+            UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= this.OnEditBeginCameraRendering;
+#endif
+        }
+
+        private void OnDestroy()
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.update -= this.EditorStepTick;
+            UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= this.OnEditBeginCameraRendering;
+#endif
+            this.DisposeAllEngines();
+            this.pool?.Clear();
+        }
+
+#if UNITY_EDITOR
+        // Re-entry guard: prevents Rebuild/RebuildLayer re-entry from SetDirty-triggered OnValidate
+        // and prevents queuing multiple deferred rebuilds while a slider is being dragged.
+        private bool rebuilding;
+
+        private void OnValidate()
+        {
+            if (this.rebuilding) return;
+            if (!this.isActiveAndEnabled) return;
+
+            UnityEditor.EditorApplication.delayCall -= this.DeferredRebuildOnce;
+            UnityEditor.EditorApplication.delayCall += this.DeferredRebuildOnce;
+        }
+
+        private void DeferredRebuildOnce()
+        {
+            UnityEditor.EditorApplication.delayCall -= this.DeferredRebuildOnce;
+            if (this == null || !this.isActiveAndEnabled) return;
+            this.Rebuild();
+        }
+
+        /// <summary>
+        /// Editor-only: walk all enabled <see cref="ScatterField"/>s and rebuild any whose
+        /// <see cref="Config"/> equals <paramref name="config"/>. Called by
+        /// <see cref="TerrainScatterConfig.OnValidate"/>.
+        /// </summary>
+        internal static void RebuildAllReferencingConfig(TerrainScatterConfig config)
+        {
+            if (config == null) return;
+            var fields = UnityEngine.Object.FindObjectsByType<ScatterField>(UnityEngine.FindObjectsSortMode.None);
+            foreach (var f in fields)
+                if (f != null && f.isActiveAndEnabled && f.Config == config)
+                    f.Rebuild();
+        }
+
+#endif
+
+        // ── Shared context builder ────────────────────────────────────────────
+
+        /// <summary>
+        /// Captures all field-level build inputs (layers, GPU resources, sampler, origin, tier probe)
+        /// into a lightweight struct. Both <see cref="Rebuild"/> and <see cref="RebuildLayer"/> use
+        /// this single source so tier-selection logic is never duplicated.
+        /// </summary>
+        private struct FieldBuildContext
+        {
+            public IReadOnlyList<ScatterLayer> Layers;
+            public ComputeShader? CullCompute;
+            public Material? IndirectMaterial;
+            public ISurfaceSampler Sampler;
+            public Vector3 Origin;
+            public bool GpuCapable;
+            public string ProbeReason;
+        }
+
+        private FieldBuildContext BuildContext()
+        {
+            var ctx = new FieldBuildContext
+            {
+                Layers = this.config!.Layers,
+                CullCompute = this.config.CullCompute,
+                IndirectMaterial = this.config.IndirectMaterial,
+            };
+
+            // Sampler + origin (field-level, shared by all layers).
+            if (this.boundTerrain != null && this.boundTerrain.terrainData != null)
+            {
+                ctx.Sampler = new TerrainSurfaceSampler(this.boundTerrain);
+                Vector3 terrainSize = this.boundTerrain.terrainData.size;
+                Vector3 terrainPos  = this.boundTerrain.transform.position;
+                ctx.Origin = terrainPos + new Vector3(terrainSize.x * 0.5f, 0f, terrainSize.z * 0.5f);
+            }
+            else
+            {
+                LayerMask mask = ctx.Layers.Count > 0 && ctx.Layers[0] != null
+                    ? ctx.Layers[0].GroundSnapMask
+                    : ~0;
+                ctx.Sampler = new RaycastSurfaceSampler(mask, this.transform.position.y);
+                ctx.Origin  = this.transform.position;
+            }
+
+            // Tier probe — once per build context, shared by all Grass-kind layers.
+#if UNITY_EDITOR || !UNITY_WEBGL
+            ctx.GpuCapable = GrassTierProbe.TryGpu(out ctx.ProbeReason);
+#else
+            ctx.GpuCapable  = false;
+            ctx.ProbeReason = "WebGL";
+#endif
+            return ctx;
+        }
+
+        // ── Engine build ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Hook called at the very start of <see cref="Rebuild"/> before any engine is built.
+        /// Subclasses may override this to inject layers before the list is iterated.
+        /// Base implementation is a no-op.
+        /// </summary>
+        protected virtual void SeedLayers() { }
+
+        /// <summary>(Re)builds all layer engines. Safe to call repeatedly.</summary>
+        public void Rebuild()
+        {
+#if UNITY_EDITOR
+            this.rebuilding = true;
+#endif
+            try
+            {
+                // Let subclasses inject legacy layers before we iterate.
+                this.SeedLayers();
+
+                if (this.config == null)
+                {
+                    Debug.LogError($"[{nameof(ScatterField)}] No TerrainScatterConfig assigned.", this);
+                    return;
+                }
+
+                var ctx = this.BuildContext();
+
+                if (ctx.Layers.Count == 0)
+                {
+                    Debug.LogWarning($"[{nameof(ScatterField)}] No layers assigned.", this);
+                    return;
+                }
+
+                this.pool ??= new InstanceBatchPool(this.prewarmSlabs);
+
+                this.DisposeAllEngines();
+                this.engines.Clear();
+
+                // Tier probe log is per-layer in SelectAndBuildEngine; capture lastTierName for field.
+                string lastTierName = string.Empty;
+
+                for (int i = 0; i < ctx.Layers.Count; ++i)
+                {
+                    ScatterLayer? layer = ctx.Layers[i];
+                    if (layer == null)
+                    {
+                        Debug.LogWarning($"[{nameof(ScatterField)}] Layer [{i}] is null — skipping.", this);
+                        this.engines.Add(null);
+                        continue;
+                    }
+
+                    // Engine route: InteractsWithDeform=false → MeshScatterEngine (mesh-prop pipeline).
+                    if (!layer.InteractsWithDeform)
+                    {
+                        IGrassEngine? meshEngine = this.TryBuildMeshEngine(
+                            i, layer, ctx.Origin, ctx.Sampler, ctx.CullCompute);
+                        this.engines.Add(meshEngine);
+                        if (meshEngine != null)
+                            Debug.Log($"[{nameof(ScatterField)}] Layer [{i}] '{layer.name}' InteractsWithDeform=false → MeshScatterEngine.", this);
+                        continue;
+                    }
+
+                    // Grass pipeline (InteractsWithDeform=true).
+                    if (!layer.Validate(out string error))
+                    {
+                        Debug.LogError($"[{nameof(ScatterField)}] Layer [{i}] '{layer.name}' invalid: {error}", this);
+                        this.engines.Add(null);
+                        continue;
+                    }
+
+                    IGrassEngine engine = this.SelectAndBuildEngine(
+                        i, layer, ctx.Origin, ctx.Sampler, ctx.GpuCapable, ctx.ProbeReason,
+                        ctx.CullCompute, ctx.IndirectMaterial);
+                    engine.Build(layer, ctx.Origin, this.pool, ctx.Sampler);
+                    this.engines.Add(engine);
+                    lastTierName = this.ActiveTierName;
+
+                    Debug.Log($"[{nameof(ScatterField)}] Layer [{i}] '{layer.name}' tier={this.ActiveTierName} " +
+                              $"(forceTier={this.forceTier}) on {SystemInfo.graphicsDeviceName}", this);
+                }
+
+                if (lastTierName.Length > 0)
+                    this.ActiveTierName = lastTierName;
+
+                WarnIfMultipleEnabledFields();
+            }
+            finally
+            {
+#if UNITY_EDITOR
+                this.rebuilding = false;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// Disposes and rebuilds the engine at index <paramref name="idx"/> without touching
+        /// other slots. Faster than a full <see cref="Rebuild"/> for per-layer inspector edits.
+        /// </summary>
+        public void RebuildLayer(int idx)
+        {
+#if UNITY_EDITOR
+            if (this.rebuilding) return;
+            this.rebuilding = true;
+#endif
+            try
+            {
+                if (this.config == null || idx < 0 || idx >= this.config.Layers.Count) return;
+
+                var ctx = this.BuildContext();
+
+                // Ensure the engines list is at least as long as idx+1 (pad with nulls).
+                while (this.engines.Count <= idx) this.engines.Add(null);
+
+                // Dispose the existing engine at this slot only.
+                // Do NOT call pool.Clear() — the pool is field-owned and spans rebuilds.
+                this.engines[idx]?.Dispose();
+                this.engines[idx] = null;
+
+                this.pool ??= new InstanceBatchPool(this.prewarmSlabs);
+
+                ScatterLayer? layer = ctx.Layers[idx];
+                if (layer == null) return;
+
+                // Engine route: InteractsWithDeform=false → MeshScatterEngine.
+                if (!layer.InteractsWithDeform)
+                {
+                    this.engines[idx] = this.TryBuildMeshEngine(idx, layer, ctx.Origin, ctx.Sampler, ctx.CullCompute);
+                    if (this.engines[idx] != null)
+                        Debug.Log($"[{nameof(ScatterField)}] RebuildLayer [{idx}] '{layer.name}' InteractsWithDeform=false → MeshScatterEngine.", this);
+                    return;
+                }
+
+                // Grass pipeline.
+                if (!layer.Validate(out string error))
+                {
+                    Debug.LogError($"[{nameof(ScatterField)}] RebuildLayer [{idx}] '{layer.name}' invalid: {error}", this);
+                    return;
+                }
+
+                IGrassEngine engine = this.SelectAndBuildEngine(
+                    idx, layer, ctx.Origin, ctx.Sampler, ctx.GpuCapable, ctx.ProbeReason,
+                    ctx.CullCompute, ctx.IndirectMaterial);
+                engine.Build(layer, ctx.Origin, this.pool, ctx.Sampler);
+                this.engines[idx] = engine;
+
+                Debug.Log($"[{nameof(ScatterField)}] RebuildLayer [{idx}] '{layer.name}' tier={this.ActiveTierName} " +
+                          $"(forceTier={this.forceTier}) on {SystemInfo.graphicsDeviceName}", this);
+            }
+            finally
+            {
+#if UNITY_EDITOR
+                this.rebuilding = false;
+#endif
+            }
+        }
+
+        // ── Engine selection ──────────────────────────────────────────────────
+
+        private IGrassEngine SelectAndBuildEngine(
+            int layerIndex,
+            ScatterLayer layer,
+            Vector3 buildOrigin,
+            ISurfaceSampler sampler,
+            bool gpuCapable,
+            string probeReason,
+            ComputeShader? activeCullCompute,
+            Material? activeIndirectMaterial)
+        {
+            switch (this.forceTier)
+            {
+                case GrassTierMode.ForceCpu:
+                    this.ActiveTierName = "CPU";
+                    Debug.Log($"[{nameof(ScatterField)}] Layer [{layerIndex}] ForceCpu override → CPU tier.", this);
+                    return new GrassCpuEngine();
+
+                case GrassTierMode.ForceGpu:
+                    if (activeCullCompute == null || activeIndirectMaterial == null)
+                    {
+                        Debug.LogError(
+                            $"[{nameof(ScatterField)}] Layer [{layerIndex}] ForceGpu requested but " +
+                            "cullCompute or indirectMaterial is not assigned — falling back to CPU.", this);
+                        this.ActiveTierName = "CPU";
+                        return new GrassCpuEngine();
+                    }
+                    return this.TryBuildGpuEngine(layerIndex, $"ForceGpu layer[{layerIndex}]",
+                        layer, buildOrigin, sampler, activeCullCompute, activeIndirectMaterial);
+
+                case GrassTierMode.Auto:
+                default:
+                    Debug.Log($"[{nameof(ScatterField)}] Layer [{layerIndex}] Probe: {probeReason}", this);
+                    if (!gpuCapable || activeCullCompute == null || activeIndirectMaterial == null)
+                    {
+                        if (gpuCapable && (activeCullCompute == null || activeIndirectMaterial == null))
+                        {
+                            Debug.LogWarning(
+                                $"[{nameof(ScatterField)}] Layer [{layerIndex}] Auto: device supports GPU " +
+                                "tier but cullCompute or indirectMaterial not assigned — CPU tier.", this);
+                        }
+                        this.ActiveTierName = "CPU";
+                        return new GrassCpuEngine();
+                    }
+                    return this.TryBuildGpuEngine(layerIndex, $"Auto layer[{layerIndex}]",
+                        layer, buildOrigin, sampler, activeCullCompute, activeIndirectMaterial);
+            }
+        }
+
+        private IGrassEngine TryBuildGpuEngine(
+            int layerIndex,
+            string source,
+            ScatterLayer layer,
+            Vector3 buildOrigin,
+            ISurfaceSampler sampler,
+            ComputeShader activeCullCompute,
+            Material activeIndirectMaterial)
+        {
+            try
+            {
+                var gpuEngine = new GrassGpuEngine(activeCullCompute, activeIndirectMaterial, this.extraCullMargin);
+                gpuEngine.Build(layer, buildOrigin, this.pool!, sampler);
+
+                if (!gpuEngine.SelfTest(out string testReason))
+                {
+                    Debug.LogWarning(
+                        $"[{nameof(ScatterField)}] {source}: {testReason} → GPU self-test failed on " +
+                        $"{SystemInfo.graphicsDeviceName} → CPU tier.", this);
+                    gpuEngine.Dispose();
+                    this.ActiveTierName = "CPU";
+                    return new GrassCpuEngine();
+                }
+
+                Debug.Log($"[{nameof(ScatterField)}] {source}: {testReason}", this);
+                this.ActiveTierName = "GPU";
+                return new PreBuiltEngineWrapper(gpuEngine);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning(
+                    $"[{nameof(ScatterField)}] {source}: GPU engine threw {ex.GetType().Name} on " +
+                    $"{SystemInfo.graphicsDeviceName} → CPU tier.\n{ex.Message}", this);
+                this.ActiveTierName = "CPU";
+                return new GrassCpuEngine();
+            }
+        }
+
+        // ── Mesh-kind engine builder ──────────────────────────────────────────
+
+        /// <summary>
+        /// Builds a <see cref="MeshScatterEngine"/> for a layer with InteractsWithDeform=false.
+        /// Returns null (logged) if <paramref name="activeCullCompute"/> is null or the layer's
+        /// mesh/material fields are missing.
+        /// </summary>
+        private IGrassEngine? TryBuildMeshEngine(
+            int layerIndex,
+            ScatterLayer layer,
+            Vector3 buildOrigin,
+            ISurfaceSampler sampler,
+            ComputeShader? activeCullCompute)
+        {
+            if (activeCullCompute == null)
+            {
+                Debug.LogError(
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop): " +
+                    "cullCompute is not assigned. Assign GrassCull.compute in the TerrainScatterConfig. Skipping.", this);
+                return null;
+            }
+
+            if (!layer.Validate(out string error))
+            {
+                Debug.LogError(
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop) invalid: {error}", this);
+                return null;
+            }
+
+            if (layer.LodMeshes.Length == 0)
+            {
+                Debug.LogError(
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop): " +
+                    "LodMeshes is empty. Assign at least one LOD mesh in the layer's lods array.", this);
+                return null;
+            }
+
+            Material? mat = layer.Material;
+            if (mat == null)
+            {
+                Debug.LogError(
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop): " +
+                    "Material is not assigned. Assign a material using the ScatterInstanced shader.", this);
+                return null;
+            }
+
+            try
+            {
+                var engine = new MeshScatterEngine(activeCullCompute, mat);
+                engine.Build(layer, buildOrigin, this.pool!, sampler);
+                return engine;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning(
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop) " +
+                    $"engine threw {ex.GetType().Name}: {ex.Message}", this);
+                return null;
+            }
+        }
+
+        // ── Multiple-field warning ────────────────────────────────────────────
+
+        private static void WarnIfMultipleEnabledFields()
+        {
+            ScatterField[] all = FindObjectsByType<ScatterField>(FindObjectsSortMode.None);
+            int enabledCount = 0;
+            foreach (ScatterField f in all)
+                if (f.isActiveAndEnabled)
+                    ++enabledCount;
+
+            if (enabledCount > 1)
+                Debug.LogError($"[{nameof(ScatterField)}] {enabledCount} enabled fields found. The bend " +
+                    "simulator + interactor registry are per-field — only ONE field per scene is supported.");
+        }
+
+        // ── Player-loop / editor-loop drivers ────────────────────────────────
+
+        private void LateUpdate()
+        {
+            if (!Application.isPlaying)
+                return;
+            this.StepAll(Time.deltaTime);
+            this.SubmitAll(null);
+        }
+
+#if UNITY_EDITOR
+        private void EditorStepTick()
+        {
+            if (Application.isPlaying)
+                return;
+            this.StepAll(1f / 60f);
+            UnityEditor.SceneView.RepaintAll();
+        }
+
+        private void OnEditBeginCameraRendering(UnityEngine.Rendering.ScriptableRenderContext context, Camera camera)
+        {
+            if (Application.isPlaying)
+                return;
+            if (camera.cameraType != CameraType.SceneView && camera.cameraType != CameraType.Game)
+                return;
+            this.SubmitAll(camera);
+        }
+#endif
+
+        // ── Render helpers ────────────────────────────────────────────────────
+
+        private void StepAll(float dt)
+        {
+            for (int i = 0; i < this.engines.Count; ++i)
+                this.engines[i]?.Step(dt);
+        }
+
+        private void SubmitAll(Camera? targetCamera)
+        {
+            if (this.engines.Count == 0)
+                return;
+
+            Vector3 lodRef;
+            if (targetCamera != null)
+            {
+                lodRef = targetCamera.transform.position;
+            }
+            else
+            {
+                Camera main = Camera.main;
+                lodRef = main != null ? main.transform.position : this.transform.position;
+            }
+
+            for (int i = 0; i < this.engines.Count; ++i)
+                this.engines[i]?.Submit(targetCamera, lodRef);
+        }
+
+        private void DisposeAllEngines()
+        {
+            for (int i = 0; i < this.engines.Count; ++i)
+                this.engines[i]?.Dispose();
+            this.engines.Clear();
+        }
+
+#if UNITY_EDITOR
+        [UnityEngine.ContextMenu("Rebuild")]
+        private void RebuildFromMenu()
+        {
+            this.Rebuild();
+        }
+
+        private void OnDrawGizmosSelected()
+        {
+            foreach (ScatterLayer? layer in this.Layers)
+            {
+                if (layer == null) continue;
+                Vector2 bounds = layer.FieldBounds;
+                Gizmos.color = new Color(1f, 0.9f, 0.2f, 0.6f);
+                Gizmos.DrawWireCube(this.transform.position, new Vector3(bounds.x, 0.05f, bounds.y));
+                break;
+            }
+
+            for (int i = 0; i < this.engines.Count; ++i)
+            {
+                IGrassEngine? engine = this.engines[i];
+                if (engine == null) continue;
+                Bounds wb = engine.WorldBounds;
+                if (wb == default) continue;
+                Gizmos.color = new Color(0.2f, 1f, 0.3f, 0.25f);
+                Gizmos.DrawWireCube(wb.center, wb.size);
+            }
+        }
+#endif
+
+        // ── PreBuiltEngineWrapper ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Thin wrapper that forwards all <see cref="IGrassEngine"/> calls to an already-built
+        /// <see cref="GrassGpuEngine"/> and makes <see cref="Build"/> a no-op (the engine was already
+        /// built + self-tested inside <see cref="TryBuildGpuEngine"/>).
+        /// </summary>
+        private sealed class PreBuiltEngineWrapper : IGrassEngine
+        {
+            private readonly GrassGpuEngine inner;
+
+            internal PreBuiltEngineWrapper(GrassGpuEngine inner)
+            {
+                this.inner = inner;
+            }
+
+            public void Build(ScatterLayer layer, Vector3 origin,
+                InstanceBatchPool pool, ISurfaceSampler sampler) { }
+
+            public void Step(float dt) => this.inner.Step(dt);
+            public void Submit(Camera? cam, Vector3 lodRef) => this.inner.Submit(cam, lodRef);
+            public Bounds WorldBounds => this.inner.WorldBounds;
+            public void Dispose() => this.inner.Dispose();
+        }
+    }
+}

@@ -1,0 +1,55 @@
+%% Economy Flow — currency sources (faucets) to sinks
+%% Distinguishes faucets (earn), conversions (exchange), and sinks (spend)
+%% Replace currencies and rates with your actual economy.
+%% Render: /t1k:preview --from-file economy-flow.mmd
+
+flowchart LR
+    %% ===== FAUCETS (sources of currency) =====
+    F1([Quest Rewards])
+    F2([Enemy Drops])
+    F3([Daily Login])
+    F4([Ad Watch])
+
+    %% ===== CURRENCIES (held by player) =====
+    Gold[(Gold)]
+    Gems[(Gems)]
+    Energy[(Energy)]
+
+    %% ===== CONVERSIONS (exchange nodes) =====
+    Shop{{Gem Shop: 100 Gems = 1000 Gold}}
+    Regen{{Energy Regen: 1 / 5 min}}
+
+    %% ===== SINKS (where currency leaves the economy) =====
+    S1[/Consumable Items/]
+    S2[/Gear Upgrades/]
+    S3[/Gacha Pull: 50 Gems/]
+    S4[/Battle Entry: 10 Energy/]
+
+    %% Faucet -> currency
+    F1 --> Gold
+    F1 --> Gems
+    F2 --> Gold
+    F3 --> Gems
+    F4 --> Gems
+    Regen --> Energy
+
+    %% Currency -> conversion
+    Gems --> Shop
+    Shop --> Gold
+
+    %% Currency -> sink
+    Gold --> S1
+    Gold --> S2
+    Gems --> S3
+    Energy --> S4
+
+    %% Styling — faucets green, sinks red, conversions amber
+    classDef faucet fill:#4caf50,stroke:#1b5e20,color:#fff
+    classDef sink fill:#e53935,stroke:#8e0000,color:#fff
+    classDef conversion fill:#ffb300,stroke:#a37500,color:#000
+    classDef currency fill:#1976d2,stroke:#003d7a,color:#fff
+
+    class F1,F2,F3,F4 faucet
+    class S1,S2,S3,S4 sink
+    class Shop,Regen conversion
+    class Gold,Gems,Energy currency

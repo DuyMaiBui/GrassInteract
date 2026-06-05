@@ -1,0 +1,117 @@
+{
+    "MonoBehaviour": {
+        "m_Enabled": true,
+        "m_EditorHideFlags": 0,
+        "m_Name": "Rock",
+        "m_EditorClassIdentifier": "GrassInteract::GrassInteract.ScatterLayer",
+        "kind": 1,
+        "deformMode": 2,
+        "hasAuthoredInstances": false,
+        "authoredInstances": {
+            "fileID": -7296929912768930340,
+            "guid": "727a186375fa01d438613d95ddebd98e",
+            "type": 2
+        },
+        "placeSpacing": 0.5,
+        "densityMap": {
+            "fileID": -9088873716821541526,
+            "guid": "727a186375fa01d438613d95ddebd98e",
+            "type": 2
+        },
+        "targetInstances": 50,
+        "fieldBounds": {
+            "x": 100.0,
+            "y": 100.0
+        },
+        "scaleRange": {
+            "x": 0.800000011920929,
+            "y": 1.2000000476837159
+        },
+        "seed": 0,
+        "groundSnapMask": {
+            "serializedVersion": "2",
+            "m_Bits": 55
+        },
+        "slopeRange": {
+            "x": 0.0,
+            "y": 90.0
+        },
+        "splatLayerIndex": -1,
+        "splatThreshold": 0.5,
+        "rotationOffsetEuler": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        },
+        "randomPitchRange": {
+            "x": 0.0,
+            "y": 0.0
+        },
+        "randomRollRange": {
+            "x": 0.0,
+            "y": 0.0
+        },
+        "alignToNormal": true,
+        "grassMaterial": {
+            "instanceID": 0
+        },
+        "shadowCastingMode": 0,
+        "windMode": 0,
+        "windDirection": {
+            "x": 1.0,
+            "y": 0.0
+        },
+        "windStrength": 0.0,
+        "windFrequency": 1.2000000476837159,
+        "windNoiseScale": 0.25,
+        "windGustScale": 0.05000000074505806,
+        "windRippleScale": 0.4000000059604645,
+        "windGustSpeed": 0.30000001192092898,
+        "windRippleSpeed": 1.5,
+        "windRippleWeight": 0.3499999940395355,
+        "bendStrength": 0.0,
+        "flatten": 0.5,
+        "recoveryRate": 4.0,
+        "maxBladeHeight": 3.0,
+        "bendHeadroom": 1.0,
+        "chunkSize": 16,
+        "lods": [
+            {
+                "mesh": {
+                    "fileID": 4300000,
+                    "guid": "5687be37e7a564f47bdb5706037daa84",
+                    "type": 2
+                },
+                "maxDistance": 30.0
+            },
+            {
+                "mesh": {
+                    "fileID": 4300000,
+                    "guid": "2ff3f5c1faa481f478e06970efd6c9ef",
+                    "type": 2
+                },
+                "maxDistance": 80.0
+            },
+            {
+                "mesh": {
+                    "fileID": 4300000,
+                    "guid": "32882d4f75c2c8a48b5664e214c696fa",
+                    "type": 2
+                },
+                "maxDistance": 400.0
+            }
+        ],
+        "meshMaterial": {
+            "fileID": 2100000,
+            "guid": "8edb2305ae9c3c14ab2505c29e28c603",
+            "type": 2
+        },
+        "generateColliders": true,
+        "colliderMesh": {
+            "fileID": 4300000,
+            "guid": "5687be37e7a564f47bdb5706037daa84",
+            "type": 2
+        },
+        "colliderConvex": true
+    }
+}

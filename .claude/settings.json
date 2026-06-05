@@ -1,0 +1,263 @@
+{
+  "_comment": "Hook commands use 'node -e' wrapper to override HOME from /etc/passwd before require(). Workaround for Claude Code 2.1.150+ bug: global hooks receive HOME=$CLAUDE_PROJECT_DIR instead of the user's real home, causing MODULE_NOT_FOUND (loader:1424) on every hook fire. os.userInfo().homedir reads from getpwuid(geteuid()) and is unaffected by the env var. See: https://github.com/The1Studio/theonekit-model-router/issues/49",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-spawn-guard.cjs'))\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-task-interceptor.cjs'))\"",
+            "timeout": 320
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-inline-tracker.cjs'))\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" privacy-guard",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" scout-block",
+            "_origin": "core"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-metrics.cjs'))\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" telemetry-tool-tracker",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" telemetry-kit-error-collector",
+            "_origin": "core"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-doctor-check.cjs'))\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-transparent-routing-reminder.cjs'))\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-kit-updates",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-kit-update-failures",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-cli-updates",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" session-state",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" project-detector",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" generate-baseline-context",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-mcp-health",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" decision-tools-preload",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-install-type",
+            "_origin": "core"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const home = require('os').userInfo().homedir; process.env.HOME = home; process.env.USERPROFILE = home; require(require('path').join(home, '.claude', 'hooks', 'mr-telemetry.cjs'))\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" telemetry-stop-reminder",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" lesson-collector",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" sync-back-rollup",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" prompt-telemetry-flush",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" session-state",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" notify-discord",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" notify-desktop",
+            "_origin": "core"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/task-completed-handler.cjs\""
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/teammate-idle-handler.cjs\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-module-keywords",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" check-ambiguous-fork-invocation",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" prompt-telemetry",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" lesson-queue-processor",
+            "_origin": "core"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" lesson-collector",
+            "_origin": "core"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" workflow-failure-detector",
+            "_origin": "core"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-runner.cjs\" statusline",
+    "padding": 0
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}

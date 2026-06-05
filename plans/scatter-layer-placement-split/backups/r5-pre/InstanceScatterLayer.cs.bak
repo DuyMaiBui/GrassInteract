@@ -1,0 +1,18 @@
+#nullable enable
+using UnityEngine;
+
+namespace GrassInteract
+{
+    /// <summary>
+    /// ScatterLayer variant that holds an authored AuthoredInstancesData sidecar and feeds it
+    /// straight into the bake. One of two concrete placement subclasses; the other is
+    /// <see cref="DensityScatterLayer"/>.
+    /// In R2 the body is empty — type-specific fields (authoredInstances, placeSpacing) migrate
+    /// down from the base in R4 once consumers are type-narrowed.
+    /// </summary>
+    [CreateAssetMenu(menuName = "GrassInteract/Instance Scatter Layer", order = 2)]
+    public sealed class InstanceScatterLayer : ScatterLayer
+    {
+        public override IScatterPlacement CreatePlacement() => new InstancePlacement(this);
+    }
+}
