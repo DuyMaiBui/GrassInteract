@@ -1,4 +1,0 @@
-designer|modules-20260528-0811|none|
-unity|modules-20260528-1206|none|base,animation,audio,editor,ui
-model-router|modules-20260529-0818|none|model-router
-core|modules-20260531-0932|none|t1k-base,t1k-extended,t1k-maintainer
