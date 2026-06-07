@@ -1,6 +1,18 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "brainstormer",
+  "command": {
+    "plan": {
+      "description": "Enter repo-local planning for this task",
+      "agent": "planner",
+      "template": "Enter the repo-local planning workflow for this task. Treat this command as explicit approval to start planning, equivalent to the English triggers `create plan`, `make plan`, and `plan it`. If any clarification, scope, constraint, or acceptance detail is still unresolved, ask the necessary questions first instead of skipping to a final plan. Stay repo-local only. When you create the new plan report and canonical plan, auto-promote them to `plan/current.md` and `plans/current-plan.md`."
+    },
+    "build": {
+      "description": "Enter repo-local build for this task",
+      "agent": "builder",
+      "template": "Enter the repo-local build workflow for this task. Treat this command as equivalent to the English build triggers `let build`, `build it`, `implement now`, and `start build`. If an approved canonical plan exists, build only from `plans/current-plan.md`. If no approved plan exists, ask whether to build directly or plan first. Do not build directly unless the user explicitly confirms that path. When build starts, create or update the task build report and update `build/current.md`."
+    }
+  },
   "agent": {
     "plan": {
       "disable": true

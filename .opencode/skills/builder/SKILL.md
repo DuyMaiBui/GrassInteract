@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Implement only from the approved canonical plan. Use when planning is complete and execution should begin without renegotiating scope.
+description: let build, build it, implement now, start build, /build; implement only from the approved canonical plan, or handle the repo-local no-plan build safety gate first. Use when execution should begin without renegotiating scope.
 ---
 
 <system-reminder>
@@ -32,7 +32,7 @@ The user indicated that they do not want you to execute yet -- you MUST NOT make
 
 # Builder
 
-Use this skill only when there is an approved canonical plan.
+Use this skill when there is an approved canonical plan, or when the user explicitly invokes repo-local build with `let build`, `build it`, `implement now`, `start build`, or `/build` and the no-plan safety gate must be handled first.
 
 ## Role
 - Execute the approved plan without renegotiating scope.
@@ -42,11 +42,15 @@ Use this skill only when there is an approved canonical plan.
 
 ## Rules
 - While plan mode is active, remain read-only and do not execute changes.
-- Outside plan mode, implement only from `plans/current-plan.md`.
+- Treat `let build`, `build it`, `implement now`, `start build`, and the repo-local `/build` command as approval to enter build handling.
+- If an approved canonical plan exists, implement only from `plans/current-plan.md`.
+- If no approved plan exists, ask whether to build directly or plan first.
+- Do not take any direct-build path unless the user explicitly confirms that path.
 - Always ask the user with the `question` tool if a decision is required that is not already approved.
 - You may choose code-level implementation details only.
 - You may not change scope, architecture, or acceptance criteria.
 - Update plan step statuses during execution.
+- When build starts, create or update the task build report in `build/YYYY-MM-DD-slug.md` and update `build/current.md` for the active task.
 - If the plan is ambiguous or conflicts with repo reality, stop and return to planner.
 - Do not reopen brainstorm unless planner determines unresolved decisions exist.
 

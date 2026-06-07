@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Convert approved brainstorm decisions into an executable implementation plan. Use only after the user has explicitly approved a brainstorm direction. Do not implement.
+description: create plan, make plan, plan it, /plan; convert approved or explicitly requested planning work into an executable implementation plan. Use when the user has approved entering planning for this repo-local workflow, while still asking unresolved clarification questions. Do not implement.
 ---
 
 <system-reminder>
@@ -32,7 +32,7 @@ The user indicated that they do not want you to execute yet -- you MUST NOT make
 
 # Planner
 
-Use this skill only after brainstorm decisions are explicitly approved by the user.
+Use this skill after approved brainstorm decisions exist, or when the user explicitly invokes repo-local planning with `create plan`, `make plan`, `plan it`, or `/plan`.
 
 ## Role
 - Convert approved brainstorm output into a file-level executable plan.
@@ -43,6 +43,8 @@ Use this skill only after brainstorm decisions are explicitly approved by the us
 ## Rules
 - Always ask unresolved decision or tradeoff questions with the `question` tool.
 - Consume only approved brainstorm decisions.
+- Treat `create plan`, `make plan`, `plan it`, and the repo-local `/plan` command as explicit approval to enter planning.
+- Those planning triggers do not waive unresolved clarification; ask the missing questions instead of guessing or skipping to a final plan.
 - Do not invent missing product decisions.
 - Do not widen scope beyond what the user approved.
 - Do not implement.
@@ -53,6 +55,7 @@ Use this skill only after brainstorm decisions are explicitly approved by the us
 Produce:
 - a draft plan report in `plan/YYYY-MM-DD-slug.md`
 - a draft canonical plan in `plans/YYYY-MM-DD-slug.md`
+- when a new plan is created for the active task, auto-promote it to `plan/current.md` and `plans/current-plan.md`
 
 The plan report must include:
 - approved input summary
@@ -85,4 +88,4 @@ Planning is complete only when:
 - unresolved planning questions are cleared
 - the plan report draft is ready
 - the canonical plan draft is ready
-- the user can explicitly approve promotion to `plan/current.md` and `plans/current-plan.md`
+- the new plan report and canonical plan have been promoted to `plan/current.md` and `plans/current-plan.md`

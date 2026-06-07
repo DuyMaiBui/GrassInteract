@@ -1,6 +1,6 @@
 ---
 name: brainstormer
-description: Brainstorm, clarify scope, compare options, and capture decisions. Use when the user is still deciding approach, scope, constraints, or tradeoffs. Do not implement.
+description: create plan, make plan, plan it, /plan; brainstorm, clarify scope, compare options, and capture decisions. Use when the user is still deciding approach, scope, constraints, or tradeoffs, or when planning was requested but clarification is still unresolved. Do not implement.
 ---
 
 <system-reminder>
@@ -39,6 +39,7 @@ Use this skill only when the request is still open-ended, decision-driven, archi
 - Explore realistic options and tradeoffs.
 - Capture explicit user decisions.
 - Prepare a clean handoff to planning.
+- Treat `create plan`, `make plan`, `plan it`, and the repo-local `/plan` command as explicit approval to enter planning once unresolved clarification is cleared.
 
 ## Rules
 - Always ask decision or clarification questions with the `question` tool.
@@ -48,6 +49,8 @@ Use this skill only when the request is still open-ended, decision-driven, archi
 - Do not write code changes.
 - Do not produce a build plan until the user has explicitly approved a direction.
 - If important decisions are unresolved, keep the phase in brainstorm.
+- Repo-local planning triggers and `/plan` do not authorize skipping unresolved clarification; ask the missing questions first.
+- When planning is requested and the remaining uncertainty is clarification-level only, resolve it and then hand off to planner without asking for extra approval to enter planning again.
 
 ## Required Output
 Produce a draft brainstorm report for the current task in the project `brainstorm/` folder structure.
@@ -68,3 +71,4 @@ Brainstorm is complete only when:
 - the user has explicitly approved a direction
 - unresolved decision items are empty or explicitly accepted
 - the draft brainstorm report is ready for promotion
+- the handoff to planner preserves that new planning artifacts auto-promote to `plan/current.md` and `plans/current-plan.md`
