@@ -1,4 +1,5 @@
 #nullable enable
+using System.IO;
 using UnityEditor;
 using UnityEditor.EditorTools;
 using UnityEngine;
@@ -7,11 +8,13 @@ namespace GrassInteract.Editor
 {
     /// <summary>
     /// Terrain-tool-style density brush for a <see cref="DensityScatterLayer"/>. Raycasts the ground,
-    /// writes the R8 <c>densityMap</c>, and re-scatters live through <see cref="ScatterRebuildScheduler"/>.
+    /// writes the R8 <c>densityMap</c>, re-scatters live through <see cref="ScatterRebuildScheduler"/>,
+    /// and persists the painted pixels back to the texture asset (PNG) on stroke end.
     /// Brush disc + falloff ring drawn via the shared <see cref="ScatterGizmos"/>.
     ///
     /// Paint alignment reuses the runtime <see cref="GrassFieldSpace"/> mapping (SSOT) so painted pixels
-    /// land exactly where <see cref="DensityPlacement"/> samples them.
+    /// land exactly where <see cref="DensityPlacement"/> samples them. An optional <see cref="BrushStamp"/>
+    /// from the owning <see cref="TerrainScatterConfig"/> modulates the kernel.
     /// </summary>
     [EditorTool("Density Paint", typeof(DensityScatterLayer))]
     internal sealed class DensityPaintTool : EditorTool
@@ -20,24 +23,27 @@ namespace GrassInteract.Editor
 
         // ── Brush settings (persisted via EditorPrefs) ─────────────────────────
 
-        private const string K_SIZE = "GrassInteract.Brush.Size";
-        private const string K_OPAC = "GrassInteract.Brush.Opacity";
-        private const string K_FALL = "GrassInteract.Brush.Falloff";
-        private const string K_FLOW = "GrassInteract.Brush.Flow";
-        private const string K_MODE = "GrassInteract.Brush.Mode";
+        private const string K_SIZE  = "GrassInteract.Brush.Size";
+        private const string K_OPAC  = "GrassInteract.Brush.Opacity";
+        private const string K_FALL  = "GrassInteract.Brush.Falloff";
+        private const string K_FLOW  = "GrassInteract.Brush.Flow";
+        private const string K_MODE  = "GrassInteract.Brush.Mode";
+        private const string K_STAMP = "GrassInteract.Brush.Stamp";
 
         private static float Size    { get => EditorPrefs.GetFloat(K_SIZE, 3f);  set => EditorPrefs.SetFloat(K_SIZE, value); }
         private static float Opacity { get => EditorPrefs.GetFloat(K_OPAC, 1f);  set => EditorPrefs.SetFloat(K_OPAC, value); }
         private static float Falloff { get => EditorPrefs.GetFloat(K_FALL, 0.5f);set => EditorPrefs.SetFloat(K_FALL, value); }
         private static float Flow    { get => EditorPrefs.GetFloat(K_FLOW, 0.5f);set => EditorPrefs.SetFloat(K_FLOW, value); }
         private static PaintMode Mode { get => (PaintMode)EditorPrefs.GetInt(K_MODE, 0); set => EditorPrefs.SetInt(K_MODE, (int)value); }
+        private static int   StampIndex { get => EditorPrefs.GetInt(K_STAMP, -1); set => EditorPrefs.SetInt(K_STAMP, value); }
 
         // ── Active stroke state ────────────────────────────────────────────────
 
-        private bool      painting;
-        private Color[]?  pixels;
-        private int       texW, texH;
+        private bool       painting;
+        private Color[]?   pixels;
+        private int        texW, texH;
         private Texture2D? activeMap;
+        private Texture2D? activeStamp; // resolved at stroke start, null = procedural falloff
 
         public override GUIContent toolbarIcon => EditorGUIUtility.IconContent("TerrainInspector.TerrainToolSplat");
 
@@ -51,7 +57,7 @@ namespace GrassInteract.Editor
             // Validate the density map up front — errors-over-silent-fallback.
             bool valid = layer.Validate(out string error);
 
-            this.DrawSettingsWindow(valid, valid ? null : error, field == null);
+            this.DrawSettingsWindow(valid, valid ? null : error, field);
 
             if (!valid || field == null)
                 return;
@@ -78,7 +84,7 @@ namespace GrassInteract.Editor
             {
                 case EventType.MouseDown when e.button == 0 && !e.alt && hasHit:
                     GUIUtility.hotControl = controlId;
-                    this.BeginStroke(layer);
+                    this.BeginStroke(layer, field);
                     this.PaintAt(hit.point, origin, bounds);
                     e.Use();
                     break;
@@ -98,7 +104,7 @@ namespace GrassInteract.Editor
 
         // ── Stroke lifecycle ───────────────────────────────────────────────────
 
-        private void BeginStroke(DensityScatterLayer layer)
+        private void BeginStroke(DensityScatterLayer layer, ScatterField field)
         {
             Texture2D map = layer.DensityMap!;
             Undo.RegisterCompleteObjectUndo(map, "Paint Density");
@@ -106,19 +112,42 @@ namespace GrassInteract.Editor
             this.texW = map.width;
             this.texH = map.height;
             this.pixels = map.GetPixels();
+            this.activeStamp = ResolveStamp(field);
             this.painting = true;
         }
 
         private void EndStroke(ScatterField field, int layerIdx)
         {
             this.painting = false;
-            if (this.activeMap != null)
+            if (this.activeMap != null && this.pixels != null)
             {
+                this.activeMap.SetPixels(this.pixels);
+                this.activeMap.Apply(false);
                 EditorUtility.SetDirty(this.activeMap);
+                SaveToAsset(this.activeMap, this.pixels, this.texW, this.texH);
                 if (layerIdx >= 0) ScatterRebuildScheduler.MarkDirty(field, layerIdx);
             }
             this.pixels = null;
             this.activeMap = null;
+            this.activeStamp = null;
+        }
+
+        /// <summary>Persists the painted pixels back to the texture's source PNG so edits survive reload.</summary>
+        private static void SaveToAsset(Texture2D map, Color[] px, int w, int h)
+        {
+            string path = AssetDatabase.GetAssetPath(map);
+            if (string.IsNullOrEmpty(path)) return; // runtime-only texture — nothing to persist
+
+            // Encode via a temp RGBA32 texture (R8 is not directly EncodeToPNG-able).
+            var tmp = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            tmp.SetPixels(px);
+            tmp.Apply(false);
+            byte[] png = tmp.EncodeToPNG();
+            Object.DestroyImmediate(tmp);
+            if (png == null) return;
+
+            File.WriteAllBytes(path, png);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate); // re-imports with the map's R8 settings
         }
 
         // ── Paint kernel ───────────────────────────────────────────────────────
@@ -140,6 +169,7 @@ namespace GrassInteract.Editor
 
             float strength = Mathf.Clamp01(Opacity) * Mathf.Clamp01(Flow);
             float inner = Mathf.Clamp01(Falloff);
+            Texture2D? stamp = this.activeStamp;
 
             for (int py = minY; py <= maxY; ++py)
             {
@@ -148,11 +178,25 @@ namespace GrassInteract.Editor
                     // World position of this pixel center → horizontal distance to the hit.
                     var uv = new Vector2((px + 0.5f) / this.texW, (py + 0.5f) / this.texH);
                     Vector3 pw = space.UvToWorld(uv, worldHit.y);
-                    float distXZ = new Vector2(pw.x - worldHit.x, pw.z - worldHit.z).magnitude;
+                    float dx = pw.x - worldHit.x;
+                    float dz = pw.z - worldHit.z;
+                    float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
                     if (distXZ > Size) continue;
 
-                    float t = Size <= 0f ? 0f : distXZ / Size;
-                    float falloff = t <= inner ? 1f : Mathf.SmoothStep(1f, 0f, (t - inner) / Mathf.Max(0.0001f, 1f - inner));
+                    // Falloff: a brush stamp (when selected) replaces the procedural curve.
+                    float falloff;
+                    if (stamp != null)
+                    {
+                        float su = Mathf.Clamp01(dx / (2f * Size) + 0.5f);
+                        float sv = Mathf.Clamp01(dz / (2f * Size) + 0.5f);
+                        falloff = stamp.GetPixelBilinear(su, sv).r;
+                    }
+                    else
+                    {
+                        float t = Size <= 0f ? 0f : distXZ / Size;
+                        falloff = t <= inner ? 1f : Mathf.SmoothStep(1f, 0f, (t - inner) / Mathf.Max(0.0001f, 1f - inner));
+                    }
+
                     float w = strength * falloff;
                     if (w <= 0f) continue;
 
@@ -170,6 +214,7 @@ namespace GrassInteract.Editor
                 }
             }
 
+            // Live preview: update CPU pixels (DensityPlacement reads GetPixelBilinear) + GPU copy.
             this.activeMap.SetPixels(this.pixels);
             this.activeMap.Apply(false);
         }
@@ -188,16 +233,32 @@ namespace GrassInteract.Editor
             return n > 0 ? sum / n : 0f;
         }
 
+        // ── Brush stamp ────────────────────────────────────────────────────────
+
+        /// <summary>Resolves the selected stamp's shape texture, or null (procedural falloff / unreadable).</summary>
+        private static Texture2D? ResolveStamp(ScatterField field)
+        {
+            int idx = StampIndex;
+            if (idx < 0 || field.Config == null) return null;
+            var stamps = field.Config.BrushStamps;
+            if (idx >= stamps.Count) return null;
+            Texture2D? shape = stamps[idx].Shape;
+            return shape != null && shape.isReadable ? shape : null;
+        }
+
         // ── In-scene settings panel ────────────────────────────────────────────
 
-        private void DrawSettingsWindow(bool valid, string? error, bool noField)
+        private void DrawSettingsWindow(bool valid, string? error, ScatterField? field)
         {
+            int stampCount = field != null && field.Config != null ? field.Config.BrushStamps.Count : 0;
+            float h = !valid ? 96f : (152f + (stampCount > 0 ? 18f : 0f));
+
             Handles.BeginGUI();
-            var area = new Rect(8, 8, 240, valid ? 132 : 96);
+            var area = new Rect(8, 8, 250, h);
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label("Density Paint", EditorStyles.boldLabel);
 
-            if (noField)
+            if (field == null)
                 EditorGUILayout.HelpBox("No active ScatterField owns this layer.", MessageType.Warning);
 
             if (!valid)
@@ -211,6 +272,19 @@ namespace GrassInteract.Editor
                 Opacity = EditorGUILayout.Slider("Opacity", Opacity, 0f,   1f);
                 Falloff = EditorGUILayout.Slider("Falloff", Falloff, 0f,   1f);
                 Flow    = EditorGUILayout.Slider("Flow",    Flow,    0f,   1f);
+
+                if (stampCount > 0 && field != null && field.Config != null)
+                {
+                    var names = new string[stampCount + 1];
+                    names[0] = "None (procedural)";
+                    var stamps = field.Config.BrushStamps;
+                    for (int i = 0; i < stampCount; ++i)
+                        names[i + 1] = stamps[i].DisplayName;
+
+                    int current = StampIndex < 0 || StampIndex >= stampCount ? 0 : StampIndex + 1;
+                    int sel = EditorGUILayout.Popup("Stamp", current, names);
+                    StampIndex = sel == 0 ? -1 : sel - 1;
+                }
             }
 
             GUILayout.EndArea();
