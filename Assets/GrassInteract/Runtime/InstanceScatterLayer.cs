@@ -46,6 +46,9 @@ namespace GrassInteract
         [Tooltip("Use a convex MeshCollider for the layer-default collider.")]
         [SerializeField] private bool defaultColliderConvex = false;
 
+        [Tooltip("Fallback collider PhysicMaterial when a record's material override is null.")]
+        [SerializeField] private PhysicsMaterial? defaultColliderMaterial;
+
         // ── Pooling + culling config ──────────────────────────────────────────
 
         [Tooltip("Pool and reuse collider GameObjects rather than instantiating per frame.")]
@@ -96,6 +99,9 @@ namespace GrassInteract
 
         /// <summary>Convex flag for the layer-default collider.</summary>
         public bool DefaultColliderConvex => this.defaultColliderConvex;
+
+        /// <summary>Fallback collider PhysicMaterial when a record has no material override.</summary>
+        public PhysicsMaterial? DefaultColliderMaterial => this.defaultColliderMaterial;
 
         /// <summary>Pool and reuse collider GameObjects.</summary>
         public bool PoolColliders => this.poolColliders;

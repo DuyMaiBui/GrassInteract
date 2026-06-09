@@ -1,0 +1,18 @@
+{
+  "kits": {
+    "TheOneKit Core": {
+      "installedSettings": {
+        "hooks": [
+          "hook:hook-runner.cjs",
+          "hook:task-completed-handler.cjs",
+          "hook:teammate-idle-handler.cjs"
+        ],
+        "mcpServers": [],
+        "statusLineInstalled": true,
+        "envKeysInstalled": [
+          "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+        ]
+      }
+    }
+  }
+}

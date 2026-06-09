@@ -1,0 +1,79 @@
+{
+  "_generated": "2026-06-03T11:50:15.967Z",
+  "_kitName": "theonekit-designer",
+  "_moduleCount": 8,
+  "keywords": {
+    "base": [
+      "architecture",
+      "authoring",
+      "balance",
+      "base",
+      "data",
+      "designer",
+      "diagram",
+      "document",
+      "events",
+      "feel",
+      "foundations",
+      "juice",
+      "liveops",
+      "mobile",
+      "tool",
+      "tools"
+    ],
+    "economy": [
+      "core",
+      "designer",
+      "economy",
+      "offering",
+      "shop"
+    ],
+    "level": [
+      "core",
+      "designer",
+      "level"
+    ],
+    "puzzle": [
+      "core",
+      "designer",
+      "puzzle"
+    ],
+    "rpg": [
+      "based",
+      "core",
+      "designer",
+      "narrative",
+      "quest",
+      "rpg",
+      "turn",
+      "worldbuilding"
+    ],
+    "systems": [
+      "combos",
+      "designer",
+      "generation",
+      "procedural",
+      "roguelike",
+      "synergy",
+      "systems"
+    ],
+    "ux": [
+      "animation",
+      "core",
+      "designer",
+      "visual",
+      "wireframe"
+    ],
+    "wiki": [
+      "core",
+      "designer",
+      "wiki"
+    ]
+  },
+  "_origin": {
+    "kit": "theonekit-designer",
+    "repository": "The1Studio/theonekit-designer",
+    "module": null,
+    "protected": false
+  }
+}

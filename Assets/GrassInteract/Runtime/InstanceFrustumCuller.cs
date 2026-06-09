@@ -36,6 +36,7 @@ namespace GrassInteract
         private Mesh?[]       recordMeshes     = System.Array.Empty<Mesh?>();
         private bool[]        recordConvex     = System.Array.Empty<bool>();
         private bool[]        recordWants      = System.Array.Empty<bool>(); // generateCollider flag
+        private PhysicsMaterial?[] recordMaterials = System.Array.Empty<PhysicsMaterial?>();
 
         // ── Frame-throttle state ──────────────────────────────────────────────
 
@@ -68,7 +69,8 @@ namespace GrassInteract
             float[]      scales,
             Mesh?[]      meshes,
             bool[]       convex,
-            bool[]       wantsCollider)
+            bool[]       wantsCollider,
+            PhysicsMaterial?[] materials)
         {
             this.recordPositions = positions;
             this.recordRotations = rotations;
@@ -76,6 +78,7 @@ namespace GrassInteract
             this.recordMeshes    = meshes;
             this.recordConvex    = convex;
             this.recordWants     = wantsCollider;
+            this.recordMaterials = materials;
         }
 
         // ── MonoBehaviour ─────────────────────────────────────────────────────
@@ -136,7 +139,8 @@ namespace GrassInteract
                         this.recordRotations[i],
                         this.recordScales[i],
                         this.recordMeshes[i],
-                        this.recordConvex[i]);
+                        this.recordConvex[i],
+                        this.recordMaterials[i]);
                 }
                 else
                 {

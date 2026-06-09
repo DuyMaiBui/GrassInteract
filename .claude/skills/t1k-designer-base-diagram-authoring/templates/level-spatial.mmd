@@ -1,0 +1,41 @@
+%% Level Spatial Layout — zones connected by gates
+%% Distinguishes two-way passages, one-way drops, and locked gates.
+%% Replace zone names and gate keys with your actual level.
+%% Render: /t1k:preview --from-file level-spatial.mmd
+
+flowchart LR
+    %% ===== ZONES =====
+    Entry([Entry Plaza])
+    Market[Market Square]
+    Alleys[Dark Alleys]
+    Sewers[Sewers]
+    Temple[Temple Courtyard]
+    Sanctum[Inner Sanctum]
+    Rooftop[Rooftop Escape]
+
+    %% ===== TWO-WAY PASSAGES (standard adjacency) =====
+    Entry <--> Market
+    Market <--> Alleys
+    Temple <--> Sanctum
+
+    %% ===== ONE-WAY DROPS (no return) =====
+    Alleys -- drop --> Sewers
+    Rooftop -- zipline --> Entry
+
+    %% ===== LOCKED GATES (require key) =====
+    Market -- "Gate: Merchant Token" --> Temple
+    Sewers -- "Gate: Sewer Key" --> Sanctum
+
+    %% ===== HIDDEN / OPTIONAL =====
+    Alleys -.hidden.- Rooftop
+
+    %% Styling
+    classDef entry fill:#4caf50,stroke:#1b5e20,color:#fff
+    classDef locked fill:#ffb300,stroke:#a37500,color:#000
+    classDef danger fill:#e53935,stroke:#8e0000,color:#fff
+    classDef goal fill:#8e24aa,stroke:#4a148c,color:#fff
+
+    class Entry entry
+    class Temple,Sewers locked
+    class Alleys danger
+    class Sanctum goal

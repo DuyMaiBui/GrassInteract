@@ -1,0 +1,30 @@
+{
+  "module": "ui",
+  "version": "2.2.1",
+  "kit": "theonekit-unity",
+  "generatedBy": "release-action",
+  "generatedAt": "2026-06-08T11:33:04.172Z",
+  "files": {
+    "skills": [
+      "t1k-unity-ui-create-prefab/SKILL.md",
+      "t1k-unity-ui-describe-image/SKILL.md",
+      "t1k-unity-ui-hud-layout/SKILL.md",
+      "t1k-unity-ui-mobile-ui/SKILL.md",
+      "t1k-unity-ui-mobile-ui/references/responsive-layout.md",
+      "t1k-unity-ui-mobile-ui/references/touch-input.md",
+      "t1k-unity-ui-mobile-ui/references/ui-optimization.md",
+      "t1k-unity-ui-toolkit/SKILL.md",
+      "t1k-unity-ui-toolkit/references/uxml-uss-and-patterns.md",
+      "t1k-unity-ui-ugui/SKILL.md",
+      "t1k-unity-ui-ugui/references/components-quick-ref.md",
+      "t1k-unity-ui-ugui/references/dots-bridge-and-performance.md",
+      "t1k-unity-ui-ugui/references/layouts-and-drag-drop.md"
+    ],
+    "agents": [],
+    "hooks": [],
+    "rules": [],
+    "fragments": [],
+    "other": []
+  },
+  "checksum": "sha256:8c38f2d05ccd1268a67c3383d996e73f34065cdbca4b8e5fc43802714a0810eb"
+}

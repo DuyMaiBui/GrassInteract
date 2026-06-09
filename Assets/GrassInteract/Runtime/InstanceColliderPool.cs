@@ -21,6 +21,7 @@ namespace GrassInteract
         private int hardCap;
         private Mesh? defaultMesh;
         private bool defaultConvex;
+        private PhysicsMaterial? defaultMaterial;
 
         // ── Pool state ────────────────────────────────────────────────────────
 
@@ -35,11 +36,13 @@ namespace GrassInteract
         /// <summary>
         /// Must be called once after the component is added. Replaces constructor parameters.
         /// </summary>
-        public void Init(int capacity, Mesh? defaultColliderMesh, bool convexDefault)
+        public void Init(int capacity, Mesh? defaultColliderMesh, bool convexDefault,
+            PhysicsMaterial? defaultColliderMaterial = null)
         {
             this.hardCap      = Mathf.Max(1, capacity);
             this.defaultMesh  = defaultColliderMesh;
             this.defaultConvex = convexDefault;
+            this.defaultMaterial = defaultColliderMaterial;
             this.initialized  = true;
         }
 
@@ -65,14 +68,15 @@ namespace GrassInteract
             Quaternion rot,
             float scale,
             Mesh? meshOverride,
-            bool convex)
+            bool convex,
+            PhysicsMaterial? materialOverride = null)
         {
             if (!this.initialized) return null;
 
             // Already active for this record — update in place.
             if (this.active.TryGetValue(recordIdx, out MeshCollider? existing))
             {
-                this.ApplyTransformAndMesh(existing, pos, rot, scale, meshOverride, convex);
+                this.ApplyTransformAndMesh(existing, pos, rot, scale, meshOverride, convex, materialOverride);
                 return existing;
             }
 
@@ -94,7 +98,7 @@ namespace GrassInteract
                 ? this.idle.Pop()
                 : this.CreatePooledCollider();
 
-            this.ApplyTransformAndMesh(mc, pos, rot, scale, meshOverride, convex);
+            this.ApplyTransformAndMesh(mc, pos, rot, scale, meshOverride, convex, materialOverride);
             mc.gameObject.SetActive(true);
 
             this.active[recordIdx] = mc;
@@ -155,7 +159,8 @@ namespace GrassInteract
             Quaternion rot,
             float scale,
             Mesh? meshOverride,
-            bool convex)
+            bool convex,
+            PhysicsMaterial? materialOverride)
         {
             Transform t = mc.transform;
             t.position   = pos;
@@ -169,6 +174,10 @@ namespace GrassInteract
             bool wantConvex = convex || this.defaultConvex;
             if (mc.convex != wantConvex)
                 mc.convex = wantConvex;
+
+            PhysicsMaterial? material = materialOverride ?? this.defaultMaterial;
+            if (mc.sharedMaterial != material)
+                mc.sharedMaterial = material;
         }
 
         private static void SafeDestroy(GameObject? go)

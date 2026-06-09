@@ -1,0 +1,37 @@
+%% Quest Tree — branching quest progression with prerequisites
+%% Pattern: hub-and-spoke with a main-line spine and optional side branches
+%% Replace placeholder labels with your actual quest names.
+%% Render: /t1k:preview --from-file quest-tree.mmd
+
+flowchart TD
+    Start([Start: Prologue])
+
+    %% Main story spine (required quests)
+    Start --> Q1[Quest 1: Meet the Elder]
+    Q1 --> Q2[Quest 2: Retrieve the Totem]
+    Q2 --> Q3{Choice: Trust the Elder?}
+
+    %% Branch A — aligned path
+    Q3 -- Yes --> Q4A[Quest 4A: Defend the Village]
+    Q4A --> Q5[Quest 5: The Final Stand]
+
+    %% Branch B — rebellious path
+    Q3 -- No --> Q4B[Quest 4B: Join the Outcasts]
+    Q4B --> Q5
+
+    %% Optional side quests (hub-and-spoke off Q1)
+    Q1 -.optional.-> S1[Side: Lost Pup]
+    Q1 -.optional.-> S2[Side: Herbalists Request]
+    S2 -.reward unlocks.-> Q2
+
+    %% Terminal
+    Q5 --> End([End: Act 1 Complete])
+
+    %% Styling — decision nodes distinct from task nodes
+    classDef choice fill:#ffd54f,stroke:#b28900,color:#000
+    classDef side fill:#e0e0e0,stroke:#616161,color:#000,stroke-dasharray:4 2
+    classDef terminal fill:#4caf50,stroke:#1b5e20,color:#fff
+
+    class Q3 choice
+    class S1,S2 side
+    class Start,End terminal

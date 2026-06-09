@@ -417,7 +417,8 @@ namespace GrassInteract
             Transform rootT   = this.colliderRoot.transform;
 
             this.colliderPool = this.colliderRoot.AddComponent<InstanceColliderPool>();
-            this.colliderPool.Init(instLayer.PoolCap, layerDefaultMesh, instLayer.DefaultColliderConvex);
+            this.colliderPool.Init(instLayer.PoolCap, layerDefaultMesh, instLayer.DefaultColliderConvex,
+                instLayer.DefaultColliderMaterial);
             this.colliderPool.Prewarm(Mathf.Min(records.Length, instLayer.PoolCap));
 
             int count           = records.Length;
@@ -427,18 +428,23 @@ namespace GrassInteract
             var meshes          = new Mesh?[count];
             var convexFlags     = new bool[count];
             var wantsCollider   = new bool[count];
+            var materials       = new PhysicsMaterial?[count];
 
             for (int i = 0; i < count; ++i)
             {
                 InstanceRecord rec = records[i];
 
                 Mesh? colMesh = null;
-                if ((rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0 &&
-                    rec.colliderMeshRefIndex >= 0)
+                PhysicsMaterial? colMat = null;
+                if ((rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0)
                 {
-                    colMesh = authored.GetObjectRef(rec.colliderMeshRefIndex) as Mesh;
+                    if (rec.colliderMeshRefIndex >= 0)
+                        colMesh = authored.GetObjectRef(rec.colliderMeshRefIndex) as Mesh;
+                    if (rec.colliderMaterialRefIndex >= 0)
+                        colMat = authored.GetObjectRef(rec.colliderMaterialRefIndex) as PhysicsMaterial;
                 }
                 colMesh ??= layerDefaultMesh;
+                // colMat stays null when unset → InstanceColliderPool falls back to the layer default.
 
                 if (rec.generateCollider && colMesh == null)
                 {
@@ -453,13 +459,14 @@ namespace GrassInteract
                 meshes[i]        = colMesh;
                 convexFlags[i]   = rec.colliderConvex;
                 wantsCollider[i] = rec.generateCollider && colMesh != null;
+                materials[i]     = colMat;
             }
 
             if (instLayer.CullColliders)
             {
                 this.colliderCuller = rootT.gameObject.AddComponent<InstanceFrustumCuller>();
                 this.colliderCuller.Init(null /* Camera.main at runtime */, instLayer.CullDistance, this.colliderPool);
-                this.colliderCuller.SetRecords(positions, rotations, scales, meshes, convexFlags, wantsCollider);
+                this.colliderCuller.SetRecords(positions, rotations, scales, meshes, convexFlags, wantsCollider, materials);
                 Debug.Log(
                     $"[InstancedPropEngine] Collider runtime: pool cap={instLayer.PoolCap}, " +
                     $"cullDist={instLayer.CullDistance}m, records={count}.");
@@ -471,7 +478,7 @@ namespace GrassInteract
                 {
                     if (!wantsCollider[i]) continue;
                     MeshCollider? mc = this.colliderPool.Acquire(
-                        i, positions[i], rotations[i], scales[i], meshes[i], convexFlags[i]);
+                        i, positions[i], rotations[i], scales[i], meshes[i], convexFlags[i], materials[i]);
                     if (mc != null) acquired++;
                 }
                 Debug.Log(

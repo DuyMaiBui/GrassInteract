@@ -1,0 +1,20 @@
+{
+  "module": "audio",
+  "version": "2.1.5",
+  "kit": "theonekit-unity",
+  "generatedBy": "release-action",
+  "generatedAt": "2026-06-08T11:33:04.029Z",
+  "files": {
+    "skills": [
+      "t1k-unity-audio-core/SKILL.md",
+      "t1k-unity-audio-core/references/audio-api.md",
+      "t1k-unity-audio-core/references/music-and-pooling.md"
+    ],
+    "agents": [],
+    "hooks": [],
+    "rules": [],
+    "fragments": [],
+    "other": []
+  },
+  "checksum": "sha256:b1f6d4c92fd5bf99c2fcb99ed4d9680659f582c8a48cc771378c9497e27b58d0"
+}
