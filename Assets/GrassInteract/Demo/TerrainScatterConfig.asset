@@ -12,32 +12,44 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8810f8360b2449f47a6241f959bd926e, type: 3}
   m_Name: Layer_Instance_1
   m_EditorClassIdentifier: GrassInteract::GrassInteract.InstanceScatterLayer
-  affectedByWind: 1
-  affectedByInteractors: 1
-  material: {fileID: 2100000, guid: 2034676a85dcec049b948224d144247f, type: 2}
-  shadowCastingMode: 0
-  windMode: 0
-  windDirection: {x: 1, y: 0}
-  windStrength: 0.15
-  windFrequency: 1.2
-  windNoiseScale: 0.25
-  windGustScale: 0.05
-  windRippleScale: 0.4
-  windGustSpeed: 0.3
-  windRippleSpeed: 1.5
-  windRippleWeight: 0.35
-  bendStrength: 0.7
-  flatten: 0.5
-  recoveryRate: 4
-  maxBladeHeight: 1
-  bendHeadroom: 1
-  chunkSize: 16
-  lods:
-  - mesh: {fileID: 4300000, guid: 50fc5ec398c2ff646b85bdc6ea16f70c, type: 2}
-    maxDistance: 30
-  groundSnapMask:
-    serializedVersion: 2
-    m_Bits: 55
+  render:
+    material: {fileID: 2100000, guid: 8edb2305ae9c3c14ab2505c29e28c603, type: 2}
+    shadowCastingMode: 0
+    lods:
+    - mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+      maxDistance: 30
+  wind:
+    windMode: 0
+    windDirection: {x: 1, y: 0}
+    windStrength: 0.15
+    windFrequency: 1.2
+    windNoiseScale: 0.25
+    windGustScale: 0.05
+    windRippleScale: 0.4
+    windGustSpeed: 0.3
+    windRippleSpeed: 1.5
+    windRippleWeight: 0.35
+  deform:
+    affectedByWind: 1
+    affectedByInteractors: 1
+    bendStrength: 0.7
+    flatten: 0.5
+    recoveryRate: 4
+  bounds:
+    maxBladeHeight: 1
+    bendHeadroom: 1
+    chunkSize: 16
+  placement:
+    groundSnapMask:
+      serializedVersion: 2
+      m_Bits: 55
+  tilt:
+    affectedByInteractors: 1
+    tiltStrength: 0.6
+    maxTiltAngle: 35
+    recoveryRate: 4
+    radiusPadding: 0
+    colliderFollowsTilt: 0
   authoredInstances: {fileID: -7124017428789331003}
   placeSpacing: 0.5
   defaultColliderMesh: {fileID: 0}
@@ -119,7 +131,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 18754b09b5d0cf042a7104c70114331f, type: 3}
   m_Name: TerrainScatterConfig
   m_EditorClassIdentifier: GrassInteract::GrassInteract.TerrainScatterConfig
-  cullCompute: {fileID: 0}
+  cullCompute: {fileID: 7200000, guid: 8eebdf92a89a18b49a0375c9c59d93d4, type: 3}
   indirectMaterial: {fileID: 0}
   layers:
   - {fileID: 1236607392225722720}
@@ -138,32 +150,41 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1abe7025d8db77e408740d14122533b7, type: 3}
   m_Name: Layer_Density_0
   m_EditorClassIdentifier: GrassInteract::GrassInteract.DensityScatterLayer
-  affectedByWind: 1
-  affectedByInteractors: 1
-  material: {fileID: 2100000, guid: 2034676a85dcec049b948224d144247f, type: 2}
-  shadowCastingMode: 0
-  windMode: 0
-  windDirection: {x: 1, y: 0}
-  windStrength: 0.15
-  windFrequency: 1.2
-  windNoiseScale: 0.25
-  windGustScale: 0.05
-  windRippleScale: 0.4
-  windGustSpeed: 0.3
-  windRippleSpeed: 1.5
-  windRippleWeight: 0.35
-  bendStrength: 0.7
-  flatten: 0.5
-  recoveryRate: 4
-  maxBladeHeight: 1
-  bendHeadroom: 1
-  chunkSize: 16
-  lods:
-  - mesh: {fileID: 4300000, guid: 5b41185079f3015479d4b43fa2a864d4, type: 2}
-    maxDistance: 30
-  groundSnapMask:
-    serializedVersion: 2
-    m_Bits: 55
+  render:
+    material: {fileID: 2100000, guid: eba123c4c127aba418b716f13a91ec8c, type: 2}
+    shadowCastingMode: 0
+    lods:
+    - mesh: {fileID: 4300000, guid: 30c9f5412a6ee444fb709fca694dc445, type: 2}
+      maxDistance: 12
+    - mesh: {fileID: 4300000, guid: be0e89d45928ea84e8395163acaab451, type: 2}
+      maxDistance: 30
+    - mesh: {fileID: 4300000, guid: a3511f82ea2acd348b4bb0853c1f1ed0, type: 2}
+      maxDistance: 80
+  wind:
+    windMode: 0
+    windDirection: {x: 1, y: 0}
+    windStrength: 0.15
+    windFrequency: 1.2
+    windNoiseScale: 0.25
+    windGustScale: 0.05
+    windRippleScale: 0.4
+    windGustSpeed: 0.3
+    windRippleSpeed: 1.5
+    windRippleWeight: 0.35
+  deform:
+    affectedByWind: 1
+    affectedByInteractors: 1
+    bendStrength: 0.7
+    flatten: 0.5
+    recoveryRate: 4
+  bounds:
+    maxBladeHeight: 1
+    bendHeadroom: 1
+    chunkSize: 16
+  placement:
+    groundSnapMask:
+      serializedVersion: 2
+      m_Bits: 55
   densityMap: {fileID: -6811648960051123233}
   targetInstances: 50000
   fieldBounds: {x: 100, y: 100}
@@ -234,32 +255,41 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1abe7025d8db77e408740d14122533b7, type: 3}
   m_Name: Layer_Density_2
   m_EditorClassIdentifier: GrassInteract::GrassInteract.DensityScatterLayer
-  affectedByWind: 1
-  affectedByInteractors: 1
-  material: {fileID: 2100000, guid: 2034676a85dcec049b948224d144247f, type: 2}
-  shadowCastingMode: 0
-  windMode: 0
-  windDirection: {x: 1, y: 0}
-  windStrength: 0.15
-  windFrequency: 1.2
-  windNoiseScale: 0.25
-  windGustScale: 0.05
-  windRippleScale: 0.4
-  windGustSpeed: 0.3
-  windRippleSpeed: 1.5
-  windRippleWeight: 0.35
-  bendStrength: 0.7
-  flatten: 0.5
-  recoveryRate: 4
-  maxBladeHeight: 1
-  bendHeadroom: 1
-  chunkSize: 16
-  lods:
-  - mesh: {fileID: 4300000, guid: 5b41185079f3015479d4b43fa2a864d4, type: 2}
-    maxDistance: 30
-  groundSnapMask:
-    serializedVersion: 2
-    m_Bits: 55
+  render:
+    material: {fileID: 2100000, guid: eba123c4c127aba418b716f13a91ec8c, type: 2}
+    shadowCastingMode: 0
+    lods:
+    - mesh: {fileID: 4300000, guid: 30c9f5412a6ee444fb709fca694dc445, type: 2}
+      maxDistance: 12
+    - mesh: {fileID: 4300000, guid: be0e89d45928ea84e8395163acaab451, type: 2}
+      maxDistance: 30
+    - mesh: {fileID: 4300000, guid: a3511f82ea2acd348b4bb0853c1f1ed0, type: 2}
+      maxDistance: 80
+  wind:
+    windMode: 0
+    windDirection: {x: 1, y: 0}
+    windStrength: 0.15
+    windFrequency: 1.2
+    windNoiseScale: 0.25
+    windGustScale: 0.05
+    windRippleScale: 0.4
+    windGustSpeed: 0.3
+    windRippleSpeed: 1.5
+    windRippleWeight: 0.35
+  deform:
+    affectedByWind: 1
+    affectedByInteractors: 1
+    bendStrength: 0.7
+    flatten: 0.5
+    recoveryRate: 4
+  bounds:
+    maxBladeHeight: 1
+    bendHeadroom: 1
+    chunkSize: 16
+  placement:
+    groundSnapMask:
+      serializedVersion: 2
+      m_Bits: 55
   densityMap: {fileID: 1377188127741630053}
   targetInstances: 50000
   fieldBounds: {x: 100, y: 100}
