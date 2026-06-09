@@ -92,34 +92,5 @@ namespace GrassInteract
         }
 #endif
 
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
-        {
-            UnityEditor.Handles.color = Color.Lerp(Color.green, Color.red, this.Strength);
-            UnityEditor.Handles.DrawWireDisc(this.WorldPosition, Vector3.up, this.Radius);
-            // Small center cross marker
-            float cross = 0.15f;
-            UnityEditor.Handles.DrawLine(this.WorldPosition - Vector3.right * cross, this.WorldPosition + Vector3.right * cross);
-            UnityEditor.Handles.DrawLine(this.WorldPosition - Vector3.forward * cross, this.WorldPosition + Vector3.forward * cross);
-        }
-
-        private void OnDrawGizmosSelected()
-        {
-            // Translucent filled disc
-            Color fill = Color.Lerp(Color.green, Color.red, this.Strength);
-            fill.a = 0.15f;
-            UnityEditor.Handles.color = fill;
-            UnityEditor.Handles.DrawSolidDisc(this.WorldPosition, Vector3.up, this.Radius);
-
-            // Vertical stalk ~1m tall
-            UnityEditor.Handles.color = Color.white;
-            UnityEditor.Handles.DrawLine(this.WorldPosition, this.WorldPosition + Vector3.up * 1f);
-
-            // Label
-            UnityEditor.Handles.Label(
-                this.WorldPosition + Vector3.up * 1.15f,
-                $"r={this.Radius:0.##}  strength={this.Strength:0.##}");
-        }
-#endif
     }
 }

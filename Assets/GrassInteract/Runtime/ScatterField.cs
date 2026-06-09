@@ -110,71 +110,18 @@ namespace GrassInteract
         private void OnEnable()
         {
             this.Rebuild();
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= this.EditorStepTick;
-            UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= this.OnEditBeginCameraRendering;
-            if (!Application.isPlaying)
-            {
-                UnityEditor.EditorApplication.update += this.EditorStepTick;
-                UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering += this.OnEditBeginCameraRendering;
-            }
-#endif
         }
 
         private void OnDisable()
         {
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= this.EditorStepTick;
-            UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= this.OnEditBeginCameraRendering;
-#endif
         }
 
         private void OnDestroy()
         {
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= this.EditorStepTick;
-            UnityEngine.Rendering.RenderPipelineManager.beginCameraRendering -= this.OnEditBeginCameraRendering;
-#endif
             this.DisposeAllEngines();
             this.pool?.Clear();
         }
 
-#if UNITY_EDITOR
-        // Re-entry guard: prevents Rebuild/RebuildLayer re-entry from SetDirty-triggered OnValidate
-        // and prevents queuing multiple deferred rebuilds while a slider is being dragged.
-        private bool rebuilding;
-
-        private void OnValidate()
-        {
-            if (this.rebuilding) return;
-            if (!this.isActiveAndEnabled) return;
-
-            UnityEditor.EditorApplication.delayCall -= this.DeferredRebuildOnce;
-            UnityEditor.EditorApplication.delayCall += this.DeferredRebuildOnce;
-        }
-
-        private void DeferredRebuildOnce()
-        {
-            UnityEditor.EditorApplication.delayCall -= this.DeferredRebuildOnce;
-            if (this == null || !this.isActiveAndEnabled) return;
-            this.Rebuild();
-        }
-
-        /// <summary>
-        /// Editor-only: walk all enabled <see cref="ScatterField"/>s and rebuild any whose
-        /// <see cref="Config"/> equals <paramref name="config"/>. Called by
-        /// <see cref="TerrainScatterConfig.OnValidate"/>.
-        /// </summary>
-        internal static void RebuildAllReferencingConfig(TerrainScatterConfig config)
-        {
-            if (config == null) return;
-            var fields = UnityEngine.Object.FindObjectsByType<ScatterField>(UnityEngine.FindObjectsSortMode.None);
-            foreach (var f in fields)
-                if (f != null && f.isActiveAndEnabled && f.Config == config)
-                    f.Rebuild();
-        }
-
-#endif
 
         // ── Shared context builder ────────────────────────────────────────────
 
@@ -242,9 +189,6 @@ namespace GrassInteract
         /// <summary>(Re)builds all layer engines. Safe to call repeatedly.</summary>
         public void Rebuild()
         {
-#if UNITY_EDITOR
-            this.rebuilding = true;
-#endif
             try
             {
                 // Let subclasses inject legacy layers before we iterate.
@@ -319,9 +263,6 @@ namespace GrassInteract
             }
             finally
             {
-#if UNITY_EDITOR
-                this.rebuilding = false;
-#endif
             }
         }
 
@@ -331,10 +272,6 @@ namespace GrassInteract
         /// </summary>
         public void RebuildLayer(int idx)
         {
-#if UNITY_EDITOR
-            if (this.rebuilding) return;
-            this.rebuilding = true;
-#endif
             try
             {
                 if (this.config == null || idx < 0 || idx >= this.config.Layers.Count) return;
@@ -381,9 +318,6 @@ namespace GrassInteract
             }
             finally
             {
-#if UNITY_EDITOR
-                this.rebuilding = false;
-#endif
             }
         }
 
@@ -561,24 +495,6 @@ namespace GrassInteract
             this.SubmitAll(null);
         }
 
-#if UNITY_EDITOR
-        private void EditorStepTick()
-        {
-            if (Application.isPlaying)
-                return;
-            this.StepAll(1f / 60f);
-            UnityEditor.SceneView.RepaintAll();
-        }
-
-        private void OnEditBeginCameraRendering(UnityEngine.Rendering.ScriptableRenderContext context, Camera camera)
-        {
-            if (Application.isPlaying)
-                return;
-            if (camera.cameraType != CameraType.SceneView && camera.cameraType != CameraType.Game)
-                return;
-            this.SubmitAll(camera);
-        }
-#endif
 
         // ── Render helpers ────────────────────────────────────────────────────
 
@@ -615,35 +531,6 @@ namespace GrassInteract
             this.engines.Clear();
         }
 
-#if UNITY_EDITOR
-        [UnityEngine.ContextMenu("Rebuild")]
-        private void RebuildFromMenu()
-        {
-            this.Rebuild();
-        }
-
-        private void OnDrawGizmosSelected()
-        {
-            foreach (ScatterLayer? layer in this.Layers)
-            {
-                if (layer == null) continue;
-                Vector2 bounds = layer.FieldBounds;
-                Gizmos.color = new Color(1f, 0.9f, 0.2f, 0.6f);
-                Gizmos.DrawWireCube(this.transform.position, new Vector3(bounds.x, 0.05f, bounds.y));
-                break;
-            }
-
-            for (int i = 0; i < this.engines.Count; ++i)
-            {
-                IGrassEngine? engine = this.engines[i];
-                if (engine == null) continue;
-                Bounds wb = engine.WorldBounds;
-                if (wb == default) continue;
-                Gizmos.color = new Color(0.2f, 1f, 0.3f, 0.25f);
-                Gizmos.DrawWireCube(wb.center, wb.size);
-            }
-        }
-#endif
 
         // ── PreBuiltEngineWrapper ─────────────────────────────────────────────
 

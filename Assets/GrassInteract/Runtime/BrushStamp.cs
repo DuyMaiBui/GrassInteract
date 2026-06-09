@@ -30,17 +30,5 @@ namespace GrassInteract
         /// <summary>Grayscale stamp texture. May be null before a shape is assigned.</summary>
         public Texture2D? Shape => this.shape;
 
-#if UNITY_EDITOR
-        /// <summary>
-        /// Sets the shape texture and display name. Called by <see cref="TerrainScatterConfig"/>
-        /// during stamp creation; not intended for runtime use.
-        /// </summary>
-        internal void SetShape(Texture2D tex, string stampName)
-        {
-            this.shape = tex;
-            this.displayName = stampName;
-            UnityEditor.EditorUtility.SetDirty(this);
-        }
-#endif
     }
 }

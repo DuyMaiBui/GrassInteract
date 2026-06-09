@@ -34,21 +34,5 @@ namespace GrassInteract.Demo
                 Mathf.Sin(rad) * this.radius);
         }
 
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
-        {
-            Vector3 ringCenter = Application.isPlaying ? this.center : this.transform.position;
-
-            // Orbit ring at the configured height
-            UnityEditor.Handles.color = new Color(0f, 0.9f, 1f, 0.85f); // cyan
-            UnityEditor.Handles.DrawWireDisc(new Vector3(ringCenter.x, this.height, ringCenter.z), Vector3.up, this.radius);
-
-            // Center cross marker at ground-level ring center
-            Vector3 centMark = new Vector3(ringCenter.x, this.height, ringCenter.z);
-            float cross = 0.3f;
-            UnityEditor.Handles.DrawLine(centMark - Vector3.right * cross, centMark + Vector3.right * cross);
-            UnityEditor.Handles.DrawLine(centMark - Vector3.forward * cross, centMark + Vector3.forward * cross);
-        }
-#endif
     }
 }

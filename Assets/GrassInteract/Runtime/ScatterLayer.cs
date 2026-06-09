@@ -33,9 +33,7 @@ namespace GrassInteract
     /// (GrassCpuEngine / GrassGpuEngine); false → mesh-prop pipeline (MeshScatterEngine).
     ///
     /// Instances of this type are sub-assets of <see cref="TerrainScatterConfig"/>; do NOT create
-    /// directly via <c>Assets &gt; Create</c>. Use
-    /// <see cref="TerrainScatterConfig.CreateDensityLayer"/> or
-    /// <see cref="TerrainScatterConfig.CreateInstanceLayer"/> instead.
+    /// directly via <c>Assets &gt; Create</c>.
     ///
     /// SSOT: every shared per-layer concern lives here — LOD meshes, render material, shadow mode,
     /// wind tunables, bend/trample tunables, and AABB headroom. Placement-specific fields live on
@@ -382,51 +380,5 @@ namespace GrassInteract
             return true;
         }
 
-        // ── Editor-only integration ───────────────────────────────────────────
-
-#if UNITY_EDITOR
-        // Debounced via delayCall so dragging a slider coalesces N edits into 1 rebuild per frame.
-        private bool rebuildQueued;
-
-        private void OnValidate()
-        {
-            if (this.rebuildQueued) return;
-            this.rebuildQueued = true;
-            UnityEditor.EditorApplication.delayCall += this.DeferredNotify;
-        }
-
-        private void DeferredNotify()
-        {
-            this.rebuildQueued = false;
-            if (this == null) return;
-            this.NotifyChanged();
-        }
-
-        /// <summary>
-        /// Triggers a fast-path rebuild on every enabled <see cref="ScatterField"/> that owns
-        /// this layer (i.e. its Config.Layers contains this layer).
-        /// </summary>
-        internal void NotifyChanged()
-        {
-            var fields = UnityEngine.Object.FindObjectsByType<ScatterField>(UnityEngine.FindObjectsSortMode.None);
-            foreach (var f in fields)
-            {
-                if (f == null || !f.isActiveAndEnabled || f.Config == null) continue;
-                int idx = -1;
-                for (int i = 0; i < f.Config.Layers.Count; ++i)
-                {
-                    if (f.Config.Layers[i] == this) { idx = i; break; }
-                }
-                if (idx < 0) continue;
-
-                int capturedIdx = idx;
-                UnityEditor.EditorApplication.delayCall += () =>
-                {
-                    if (f != null && f.isActiveAndEnabled)
-                        f.RebuildLayer(capturedIdx);
-                };
-            }
-        }
-#endif
     }
 }

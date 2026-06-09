@@ -162,42 +162,5 @@ namespace GrassInteract
         }
 #endif
 
-        // ── Gizmo ────────────────────────────────────────────────────────────────────
-
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
-        {
-            if (this.samples.Count == 0) return;
-
-            // Polyline through all samples, alpha-tinted by 1 - age/duration.
-            for (int i = 1; i < this.samples.Count; i++)
-            {
-                TrailSample prev = this.samples[i - 1];
-                TrailSample cur  = this.samples[i];
-                float aPrev = 1f - prev.Age / Mathf.Max(this.trailDuration, 1e-4f);
-                float aCur  = 1f - cur.Age  / Mathf.Max(this.trailDuration, 1e-4f);
-                float aSeg  = 0.5f * (aPrev + aCur);
-
-                // Stroke-start sample = pen lift; draw a distinct color and SKIP the bridge segment.
-                if (cur.StrokeStart)
-                {
-                    UnityEditor.Handles.color = new Color(1f, 0.4f, 0.1f); // orange tick
-                    UnityEditor.Handles.DrawSolidDisc(cur.PosWS, Vector3.up, 0.15f);
-                    continue;
-                }
-
-                UnityEditor.Handles.color = new Color(0.3f, 0.9f, 0.4f, aSeg);
-                UnityEditor.Handles.DrawLine(prev.PosWS, cur.PosWS);
-            }
-
-            // Width disc at every sample.
-            foreach (TrailSample s in this.samples)
-            {
-                float a = 1f - s.Age / Mathf.Max(this.trailDuration, 1e-4f);
-                UnityEditor.Handles.color = new Color(0.3f, 0.9f, 0.4f, 0.25f * a);
-                UnityEditor.Handles.DrawWireDisc(s.PosWS, Vector3.up, this.worldRadius);
-            }
-        }
-#endif
     }
 }
