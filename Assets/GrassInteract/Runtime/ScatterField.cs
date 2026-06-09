@@ -105,6 +105,34 @@ namespace GrassInteract
         /// <summary>The bound terrain (if any). Readable by subclasses and harnesses.</summary>
         protected Terrain? BoundTerrain => this.boundTerrain;
 
+        // ── Editor field-space resolution (mirrors BuildContext; consumed by editor tools) ──
+
+        /// <summary>Resolved field origin: terrain center when a terrain is bound, else transform position.</summary>
+        internal Vector3 ResolveFieldOrigin()
+        {
+            if (this.boundTerrain != null && this.boundTerrain.terrainData != null)
+            {
+                Vector3 size = this.boundTerrain.terrainData.size;
+                Vector3 pos  = this.boundTerrain.transform.position;
+                return pos + new Vector3(size.x * 0.5f, 0f, size.z * 0.5f);
+            }
+            return this.transform.position;
+        }
+
+        /// <summary>Resolved field XZ bounds: terrain size when bound, else the layer's FieldBounds.</summary>
+        internal Vector2 ResolveFieldBoundsXZ(ScatterLayer? layer)
+        {
+            if (this.boundTerrain != null && this.boundTerrain.terrainData != null)
+            {
+                Vector3 size = this.boundTerrain.terrainData.size;
+                return new Vector2(size.x, size.z);
+            }
+            return layer != null ? layer.FieldBounds : new Vector2(100f, 100f);
+        }
+
+        /// <summary>Ground raycast mask for a layer's placement (used by editor painting/placement).</summary>
+        internal LayerMask ResolveGroundMask(ScatterLayer layer) => layer.Placement.GroundSnapMask;
+
         // ── MonoBehaviour lifecycle ───────────────────────────────────────────
 
         private void OnEnable()
@@ -498,13 +526,13 @@ namespace GrassInteract
 
         // ── Render helpers ────────────────────────────────────────────────────
 
-        private void StepAll(float dt)
+        internal void StepAll(float dt)
         {
             for (int i = 0; i < this.engines.Count; ++i)
                 this.engines[i]?.Step(dt);
         }
 
-        private void SubmitAll(Camera? targetCamera)
+        internal void SubmitAll(Camera? targetCamera)
         {
             if (this.engines.Count == 0)
                 return;
