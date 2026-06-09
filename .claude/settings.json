@@ -303,16 +303,6 @@
           }
         ]
       }
-    ],
-    "TeammateIdle": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/teammate-idle-handler.cjs\""
-          }
-        ]
-      }
     ]
   }
 }
