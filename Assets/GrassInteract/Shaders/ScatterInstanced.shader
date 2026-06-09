@@ -104,6 +104,8 @@ Shader "GrassInteract/ScatterInstanced"
                 // Phase 5: independent deform gates. 0=off (default), 1=on.
                 float _WindEnabled;
                 float _InteractorsEnabled;
+                // Phase B: rigid whole-instance tilt gate. 0=off, 1=apply _InstanceTilt.
+                float _TiltEnabled;
             CBUFFER_END
 
             TEXTURE2D(_BaseMap);
@@ -132,6 +134,7 @@ Shader "GrassInteract/ScatterInstanced"
             StructuredBuffer<InstanceData>         _Instances;      // global, all prop instances
             StructuredBuffer<uint>                 _VisibleIndices; // per-LOD, material.SetBuffer
             StructuredBuffer<SCATTER_InteractorGpu> _Interactors;   // global, shared with GrassInteractIndirect
+            StructuredBuffer<float4>                _InstanceTilt;  // global, per-instance rigid tilt quaternion (xyzw, baked-order indexed)
 
             float  _ScaleMax2;       // global float — scale decode upper bound
             float  _GrassTime;       // global — time accumulator (set by GrassGpuEngine or MeshScatterEngine)
@@ -150,6 +153,13 @@ Shader "GrassInteract/ScatterInstanced"
             static const float SCATTER_TWO_PI        = 6.2831853f;
             static const float SCATTER_DEG_PER_METRE = 55.0f;
             static const float SCATTER_MAX_LEAN_DEG  = 80.0f;
+
+            // Rotate a vector by a unit quaternion (q.xyz = imaginary, q.w = real) — Unity.Mathematics convention.
+            float3 SCATTER_RotateByQuat(float3 v, float4 q)
+            {
+                float3 t = 2.0f * cross(q.xyz, v);
+                return v + q.w * t + cross(q.xyz, t);
+            }
 
             // Build a Y-axis rotation matrix from yaw (degrees).
             float3x3 SCATTER_YawMatrix(float yawDeg)
@@ -230,7 +240,7 @@ Shader "GrassInteract/ScatterInstanced"
 
             // Reconstruct world-space vertex position and normal from an InstanceData record.
             // Independent gates: _WindEnabled and _InteractorsEnabled may be on/off separately.
-            void TransformInstance(InstanceData inst, float3 localPos, float3 localNormal,
+            void TransformInstance(InstanceData inst, float4 tiltQ, float3 localPos, float3 localNormal,
                 out float3 posWS, out float3 normalWS)
             {
                 // Unpack yaw and scale (common to both modes).
@@ -289,8 +299,10 @@ Shader "GrassInteract/ScatterInstanced"
                     rot = baseRot;
                 }
 
-                posWS    = inst.posWS + mul(rot, localPos * scale);
-                normalWS = mul(rot, localNormal);
+                // Rigid whole-instance tilt about the pivot (identity quat when _TiltEnabled == 0).
+                float3 tiltOffset = SCATTER_RotateByQuat(mul(rot, localPos * scale), tiltQ);
+                posWS    = inst.posWS + tiltOffset;
+                normalWS = SCATTER_RotateByQuat(mul(rot, localNormal), tiltQ);
             }
 
             struct Varyings
@@ -310,9 +322,10 @@ Shader "GrassInteract/ScatterInstanced"
 
                 uint         instIdx = _VisibleIndices[instanceID];
                 InstanceData inst    = _Instances[instIdx];
+                float4       tiltQ   = (_TiltEnabled >= 0.5f) ? _InstanceTilt[instIdx] : float4(0, 0, 0, 1);
 
                 float3 posWS, normalWS;
-                TransformInstance(inst, posOS.xyz, normalOS, posWS, normalWS);
+                TransformInstance(inst, tiltQ, posOS.xyz, normalOS, posWS, normalWS);
 
                 o.positionCS = TransformWorldToHClip(posWS);
                 o.normalWS   = normalWS;
@@ -365,12 +378,14 @@ Shader "GrassInteract/ScatterInstanced"
             StructuredBuffer<InstanceData>   _Instances;
             StructuredBuffer<uint>           _VisibleIndices;
             StructuredBuffer<SC_InteractorGpu> _Interactors;
+            StructuredBuffer<float4>         _InstanceTilt;
 
             float _ScaleMax2;
             float _OrientMode;
             float4 _RotationOffsetEuler;
             float _WindEnabled;
             float _InteractorsEnabled;
+            float _TiltEnabled;
             float _GrassTime; float2 _WindDir; float _WindStrength; float _WindFrequency;
             float _WindNoiseScale; float _BendStrength; float _Flatten; int _InteractorCount;
             // Explicitly declare shadow-direction uniforms (mirrors GrassInteractIndirect.shader pattern).
@@ -378,6 +393,7 @@ Shader "GrassInteract/ScatterInstanced"
             float3 _LightPosition;
 
             static const float SC_DEG_TO_RAD=0.01745329f,SC_TWO_PI=6.2831853f,SC_DPM=55.0f,SC_MAX_LEAN=80.0f;
+            float3 SC_RotateByQuat(float3 v,float4 q){float3 t=2.0f*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
 
             float3x3 SC_YawMat(float y){float a=y*SC_DEG_TO_RAD,sy=sin(a),cy=cos(a);return float3x3(cy,0,sy,0,1,0,-sy,0,cy);}
             float3x3 SC_EulMat(float p,float y,float r){p*=SC_DEG_TO_RAD;y*=SC_DEG_TO_RAD;r*=SC_DEG_TO_RAD;float sp=sin(p),cp=cos(p),sy=sin(y),cy=cos(y),sr=sin(r),cr=cos(r);return mul(float3x3(cy,0,sy,0,1,0,-sy,0,cy),mul(float3x3(1,0,0,0,cp,-sp,0,sp,cp),float3x3(cr,-sr,0,sr,cr,0,0,0,1)));}
@@ -385,7 +401,7 @@ Shader "GrassInteract/ScatterInstanced"
             float3x3 SC_AlignMat(float3 n){float3 up=float3(0,1,0);float3 ax=cross(up,n);float s=length(ax),c=dot(up,n);if(s<1e-6)return c>0?(float3x3)1:float3x3(1,0,0,0,-1,0,0,0,1);ax/=s;float t=1-c;return float3x3(t*ax.x*ax.x+c,t*ax.x*ax.y-s*ax.z,t*ax.x*ax.z+s*ax.y,t*ax.x*ax.y+s*ax.z,t*ax.y*ax.y+c,t*ax.y*ax.z-s*ax.x,t*ax.x*ax.z-s*ax.y,t*ax.y*ax.z+s*ax.x,t*ax.z*ax.z+c);}
             float3x3 SC_BaseRot2(InstanceData inst,float yaw){float3 oe=_RotationOffsetEuler.xyz;if(_OrientMode>=0.5f){uint s2=inst.lodHash;float ox=(float)((s2>>24)&0xFFu)/255.0f*2.0f-1.0f,oy=(float)((s2>>16)&0xFFu)/255.0f*2.0f-1.0f,pd=(float)((s2>>8)&0xFFu)/255.0f*180.0f-90.0f,rd=(float)(s2&0xFFu)/255.0f*180.0f-90.0f;return mul(SC_AlignMat(SC_OctDec(ox,oy)),mul(SC_EulMat(pd,yaw,rd),SC_EulMat(oe.x,oe.y,oe.z)));}return mul(SC_YawMat(yaw),SC_EulMat(oe.x,oe.y,oe.z));}
 
-            void TransformInstance2(InstanceData inst, float3 lp, float3 ln, out float3 wp, out float3 wn)
+            void TransformInstance2(InstanceData inst, float4 tiltQ, float3 lp, float3 ln, out float3 wp, out float3 wn)
             {
                 uint hi=(inst.packedYawScale>>16)&0xFFFFu,lo=inst.packedYawScale&0xFFFFu;
                 float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2;
@@ -400,7 +416,7 @@ Shader "GrassInteract/ScatterInstanced"
                     if(mg>SC_MAX_LEAN){float s=SC_MAX_LEAN/mg;pt*=s;rl*=s;}
                     rot=mul(SC_EulMat(pt,0,rl),baseRot);
                 } else {rot=baseRot;}
-                wp=inst.posWS+mul(rot,lp*scale); wn=mul(rot,ln);
+                float3 toff=SC_RotateByQuat(mul(rot,lp*scale),tiltQ); wp=inst.posWS+toff; wn=SC_RotateByQuat(mul(rot,ln),tiltQ);
             }
 
             struct SV { float4 positionCS : SV_POSITION; };
@@ -411,9 +427,11 @@ Shader "GrassInteract/ScatterInstanced"
                 uint   iid      : SV_InstanceID)
             {
                 SV o = (SV)0;
-                InstanceData inst = _Instances[_VisibleIndices[iid]];
+                uint sIdx = _VisibleIndices[iid];
+                InstanceData inst = _Instances[sIdx];
+                float4 tiltQ = (_TiltEnabled >= 0.5f) ? _InstanceTilt[sIdx] : float4(0,0,0,1);
                 float3 posWS, nrmWS;
-                TransformInstance2(inst, posOS.xyz, normalOS, posWS, nrmWS);
+                TransformInstance2(inst, tiltQ, posOS.xyz, normalOS, posWS, nrmWS);
 
                 #if _CASTING_PUNCTUAL_LIGHT_SHADOW
                     float3 lightDir = normalize(_LightPosition - posWS);
@@ -459,16 +477,19 @@ Shader "GrassInteract/ScatterInstanced"
             StructuredBuffer<InstanceData>   _Instances;
             StructuredBuffer<uint>           _VisibleIndices;
             StructuredBuffer<SD_InteractorGpu> _Interactors;
+            StructuredBuffer<float4>         _InstanceTilt;
 
             float _ScaleMax2;
             float _OrientMode;
             float4 _RotationOffsetEuler;
             float _WindEnabled;
             float _InteractorsEnabled;
+            float _TiltEnabled;
             float _GrassTime; float2 _WindDir; float _WindStrength; float _WindFrequency;
             float _WindNoiseScale; float _BendStrength; int _InteractorCount;
 
             static const float SD_DEG_TO_RAD=0.01745329f,SD_TWO_PI=6.2831853f,SD_DPM=55.0f,SD_MAX_LEAN=80.0f;
+            float3 SD_RotateByQuat(float3 v,float4 q){float3 t=2.0f*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
 
             float3x3 SD_YawMat(float y){float a=y*SD_DEG_TO_RAD,sy=sin(a),cy=cos(a);return float3x3(cy,0,sy,0,1,0,-sy,0,cy);}
             float3x3 SD_EulMat(float p,float y,float r){p*=SD_DEG_TO_RAD;y*=SD_DEG_TO_RAD;r*=SD_DEG_TO_RAD;float sp=sin(p),cp=cos(p),sy=sin(y),cy=cos(y),sr=sin(r),cr=cos(r);return mul(float3x3(cy,0,sy,0,1,0,-sy,0,cy),mul(float3x3(1,0,0,0,cp,-sp,0,sp,cp),float3x3(cr,-sr,0,sr,cr,0,0,0,1)));}
@@ -476,7 +497,7 @@ Shader "GrassInteract/ScatterInstanced"
             float3x3 SD_AlignMat(float3 n){float3 up=float3(0,1,0);float3 ax=cross(up,n);float s=length(ax),c=dot(up,n);if(s<1e-6)return c>0?(float3x3)1:float3x3(1,0,0,0,-1,0,0,0,1);ax/=s;float t=1-c;return float3x3(t*ax.x*ax.x+c,t*ax.x*ax.y-s*ax.z,t*ax.x*ax.z+s*ax.y,t*ax.x*ax.y+s*ax.z,t*ax.y*ax.y+c,t*ax.y*ax.z-s*ax.x,t*ax.x*ax.z-s*ax.y,t*ax.y*ax.z+s*ax.x,t*ax.z*ax.z+c);}
             float3x3 SD_BaseRot3(InstanceData inst,float yaw){float3 oe=_RotationOffsetEuler.xyz;if(_OrientMode>=0.5f){uint s2=inst.lodHash;float ox=(float)((s2>>24)&0xFFu)/255.0f*2.0f-1.0f,oy=(float)((s2>>16)&0xFFu)/255.0f*2.0f-1.0f,pd=(float)((s2>>8)&0xFFu)/255.0f*180.0f-90.0f,rd=(float)(s2&0xFFu)/255.0f*180.0f-90.0f;return mul(SD_AlignMat(SD_OctDec(ox,oy)),mul(SD_EulMat(pd,yaw,rd),SD_EulMat(oe.x,oe.y,oe.z)));}return mul(SD_YawMat(yaw),SD_EulMat(oe.x,oe.y,oe.z));}
 
-            float3 TransformInstancePos3(InstanceData inst, float3 lp)
+            float3 TransformInstancePos3(InstanceData inst, float4 tiltQ, float3 lp)
             {
                 uint hi=(inst.packedYawScale>>16)&0xFFFFu,lo=inst.packedYawScale&0xFFFFu;
                 float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2;
@@ -491,7 +512,7 @@ Shader "GrassInteract/ScatterInstanced"
                     if(mg>SD_MAX_LEAN){float s=SD_MAX_LEAN/mg;pt*=s;rl*=s;}
                     rot=mul(SD_EulMat(pt,0,rl),baseRot);
                 } else {rot=baseRot;}
-                return inst.posWS+mul(rot,lp*scale);
+                return inst.posWS+SD_RotateByQuat(mul(rot,lp*scale),tiltQ);
             }
 
             struct DV { float4 positionCS : SV_POSITION; };
@@ -499,8 +520,10 @@ Shader "GrassInteract/ScatterInstanced"
             DV depthVert(float4 posOS : POSITION, uint iid : SV_InstanceID)
             {
                 DV o = (DV)0;
-                InstanceData inst = _Instances[_VisibleIndices[iid]];
-                o.positionCS = TransformWorldToHClip(TransformInstancePos3(inst, posOS.xyz));
+                uint dIdx = _VisibleIndices[iid];
+                InstanceData inst = _Instances[dIdx];
+                float4 tiltQ = (_TiltEnabled >= 0.5f) ? _InstanceTilt[dIdx] : float4(0,0,0,1);
+                o.positionCS = TransformWorldToHClip(TransformInstancePos3(inst, tiltQ, posOS.xyz));
                 return o;
             }
 

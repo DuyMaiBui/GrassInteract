@@ -1,6 +1,5 @@
 #nullable enable
 using System;
-using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -8,22 +7,17 @@ using UnityEngine.Rendering;
 namespace GrassInteract
 {
     /// <summary>
-    /// GPU-indirect engine for mesh-prop scatter layers (InteractsWithDeform == false).
-    /// Implements <see cref="IGrassEngine"/>; reuses <c>GrassCull.compute</c> UNCHANGED.
+    /// GPU-indirect engine for <see cref="InstanceScatterLayer"/> mesh props. Replaces the former
+    /// MeshScatterEngine: same chunked GPU frustum-cull + per-LOD indirect draw + pooled colliders,
+    /// PLUS an optional C#(Burst)-simulated whole-instance rigid tilt (<see cref="InstanceTiltSimulator"/>)
+    /// that leans props away from moving interactors and springs them back.
     ///
-    /// Engine route: ScatterField checks layer.InteractsWithDeform; when false it creates a
-    /// MeshScatterEngine using layer.Material (single material per layer; no per-instance renderer
-    /// overrides per Phase A D1 strict-V2).
-    ///
-    /// Build:
-    ///   scatter (via GrassScatter.Build + ISurfaceSampler) →
-    ///   ChunkedInstanceBuffer.Bake →
-    ///   per-LOD Material clones bound to per-LOD visible-index buffers →
-    ///   InitLodArgs from layer.LodMeshes.
-    ///
-    /// Per-instance colliders: delegated to InstanceColliderPool + InstanceFrustumCuller (Phase H).
+    /// The tilt is computed in C# (so recovery has real timed spring-back state), uploaded as a compact
+    /// per-instance quaternion buffer (<c>_InstanceTilt</c>), and applied rigidly about each instance pivot
+    /// in <c>ScatterInstanced.shader</c>. Base transforms stay static in the GPU instance buffer; only the
+    /// small tilt buffer uploads per frame.
     /// </summary>
-    internal sealed class MeshScatterEngine : IGrassEngine
+    internal sealed class InstancedPropEngine : IGrassEngine
     {
         // ── Constants ────────────────────────────────────────────────────────
         private const int ARGS_INSTANCE_COUNT_OFFSET = 4;
@@ -47,6 +41,8 @@ namespace GrassInteract
         private static readonly int ID_BendStrength          = Shader.PropertyToID("_BendStrength");
         private static readonly int ID_Flatten               = Shader.PropertyToID("_Flatten");
         private static readonly int ID_CamPosWS              = Shader.PropertyToID("_CamPosWS");
+        private static readonly int ID_InstanceTilt          = Shader.PropertyToID("_InstanceTilt");
+        private static readonly int ID_TiltEnabled           = Shader.PropertyToID("_TiltEnabled");
 
         // ── Injected ─────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -76,7 +72,6 @@ namespace GrassInteract
         private ChunkedInstanceBuffer? instanceBuffer;
 
         // ── Per-instance colliders (Play-mode only) ───────────────────────────
-
         private GameObject?            colliderRoot;
         private InstanceColliderPool?  colliderPool;
         private InstanceFrustumCuller? colliderCuller;
@@ -112,6 +107,10 @@ namespace GrassInteract
         private float   windSnapshotBendStrength;
         private float   windSnapshotFlatten;
 
+        // ── Rigid-tilt state ──────────────────────────────────────────────────
+        private InstanceTiltSimulator? tiltSim;
+        private bool tiltEnabled;
+
         // ── Per-frame state ───────────────────────────────────────────────────
         private Bounds worldBounds;
         private bool isBuilt;
@@ -125,10 +124,7 @@ namespace GrassInteract
 
         // ── Construction ──────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Constructs the engine with the shared GrassCull.compute and the ScatterInstanced material.
-        /// </summary>
-        public MeshScatterEngine(ComputeShader computeShader, Material material)
+        public InstancedPropEngine(ComputeShader computeShader, Material material)
         {
             this.computeShader = computeShader ?? throw new ArgumentNullException(nameof(computeShader));
             this.materialBase  = material      ?? throw new ArgumentNullException(nameof(material));
@@ -147,7 +143,7 @@ namespace GrassInteract
             GrassScatterResult scatter = GrassScatter.Build(layer, origin, pool, sampler);
             this.worldBounds = scatter.WorldBounds;
 
-            Bounds meshBounds = ComputeMeshBounds(layer.LodMeshes);
+            Bounds meshBounds = ComputeMeshBounds(layer.Render.LodMeshes);
 
             Vector2 effectiveBounds = sampler is TerrainSurfaceSampler tss
                 ? tss.TerrainSizeXZ
@@ -161,29 +157,45 @@ namespace GrassInteract
             // Phase-H: pooled + culled per-instance colliders.
             this.BuildColliderRuntime(layer);
 
+            // Rigid-tilt sim (InstanceScatterLayer only, when interactor-tilt is enabled). Reads the BAKED
+            // instance order from instanceBuffer.Instances so the tilt buffer index == _Instances index.
+            var instLayer = layer as InstanceScatterLayer;
+            this.tiltEnabled = instLayer != null && instLayer.Tilt.AffectedByInteractors;
+            if (this.tiltEnabled && instLayer != null)
+            {
+                this.tiltSim = new InstanceTiltSimulator(this.instanceBuffer, instLayer);
+                if (instLayer.Tilt.ColliderFollowsTilt)
+                    Debug.LogWarning(
+                        $"[InstancedPropEngine] Layer '{layer.name}': colliderFollowsTilt=true is not yet " +
+                        "wired — colliders stay at their base orientation.");
+            }
+
             GrassScatter.ReturnSlabs(scatter, pool);
 
-            Mesh[] meshes = layer.LodMeshes;
+            Mesh[] meshes = layer.Render.LodMeshes;
             if (meshes.Length == 0)
                 Debug.LogWarning(
-                    $"[MeshScatterEngine] Layer '{layer.name}' has no LOD meshes. No props will render.");
+                    $"[InstancedPropEngine] Layer '{layer.name}' has no LOD meshes. No props will render.");
 
             this.mesh0 = meshes.Length > 0 ? meshes[0] : null;
             this.mesh1 = meshes.Length > 1 ? meshes[1] : null;
             this.mesh2 = meshes.Length > 2 ? meshes[2] : null;
 
-            float[] dists = layer.LodMaxDistances;
+            float[] dists = layer.Render.LodMaxDistances;
             float d0 = dists.Length > 0 ? dists[0] : 12f;
             float d1 = dists.Length > 1 ? dists[1] : 30f;
             this.lod0MaxSqrDist = d0 * d0;
             this.lod1MaxSqrDist = d1 * d1;
-            // Editor: generous distance so SceneView zoom-out doesn't hide everything.
-            // Play: 500 m minimum coarse cull beyond the last LOD boundary.
             float minCullSqr = Application.isPlaying ? 250000f : 1e8f;
             this.maxSqrDistance = Mathf.Max(this.lod1MaxSqrDist * 4f, minCullSqr);
 
             float bakedScaleMax = this.instanceBuffer.ScaleMax;
-            this.bladeCullMargin = Mathf.Max(0f, meshBounds.extents.magnitude * bakedScaleMax);
+            // Expand the per-instance cull margin by the max-tilt sweep so a tilted prop never pops.
+            float tiltSweep = (this.tiltEnabled && instLayer != null)
+                ? Mathf.Sin(Mathf.Deg2Rad * instLayer.Tilt.MaxTiltAngle)
+                : 0f;
+            this.bladeCullMargin = Mathf.Max(0f,
+                meshBounds.extents.magnitude * bakedScaleMax * (1f + tiltSweep));
 
             int chunkCap = Mathf.Max(1, this.instanceBuffer.TotalChunks);
             int instCap  = Mathf.Max(1, this.instanceBuffer.TotalInstances);
@@ -219,8 +231,13 @@ namespace GrassInteract
             this.lodMat1.SetVector(ID_RotationOffsetEuler, new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f));
             this.lodMat2.SetVector(ID_RotationOffsetEuler, new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f));
 
-            this.affectedByWind        = layer.AffectedByWind;
-            this.affectedByInteractors = layer.AffectedByInteractors;
+            float tiltFlag = this.tiltEnabled ? 1f : 0f;
+            this.lodMat0.SetFloat(ID_TiltEnabled, tiltFlag);
+            this.lodMat1.SetFloat(ID_TiltEnabled, tiltFlag);
+            this.lodMat2.SetFloat(ID_TiltEnabled, tiltFlag);
+
+            this.affectedByWind        = layer.Deform.AffectedByWind;
+            this.affectedByInteractors = layer.Deform.AffectedByInteractors;
             this.interactsWithDeform   = this.affectedByWind || this.affectedByInteractors;
             float windFlag        = this.affectedByWind        ? 1f : 0f;
             float interactorsFlag = this.affectedByInteractors ? 1f : 0f;
@@ -238,19 +255,22 @@ namespace GrassInteract
             }
             this.deformTime = 0f;
 
-            Vector2 rawDir = layer.WindDirection;
+            Vector2 rawDir = layer.Wind.WindDirection;
             this.windSnapshotDir          = rawDir.sqrMagnitude > 1e-8f ? rawDir.normalized : Vector2.right;
-            this.windSnapshotStrength     = layer.WindStrength;
-            this.windSnapshotFrequency    = layer.WindFrequency;
-            this.windSnapshotNoiseScale   = layer.WindNoiseScale;
-            this.windSnapshotBendStrength = layer.BendStrength;
-            this.windSnapshotFlatten      = layer.Flatten;
+            this.windSnapshotStrength     = layer.Wind.WindStrength;
+            this.windSnapshotFrequency    = layer.Wind.WindFrequency;
+            this.windSnapshotNoiseScale   = layer.Wind.WindNoiseScale;
+            this.windSnapshotBendStrength = layer.Deform.BendStrength;
+            this.windSnapshotFlatten      = layer.Deform.Flatten;
 
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
             Shader.SetGlobalFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
 
-            this.cullCmd = new CommandBuffer { name = "MeshScatterEngine.Cull" };
+            if (this.tiltSim?.TiltBuffer != null)
+                Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
+
+            this.cullCmd = new CommandBuffer { name = "InstancedPropEngine.Cull" };
             this.isBuilt = true;
         }
 
@@ -260,6 +280,7 @@ namespace GrassInteract
         {
             if (this.affectedByWind)
                 this.deformTime += dt;
+            this.tiltSim?.Step(dt);
         }
 
         // ── IGrassEngine : Submit ─────────────────────────────────────────────
@@ -300,6 +321,9 @@ namespace GrassInteract
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
             Shader.SetGlobalFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
+
+            if (this.tiltSim?.TiltBuffer != null)
+                Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
 
             if (this.affectedByWind)
             {
@@ -355,8 +379,9 @@ namespace GrassInteract
             this.interactsWithDeform = false;
             this.deformTime = 0f;
 
-            // Tear down the pooled collider runtime (pool.Dispose destroys child GOs;
-            // then we destroy the root, culler, and pool components in one pass).
+            this.tiltSim?.Dispose(); this.tiltSim = null;
+            this.tiltEnabled = false;
+
             this.colliderPool?.Dispose();
             this.colliderPool  = null;
             this.colliderCuller = null; // component lives on colliderRoot — destroyed below
@@ -370,9 +395,6 @@ namespace GrassInteract
         }
 
         // ── Per-instance colliders (Play-mode only) ───────────────────────────
-        // Phase-H: replaced inline GameObject spawn with InstanceColliderPool + InstanceFrustumCuller.
-        // If layer.PoolColliders == false the pool is still used (without culler) to spawn all
-        // colliders immediately at build time via Prewarm + unconditional Acquire per record.
 
         private void BuildColliderRuntime(ScatterLayer layer)
         {
@@ -383,8 +405,7 @@ namespace GrassInteract
             var authored = instLayer.AuthoredInstances;
             if (authored == null) return;
 
-            // Resolve the layer-level fallback mesh.
-            Mesh[] lodMeshes       = instLayer.LodMeshes;
+            Mesh[] lodMeshes       = instLayer.Render.LodMeshes;
             Mesh? layerDefaultMesh = instLayer.DefaultColliderMesh != null
                 ? instLayer.DefaultColliderMesh
                 : (lodMeshes.Length > 0 ? lodMeshes[0] : null);
@@ -392,16 +413,13 @@ namespace GrassInteract
             NativeArray<InstanceRecord> records = authored.GetRuntimeRecords();
             if (records.Length == 0) return;
 
-            // Create the shared root GameObject that hosts the pool (and optionally the culler).
             this.colliderRoot = new GameObject("ScatterColliderPool");
             Transform rootT   = this.colliderRoot.transform;
 
-            // Create and init the pool MonoBehaviour.
             this.colliderPool = this.colliderRoot.AddComponent<InstanceColliderPool>();
             this.colliderPool.Init(instLayer.PoolCap, layerDefaultMesh, instLayer.DefaultColliderConvex);
             this.colliderPool.Prewarm(Mathf.Min(records.Length, instLayer.PoolCap));
 
-            // Build parallel snapshot arrays for the culler (or for direct Acquire below).
             int count           = records.Length;
             var positions       = new Vector3[count];
             var rotations       = new Quaternion[count];
@@ -414,7 +432,6 @@ namespace GrassInteract
             {
                 InstanceRecord rec = records[i];
 
-                // Resolve per-record collider mesh (override > layer default).
                 Mesh? colMesh = null;
                 if ((rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0 &&
                     rec.colliderMeshRefIndex >= 0)
@@ -426,7 +443,7 @@ namespace GrassInteract
                 if (rec.generateCollider && colMesh == null)
                 {
                     Debug.LogWarning(
-                        $"[MeshScatterEngine] Record {i}: generateCollider=true but no collider mesh " +
+                        $"[InstancedPropEngine] Record {i}: generateCollider=true but no collider mesh " +
                         "available (no per-record override, no layer default, no lod0 mesh) — skipping.");
                 }
 
@@ -440,17 +457,15 @@ namespace GrassInteract
 
             if (instLayer.CullColliders)
             {
-                // Frustum-culler path: activates/deactivates colliders per frame based on distance + visibility.
                 this.colliderCuller = rootT.gameObject.AddComponent<InstanceFrustumCuller>();
                 this.colliderCuller.Init(null /* Camera.main at runtime */, instLayer.CullDistance, this.colliderPool);
                 this.colliderCuller.SetRecords(positions, rotations, scales, meshes, convexFlags, wantsCollider);
                 Debug.Log(
-                    $"[MeshScatterEngine] Collider runtime: pool cap={instLayer.PoolCap}, " +
+                    $"[InstancedPropEngine] Collider runtime: pool cap={instLayer.PoolCap}, " +
                     $"cullDist={instLayer.CullDistance}m, records={count}.");
             }
             else
             {
-                // No-cull path: acquire all colliders immediately (up to PoolCap).
                 int acquired = 0;
                 for (int i = 0; i < count; ++i)
                 {
@@ -460,7 +475,7 @@ namespace GrassInteract
                     if (mc != null) acquired++;
                 }
                 Debug.Log(
-                    $"[MeshScatterEngine] Collider runtime (no cull): acquired {acquired}/{count} colliders.");
+                    $"[InstancedPropEngine] Collider runtime (no cull): acquired {acquired}/{count} colliders.");
             }
         }
 
@@ -550,7 +565,7 @@ namespace GrassInteract
             {
                 if (buf == null) continue;
                 if (mesh != null && mesh.GetIndexCount(0) == 0)
-                    Debug.LogError($"[MeshScatterEngine] LOD{idx} mesh '{mesh.name}' has 0 indices.");
+                    Debug.LogError($"[InstancedPropEngine] LOD{idx} mesh '{mesh.name}' has 0 indices.");
 
                 var args = new GraphicsBuffer.IndirectDrawIndexedArgs[1];
                 args[0].indexCountPerInstance = (mesh != null) ? mesh.GetIndexCount(0) : 0;

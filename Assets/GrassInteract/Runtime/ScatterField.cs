@@ -161,7 +161,7 @@ namespace GrassInteract
             else
             {
                 LayerMask mask = ctx.Layers.Count > 0 && ctx.Layers[0] != null
-                    ? ctx.Layers[0].GroundSnapMask
+                    ? ctx.Layers[0].Placement.GroundSnapMask
                     : ~0;
                 ctx.Sampler = new RaycastSurfaceSampler(mask, this.transform.position.y);
                 ctx.Origin  = this.transform.position;
@@ -226,18 +226,18 @@ namespace GrassInteract
                         continue;
                     }
 
-                    // Engine route: InteractsWithDeform=false → MeshScatterEngine (mesh-prop pipeline).
-                    if (!layer.InteractsWithDeform)
+                    // Engine route: InstanceScatterLayer → InstancedPropEngine (instanced-prop pipeline).
+                    if (layer is InstanceScatterLayer instanceLayer)
                     {
-                        IGrassEngine? meshEngine = this.TryBuildMeshEngine(
-                            i, layer, ctx.Origin, ctx.Sampler, ctx.CullCompute);
-                        this.engines.Add(meshEngine);
-                        if (meshEngine != null)
-                            Debug.Log($"[{nameof(ScatterField)}] Layer [{i}] '{layer.name}' InteractsWithDeform=false → MeshScatterEngine.", this);
+                        IGrassEngine? propEngine = this.TryBuildInstancedPropEngine(
+                            i, instanceLayer, ctx.Origin, ctx.Sampler, ctx.CullCompute);
+                        this.engines.Add(propEngine);
+                        if (propEngine != null)
+                            Debug.Log($"[{nameof(ScatterField)}] Layer [{i}] '{instanceLayer.name}' is InstanceScatterLayer → InstancedPropEngine.", this);
                         continue;
                     }
 
-                    // Grass pipeline (InteractsWithDeform=true).
+                    // Density/grass pipeline — falls through to tier selection (SelectAndBuildEngine).
                     if (!layer.Validate(out string error))
                     {
                         Debug.LogError($"[{nameof(ScatterField)}] Layer [{i}] '{layer.name}' invalid: {error}", this);
@@ -291,12 +291,12 @@ namespace GrassInteract
                 ScatterLayer? layer = ctx.Layers[idx];
                 if (layer == null) return;
 
-                // Engine route: InteractsWithDeform=false → MeshScatterEngine.
-                if (!layer.InteractsWithDeform)
+                // Engine route: InstanceScatterLayer → InstancedPropEngine.
+                if (layer is InstanceScatterLayer instanceLayer)
                 {
-                    this.engines[idx] = this.TryBuildMeshEngine(idx, layer, ctx.Origin, ctx.Sampler, ctx.CullCompute);
+                    this.engines[idx] = this.TryBuildInstancedPropEngine(idx, instanceLayer, ctx.Origin, ctx.Sampler, ctx.CullCompute);
                     if (this.engines[idx] != null)
-                        Debug.Log($"[{nameof(ScatterField)}] RebuildLayer [{idx}] '{layer.name}' InteractsWithDeform=false → MeshScatterEngine.", this);
+                        Debug.Log($"[{nameof(ScatterField)}] RebuildLayer [{idx}] '{instanceLayer.name}' is InstanceScatterLayer → InstancedPropEngine.", this);
                     return;
                 }
 
@@ -409,16 +409,16 @@ namespace GrassInteract
             }
         }
 
-        // ── Mesh-kind engine builder ──────────────────────────────────────────
+        // ── Instanced-prop engine builder ─────────────────────────────────────
 
         /// <summary>
-        /// Builds a <see cref="MeshScatterEngine"/> for a layer with InteractsWithDeform=false.
+        /// Builds an <see cref="InstancedPropEngine"/> for an <see cref="InstanceScatterLayer"/>.
         /// Returns null (logged) if <paramref name="activeCullCompute"/> is null or the layer's
         /// mesh/material fields are missing.
         /// </summary>
-        private IGrassEngine? TryBuildMeshEngine(
+        private IGrassEngine? TryBuildInstancedPropEngine(
             int layerIndex,
-            ScatterLayer layer,
+            InstanceScatterLayer layer,
             Vector3 buildOrigin,
             ISurfaceSampler sampler,
             ComputeShader? activeCullCompute)
@@ -426,7 +426,7 @@ namespace GrassInteract
             if (activeCullCompute == null)
             {
                 Debug.LogError(
-                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop): " +
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (instanced-prop): " +
                     "cullCompute is not assigned. Assign GrassCull.compute in the TerrainScatterConfig. Skipping.", this);
                 return null;
             }
@@ -434,37 +434,37 @@ namespace GrassInteract
             if (!layer.Validate(out string error))
             {
                 Debug.LogError(
-                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop) invalid: {error}", this);
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (instanced-prop) invalid: {error}", this);
                 return null;
             }
 
-            if (layer.LodMeshes.Length == 0)
+            if (layer.Render.LodMeshes.Length == 0)
             {
                 Debug.LogError(
-                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop): " +
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (instanced-prop): " +
                     "LodMeshes is empty. Assign at least one LOD mesh in the layer's lods array.", this);
                 return null;
             }
 
-            Material? mat = layer.Material;
+            Material? mat = layer.Render.Material;
             if (mat == null)
             {
                 Debug.LogError(
-                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop): " +
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (instanced-prop): " +
                     "Material is not assigned. Assign a material using the ScatterInstanced shader.", this);
                 return null;
             }
 
             try
             {
-                var engine = new MeshScatterEngine(activeCullCompute, mat);
+                var engine = new InstancedPropEngine(activeCullCompute, mat);
                 engine.Build(layer, buildOrigin, this.pool!, sampler);
                 return engine;
             }
             catch (System.Exception ex)
             {
                 Debug.LogWarning(
-                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (mesh-prop) " +
+                    $"[{nameof(ScatterField)}] Layer [{layerIndex}] '{layer.name}' (instanced-prop) " +
                     $"engine threw {ex.GetType().Name}: {ex.Message}", this);
                 return null;
             }

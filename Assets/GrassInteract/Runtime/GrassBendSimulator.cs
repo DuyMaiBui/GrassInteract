@@ -65,15 +65,18 @@ namespace GrassInteract
             this.basePositionSlabs = scatter.BasePositionSlabs;
             this.slabCounts = scatter.SlabCounts;
 
-            Vector2 dir = layer.WindDirection;
-            this.windDir = dir.sqrMagnitude > 1e-8f ? dir.normalized : Vector2.right;
-            this.windStrength = layer.WindStrength;
-            this.windFrequency = layer.WindFrequency;
-            this.bendStrength = layer.BendStrength;
-            this.flatten = layer.Flatten;
-            this.recoveryRate = layer.RecoveryRate;
+            var wind = layer.Wind;
+            var deform = layer.Deform;
 
-            float windNoiseScale = layer.WindNoiseScale;
+            Vector2 dir = wind.WindDirection;
+            this.windDir = dir.sqrMagnitude > 1e-8f ? dir.normalized : Vector2.right;
+            this.windStrength = wind.WindStrength;
+            this.windFrequency = wind.WindFrequency;
+            this.bendStrength = deform.BendStrength;
+            this.flatten = deform.Flatten;
+            this.recoveryRate = deform.RecoveryRate;
+
+            float windNoiseScale = wind.WindNoiseScale;
 
             int slabs = this.baseSlabs.Length;
             this.baseYaw = new Quaternion[slabs][];

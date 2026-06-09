@@ -6,101 +6,107 @@ namespace GrassInteract
 {
     /// <summary>
     /// ScatterLayer variant that drives placement from a density map via procedural RNG scatter.
-    /// One of two concrete placement subclasses; the other is <see cref="InstanceScatterLayer"/>.
+    /// One of two concrete placement types; the other is <see cref="InstanceScatterLayer"/>.
     ///
-    /// Holds density-specific serialized fields: <see cref="densityMap"/> and <see cref="targetInstances"/>.
-    /// All procedural placement fields (fieldBounds, seed, scaleRange, slope, splat, orientation)
-    /// also live here — InstanceScatterLayer does not use procedural placement.
-    ///
-    /// FormerlySerializedAs shims ensure pre-Phase-A assets that stored these fields on the base
-    /// ScatterLayer continue to resolve correctly.
+    /// This type COMPOSES its shared configuration as embedded <see cref="System.Serializable"/> structs
+    /// (<see cref="ScatterRenderConfig"/>, <see cref="ScatterWindConfig"/>, <see cref="ScatterDeformConfig"/>,
+    /// <see cref="ScatterBoundsConfig"/>, <see cref="ScatterPlacementConfig"/>) — each struct is the single
+    /// source of truth for its fields. No shared state with <see cref="InstanceScatterLayer"/> beyond the
+    /// thin <see cref="ScatterLayer"/> serialization marker.
     /// </summary>
-    public sealed class DensityScatterLayer : ScatterLayer
+    public sealed class DensityScatterLayer : ScatterLayer, IDensityPlacementSource
     {
-        // ── Density ───────────────────────────────────────────────────────────
+        // ── Composed shared config (embedded structs = SSOT) ───────────────────
+
+        [SerializeField] private ScatterRenderConfig    render;
+        [SerializeField] private ScatterWindConfig      wind;
+        [SerializeField] private ScatterDeformConfig    deform;
+        [SerializeField] private ScatterBoundsConfig    bounds;
+        [SerializeField] private ScatterPlacementConfig placement;
+
+        // ── Density-specific fields ────────────────────────────────────────────
 
         [Tooltip("Readable, uncompressed R8 density map. White = full density, black = no instances.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("densityMap")]
         [SerializeField] private Texture2D? densityMap;
 
         [Min(1)]
-        [Tooltip("Candidate instances scattered across the field. Each is KEPT with probability = density at its position.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("targetInstances")]
+        [Tooltip("Candidate instances scattered across the field.")]
         [SerializeField] private int targetInstances = 50000;
 
-        // ── Placement fields (moved from ScatterLayer base in Phase A) ────────
+        // ── Procedural placement fields ────────────────────────────────────────
 
-        [Tooltip("World-space XZ size of the field, centered on the ScatterField transform.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("fieldBounds")]
+        [Tooltip("World-space XZ size of the field.")]
         [SerializeField] private Vector2 fieldBounds = new Vector2(100f, 100f);
 
-        [UnityEngine.Serialization.FormerlySerializedAs("scaleRange")]
         [SerializeField] private Vector2 scaleRange = new Vector2(0.8f, 1.2f);
 
-        [UnityEngine.Serialization.FormerlySerializedAs("seed")]
         [SerializeField] private int seed = 0;
 
-        [Tooltip("Placement is allowed only when the ground slope (deg) is within [x, y]. Default (0, 90) = no filter.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("slopeRange")]
+        [Tooltip("Placement is allowed only when the ground slope (deg) is within [x, y].")]
         [SerializeField] private Vector2 slopeRange = new Vector2(0f, 90f);
 
         [Tooltip("Terrain alphamap layer index to use as placement mask (-1 = off).")]
-        [UnityEngine.Serialization.FormerlySerializedAs("splatLayerIndex")]
         [SerializeField] private int splatLayerIndex = -1;
 
         [Range(0f, 1f)]
         [Tooltip("Minimum splat weight required for placement when splatLayerIndex >= 0.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("splatThreshold")]
         [SerializeField] private float splatThreshold = 0.5f;
 
-        // ── Orientation fields (moved from ScatterLayer base in Phase A) ──────
+        // ── Orientation fields ─────────────────────────────────────────────────
 
-        [Tooltip("Per-layer uniform rotation offset applied to every instance after yaw and optional pitch/roll.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("rotationOffsetEuler")]
+        [Tooltip("Per-layer uniform rotation offset applied to every instance.")]
         [SerializeField] private Vector3 rotationOffsetEuler = Vector3.zero;
 
-        [Tooltip("Per-instance random pitch (X-axis) range in degrees. (0,0) = no random pitch.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("randomPitchRange")]
+        [Tooltip("Per-instance random pitch (X-axis) range in degrees.")]
         [SerializeField] private Vector2 randomPitchRange = Vector2.zero;
 
-        [Tooltip("Per-instance random roll (Z-axis) range in degrees. (0,0) = no random roll.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("randomRollRange")]
+        [Tooltip("Per-instance random roll (Z-axis) range in degrees.")]
         [SerializeField] private Vector2 randomRollRange = Vector2.zero;
 
         [Tooltip("Align instance up-axis to terrain/surface normal.")]
-        [UnityEngine.Serialization.FormerlySerializedAs("alignToNormal")]
         [SerializeField] private bool alignToNormal = false;
 
-        // ── Accessors ─────────────────────────────────────────────────────────
+        // ── Config struct accessors ────────────────────────────────────────────
 
-        public override Texture2D? DensityMap  => this.densityMap;
-        public int TargetInstances             => this.targetInstances;
+        public override ScatterRenderConfig    Render    => this.render;
+        public override ScatterWindConfig      Wind      => this.wind;
+        public override ScatterDeformConfig    Deform    => this.deform;
+        public override ScatterBoundsConfig    Bounds    => this.bounds;
+        public override ScatterPlacementConfig Placement => this.placement;
 
-        public override Vector2 FieldBounds         => this.fieldBounds;
-        public override Vector2 ScaleRange          => this.scaleRange;
-        public override int     Seed                => this.seed;
-        public override Vector2 SlopeRange          => this.slopeRange;
-        public override int     SplatLayerIndex     => this.splatLayerIndex;
-        public override float   SplatThreshold      => this.splatThreshold;
+        // ── Abstract placement data accessors ──────────────────────────────────
+
+        public override Vector2 FieldBounds => this.fieldBounds;
+        public override Vector2 ScaleRange => this.scaleRange;
         public override Vector3 RotationOffsetEuler => this.rotationOffsetEuler;
-        public override Vector2 RandomPitchRange    => this.randomPitchRange;
-        public override Vector2 RandomRollRange     => this.randomRollRange;
-        public override bool    AlignToNormal       => this.alignToNormal;
 
-        /// <summary>
-        /// True when per-instance oriented packing is needed in the GPU buffers.
-        /// Activated by AlignToNormal or non-zero pitch/roll ranges.
-        /// </summary>
         public override bool IsOriented =>
             this.alignToNormal
             || this.randomPitchRange != Vector2.zero
-            || this.randomRollRange  != Vector2.zero;
+            || this.randomRollRange != Vector2.zero;
 
-        // ── IScatterPlacement ─────────────────────────────────────────────────
+        // ── IDensityPlacementSource ────────────────────────────────────────────
+
+        public Texture2D? DensityMap => this.densityMap;
+        public int TargetInstances => this.targetInstances;
+        public int Seed => this.seed;
+        public Vector2 SlopeRange => this.slopeRange;
+        public int SplatLayerIndex => this.splatLayerIndex;
+        public float SplatThreshold => this.splatThreshold;
+        public Vector2 RandomPitchRange => this.randomPitchRange;
+        public Vector2 RandomRollRange => this.randomRollRange;
+        public bool AlignToNormal => this.alignToNormal;
+
+        // ── Bounds (IDensityPlacementSource — delegate to the embedded struct) ──
+
+        public float MaxBladeHeight => this.bounds.MaxBladeHeight;
+        public float BendHeadroom => this.bounds.BendHeadroom;
+
+        // ── IScatterPlacement factory ──────────────────────────────────────────
 
         public override IScatterPlacement CreatePlacement() => new DensityPlacement(this);
 
-        // ── Validation ────────────────────────────────────────────────────────
+        // ── Validation ─────────────────────────────────────────────────────────
 
         public override bool Validate(out string error)
         {
@@ -113,6 +119,16 @@ namespace GrassInteract
             if (GraphicsFormatUtility.IsCompressedFormat(this.densityMap.graphicsFormat))
             {
                 error = $"DensityMap '{this.densityMap.name}' is compressed. Use uncompressed single-channel format (R8).";
+                return false;
+            }
+            if (this.scaleRange.x <= 0f || this.scaleRange.y < this.scaleRange.x)
+            {
+                error = $"ScaleRange ({this.scaleRange}) must be positive and non-decreasing.";
+                return false;
+            }
+            if (this.fieldBounds.x <= 0f || this.fieldBounds.y <= 0f)
+            {
+                error = $"FieldBounds ({this.fieldBounds}) must be positive.";
                 return false;
             }
             return base.Validate(out error);

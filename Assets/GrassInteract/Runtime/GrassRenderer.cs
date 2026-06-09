@@ -9,7 +9,7 @@ namespace GrassInteract
     /// every instancing slab via <see cref="Graphics.RenderMeshInstanced"/> under one field-wide bounds.
     ///
     /// LOD meshes/distances, material, shadow mode, and wind parameters all live on the
-    /// <see cref="ScatterLayer"/> (SSOT, post-refactor).
+    /// <see cref="ScatterLayer"/> config structs (SSOT, post-refactor).
     ///
     /// CRITICAL — call site differs by mode (<see cref="ScatterField"/> owns this):
     /// • PLAY: drive from the player loop (<c>MonoBehaviour.LateUpdate</c>) with <paramref name="targetCamera"/>
@@ -28,7 +28,7 @@ namespace GrassInteract
     /// means no off-screen frustum culling — accepted for a contained field.
     ///
     /// 0-LOD graceful handling: when the layer has no LOD meshes the renderer logs a warning at build time
-    /// and skips the draw each frame without throwing. The main loop must populate layer.Lods before testing.
+    /// and skips the draw each frame without throwing. The main loop must populate layer.Render.Lods before testing.
     /// </summary>
     public sealed class GrassRenderer
     {
@@ -46,8 +46,9 @@ namespace GrassInteract
         public GrassRenderer(ScatterLayer layer, Vector3 origin)
         {
             // Snapshot LOD data from the layer (SSOT: all render params live on the layer).
-            Mesh[] meshes = layer.LodMeshes;
-            float[] dists = layer.LodMaxDistances;
+            var render = layer.Render;
+            Mesh[] meshes = render.LodMeshes;
+            float[] dists = render.LodMaxDistances;
 
             this.hasLods = meshes.Length > 0;
 
@@ -65,13 +66,13 @@ namespace GrassInteract
                 this.lodMaxSqrDistances[i] = dists[i] * dists[i];
 
             this.lodMeshes = (Mesh[])meshes.Clone();
-            this.grassMaterial = layer.Material;
+            this.grassMaterial = render.Material;
 
             if (this.grassMaterial != null)
             {
                 this.renderParams = new RenderParams(this.grassMaterial)
                 {
-                    shadowCastingMode = layer.ShadowCastingMode,
+                    shadowCastingMode = render.ShadowCastingMode,
                     receiveShadows = false,
                     layer = 0,
                     camera = null, // render in ALL cameras (game + scene view) — see class summary

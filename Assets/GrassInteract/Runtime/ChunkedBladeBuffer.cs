@@ -174,7 +174,7 @@ namespace GrassInteract
             // Release any prior buffers.
             this.Dispose();
 
-            int cellSize = chunkSizeOverride > 0 ? chunkSizeOverride : layer.ChunkSize;
+            int cellSize = chunkSizeOverride > 0 ? chunkSizeOverride : layer.Bounds.ChunkSize;
             if (cellSize < 1) cellSize = 1;
 
             // Field min corner — SSOT: GrassFieldSpace uses this identical formula.
@@ -201,8 +201,8 @@ namespace GrassInteract
             float encodeScaleScale = 65535f / this.scaleMax2;
 
             // Headroom — mirror GrassScatter.BuildFieldBounds EXACTLY for AABB parity.
-            float bladeReachY = layer.MaxBladeHeight * maxScale + layer.BendHeadroom;
-            float lateralPad  = maxScale + layer.BendHeadroom;
+            float bladeReachY = layer.Bounds.MaxBladeHeight * maxScale + layer.Bounds.BendHeadroom;
+            float lateralPad  = maxScale + layer.Bounds.BendHeadroom;
 
             // ── Step 1: count blades per cell (counting sort, pass 1) ────────
             int[] cellCounts = new int[totalChunks];

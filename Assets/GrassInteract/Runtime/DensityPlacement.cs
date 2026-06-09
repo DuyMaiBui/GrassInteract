@@ -10,50 +10,50 @@ namespace GrassInteract
     /// </summary>
     internal sealed class DensityPlacement : IScatterPlacement
     {
-        private readonly DensityScatterLayer layer;
+        private readonly IDensityPlacementSource source;
 
-        public DensityPlacement(DensityScatterLayer layer)
+        public DensityPlacement(IDensityPlacementSource source)
         {
-            this.layer = layer;
+            this.source = source;
         }
 
         public GrassScatterResult Build(Vector3 origin, InstanceBatchPool pool, ISurfaceSampler sampler)
         {
-            Texture2D densityMap = this.layer.DensityMap!;    // caller validated readable + uncompressed
+            Texture2D densityMap = this.source.DensityMap!;    // caller validated readable + uncompressed
 
             // Terrain-driven bounds: when a terrain is bound, the field rect = the terrain's XZ size
             // (origin is the terrain center, set by ScatterField). The layer's manual FieldBounds is the
             // fallback for non-terrain (raycast) fields only.
-            Vector2 bounds = sampler is TerrainSurfaceSampler tss ? tss.TerrainSizeXZ : this.layer.FieldBounds;
+            Vector2 bounds = sampler is TerrainSurfaceSampler tss ? tss.TerrainSizeXZ : this.source.FieldBounds;
 
             // Flat draw-order accumulation (no spatial buckets) + tracked min/max snapped Y for a cull-safe AABB.
-            var matrices  = new List<Matrix4x4>(this.layer.TargetInstances);
-            var positions = new List<Vector3>(this.layer.TargetInstances);
-            var normals   = new List<Vector3>(this.layer.TargetInstances);
+            var matrices  = new List<Matrix4x4>(this.source.TargetInstances);
+            var positions = new List<Vector3>(this.source.TargetInstances);
+            var normals   = new List<Vector3>(this.source.TargetInstances);
             float minY = float.PositiveInfinity;
             float maxY = float.NegativeInfinity;
 
-            var rng = new System.Random(this.layer.Seed);
+            var rng = new System.Random(this.source.Seed);
             var space = new GrassFieldSpace(origin, bounds); // SAME rect placement keys off
             float halfX    = bounds.x * 0.5f;
             float halfZ    = bounds.y * 0.5f;
-            float minScale = this.layer.ScaleRange.x;
-            float maxScale = this.layer.ScaleRange.y;
+            float minScale = this.source.ScaleRange.x;
+            float maxScale = this.source.ScaleRange.y;
 
             // Phase 4: orientation parameters.
-            Vector2 slopeRange          = this.layer.SlopeRange;
-            int     splatLayerIndex     = this.layer.SplatLayerIndex;
-            float   splatThreshold      = this.layer.SplatThreshold;
-            Vector2 pitchRange          = this.layer.RandomPitchRange;
-            Vector2 rollRange           = this.layer.RandomRollRange;
-            bool    alignToNormal       = this.layer.AlignToNormal;
-            Quaternion rotationOffset   = Quaternion.Euler(this.layer.RotationOffsetEuler);
+            Vector2 slopeRange          = this.source.SlopeRange;
+            int     splatLayerIndex     = this.source.SplatLayerIndex;
+            float   splatThreshold      = this.source.SplatThreshold;
+            Vector2 pitchRange          = this.source.RandomPitchRange;
+            Vector2 rollRange           = this.source.RandomRollRange;
+            bool    alignToNormal       = this.source.AlignToNormal;
+            Quaternion rotationOffset   = Quaternion.Euler(this.source.RotationOffsetEuler);
             bool    hasPitchRange       = pitchRange.x != pitchRange.y;
             bool    hasRollRange        = rollRange.x  != rollRange.y;
 
             bool warnedNoHit = false;
 
-            for (int i = 0; i < this.layer.TargetInstances; ++i)
+            for (int i = 0; i < this.source.TargetInstances; ++i)
             {
                 // ── Fixed rng draw order (localX, localZ, accept[, yaw, scale]) keeps placement byte-stable
                 // vs the prior spatial-chunk scatter. Phase 4 appends pitch/roll draws AFTER the existing
@@ -170,7 +170,7 @@ namespace GrassInteract
                 slabCounts[b]    = count;
             }
 
-            Bounds worldBounds = BuildFieldBounds(this.layer, origin, bounds, halfX, halfZ, maxScale, minY, maxY);
+            Bounds worldBounds = BuildFieldBounds(this.source, origin, bounds, halfX, halfZ, maxScale, minY, maxY);
             return new GrassScatterResult(baseSlabs, slabCounts, positionSlabs, normalSlabs, total, worldBounds);
         }
 
@@ -181,11 +181,11 @@ namespace GrassInteract
         /// Mirrors <c>GrassScatter.BuildFieldBounds</c> — kept internal so R5 can unify when BuildFieldBounds
         /// is promoted to internal static.
         /// </summary>
-        private static Bounds BuildFieldBounds(ScatterLayer layer, Vector3 origin, Vector2 bounds,
+        private static Bounds BuildFieldBounds(IDensityPlacementSource source, Vector3 origin, Vector2 bounds,
             float halfX, float halfZ, float maxScale, float minY, float maxY)
         {
-            float maxBladeHeight = layer.MaxBladeHeight;
-            float bendHeadroom   = layer.BendHeadroom;
+            float maxBladeHeight = source.MaxBladeHeight;
+            float bendHeadroom   = source.BendHeadroom;
             float bladeReachY = maxBladeHeight * maxScale + bendHeadroom;
             float lateralPad = maxScale + bendHeadroom;
 

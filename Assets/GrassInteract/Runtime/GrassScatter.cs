@@ -77,8 +77,8 @@ namespace GrassInteract
             // Cull headroom from the layer's own MaxBladeHeight + BendHeadroom (SSOT — all render
             // parameters live on ScatterLayer post-refactor). MeshScatterEngine derives its own cull
             // headroom from mesh bounds and does not rely on these for Mesh-kind layers.
-            float maxBladeHeight = layer.MaxBladeHeight;
-            float bendHeadroom   = layer.BendHeadroom;
+            float maxBladeHeight = layer.Bounds.MaxBladeHeight;
+            float bendHeadroom   = layer.Bounds.BendHeadroom;
             float bladeReachY = maxBladeHeight * maxScale + bendHeadroom;
             float lateralPad = maxScale + bendHeadroom;
 

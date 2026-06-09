@@ -179,25 +179,29 @@ namespace GrassInteract
             // Return the scatter slabs now — the GPU path doesn't need them again.
             GrassScatter.ReturnSlabs(scatter, pool);
 
-            // ── Config snapshot (render/wind params from layer directly) ────────
-            Vector2 dir = layer.WindDirection;
+            // ── Config snapshot (render/wind params from layer config structs) ────
+            var wind = layer.Wind;
+            var deform = layer.Deform;
+            var render = layer.Render;
+
+            Vector2 dir = wind.WindDirection;
             this.windDir         = dir.sqrMagnitude > 1e-8f ? dir.normalized : Vector2.right;
-            this.windStrength    = layer.WindStrength;
-            this.windFrequency   = layer.WindFrequency;
-            this.windNoiseScale  = layer.WindNoiseScale;
-            this.windMode        = layer.Mode;
-            this.windGustScale   = layer.WindGustScale;
-            this.windRippleScale = layer.WindRippleScale;
-            this.windGustSpeed   = layer.WindGustSpeed;
-            this.windRippleSpeed = layer.WindRippleSpeed;
-            this.windRippleWeight = layer.WindRippleWeight;
-            this.bendStrength    = layer.BendStrength;
-            this.flatten         = layer.Flatten;
-            this.shadowCastingMode = layer.ShadowCastingMode;
+            this.windStrength    = wind.WindStrength;
+            this.windFrequency   = wind.WindFrequency;
+            this.windNoiseScale  = wind.WindNoiseScale;
+            this.windMode        = wind.Mode;
+            this.windGustScale   = wind.WindGustScale;
+            this.windRippleScale = wind.WindRippleScale;
+            this.windGustSpeed   = wind.WindGustSpeed;
+            this.windRippleSpeed = wind.WindRippleSpeed;
+            this.windRippleWeight = wind.WindRippleWeight;
+            this.bendStrength    = deform.BendStrength;
+            this.flatten         = deform.Flatten;
+            this.shadowCastingMode = render.ShadowCastingMode;
 
             // LOD distances sourced from the layer.
             // LodMaxDistances[0] = LOD0→1 boundary, [1] = LOD1→2 boundary.
-            float[] dists = layer.LodMaxDistances;
+            float[] dists = render.LodMaxDistances;
             this.lod0MaxSqrDist = dists.Length > 0 ? dists[0] * dists[0] : 144f;  // default 12m
             this.lod1MaxSqrDist = dists.Length > 1 ? dists[1] * dists[1] : 900f;  // default 30m
             // Editor: generous distance so SceneView zoom-out doesn't hide everything.
@@ -214,10 +218,10 @@ namespace GrassInteract
             // reject into culling IN-frustum blades (holes); clamp closes that path (extraCullMargin already clamped).
             float bakedMaxScale = this.bladeBuffer.ScaleMax2;
             this.bladeCullMargin = Mathf.Max(0f,
-                layer.MaxBladeHeight * bakedMaxScale + layer.BendHeadroom + this.extraCullMargin);
+                layer.Bounds.MaxBladeHeight * bakedMaxScale + layer.Bounds.BendHeadroom + this.extraCullMargin);
 
             // ── LOD meshes sourced from the layer (SSOT) ──
-            Mesh[] meshes = layer.LodMeshes;
+            Mesh[] meshes = render.LodMeshes;
             if (meshes.Length == 0)
             {
                 Debug.LogWarning(
@@ -282,8 +286,8 @@ namespace GrassInteract
             this.lodMat2.SetVector(ID_RotationOffsetEuler, new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f));
 
             // Independent deform gates.
-            float windFlag        = layer.AffectedByWind        ? 1f : 0f;
-            float interactorsFlag = layer.AffectedByInteractors ? 1f : 0f;
+            float windFlag        = layer.Deform.AffectedByWind        ? 1f : 0f;
+            float interactorsFlag = layer.Deform.AffectedByInteractors ? 1f : 0f;
             this.lodMat0.SetFloat(ID_WindEnabled,        windFlag);
             this.lodMat1.SetFloat(ID_WindEnabled,        windFlag);
             this.lodMat2.SetFloat(ID_WindEnabled,        windFlag);
@@ -398,8 +402,7 @@ namespace GrassInteract
 
             // ── 5. RenderMeshIndirect ×3 ─────────────────────────────────────
             // RenderParams MUST be built via the Material constructor: the object-initializer form leaves
-            // renderingLayerMask = 0, which makes URP SKIP THE DRAW ENTIRELY (cull works, instanceCount is
-            // non-zero, yet nothing paints). The Material ctor sets renderingLayerMask to the project default.
+            // renderingLayerMask = 0, which makes URP SKIP THE DRAW ENTIRELY. The Material ctor sets renderingLayerMask to the project default.
             // worldBounds must be non-zero-extent (zero culls the whole draw). matProps NOT set (MPB is
             // silently dropped under URP RenderGraph). Mirrors the working CPU GrassRenderer pattern.
             // Draw scoped to targetCamera: null in play (all cameras), the firing camera in edit-mode
@@ -422,7 +425,7 @@ namespace GrassInteract
             return new RenderParams(mat)
             {
                 worldBounds       = this.worldBounds,
-                shadowCastingMode = this.shadowCastingMode, // honors layer.ShadowCastingMode
+                shadowCastingMode = this.shadowCastingMode, // honors layer.Render.ShadowCastingMode
                 receiveShadows    = false,
                 // null = render in ALL cameras (play-mode player-loop path).
                 // A camera = render ONLY in that one (edit-mode per-camera beginCameraRendering path) so the

@@ -11,16 +11,16 @@ namespace GrassInteract
     /// </summary>
     internal sealed class InstancePlacement : IScatterPlacement
     {
-        private readonly InstanceScatterLayer layer;
+        private readonly IInstancePlacementSource source;
 
-        public InstancePlacement(InstanceScatterLayer layer)
+        public InstancePlacement(IInstancePlacementSource source)
         {
-            this.layer = layer;
+            this.source = source;
         }
 
         public GrassScatterResult Build(Vector3 origin, InstanceBatchPool pool, ISurfaceSampler sampler)
         {
-            NativeArray<InstanceRecord> records = this.layer.AuthoredInstances!.GetRuntimeRecords();
+            NativeArray<InstanceRecord> records = this.source.AuthoredInstances!.GetRuntimeRecords();
 
             int total = records.Length;
             int slabCount = Mathf.Max(1, Mathf.CeilToInt(total / (float)InstanceBatchPool.MAX_INSTANCES_PER_BATCH));
@@ -69,11 +69,11 @@ namespace GrassInteract
                 slabCounts[b]    = count;
             }
 
-            Vector2 bounds = this.layer.FieldBounds;
+            Vector2 bounds = this.source.FieldBounds;
             float halfX    = bounds.x * 0.5f;
             float halfZ    = bounds.y * 0.5f;
-            float maxScale = this.layer.ScaleRange.y;
-            Bounds worldBounds = BuildFieldBounds(this.layer, origin, bounds, halfX, halfZ, maxScale, minY, maxY);
+            float maxScale = this.source.ScaleRange.y;
+            Bounds worldBounds = BuildFieldBounds(this.source, origin, bounds, halfX, halfZ, maxScale, minY, maxY);
 
             return new GrassScatterResult(baseSlabs, slabCounts, positionSlabs, normalSlabs, total, worldBounds);
         }
@@ -82,11 +82,11 @@ namespace GrassInteract
         /// One field-wide AABB mirroring <c>GrassScatter.BuildFieldBounds</c>.
         /// Kept private until R5 promotes the helper to internal static on GrassScatter.
         /// </summary>
-        private static Bounds BuildFieldBounds(ScatterLayer layer, Vector3 origin, Vector2 bounds,
+        private static Bounds BuildFieldBounds(IInstancePlacementSource source, Vector3 origin, Vector2 bounds,
             float halfX, float halfZ, float maxScale, float minY, float maxY)
         {
-            float maxBladeHeight = layer.MaxBladeHeight;
-            float bendHeadroom   = layer.BendHeadroom;
+            float maxBladeHeight = source.MaxBladeHeight;
+            float bendHeadroom   = source.BendHeadroom;
             float bladeReachY = maxBladeHeight * maxScale + bendHeadroom;
             float lateralPad = maxScale + bendHeadroom;
 

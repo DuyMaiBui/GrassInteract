@@ -1,6 +1,8 @@
 {
   "dependencies": {
     "com.coplaydev.unity-mcp": "https://github.com/The1Studio/unity-mcp.git?path=/MCPForUnity#beta",
+    "com.unity.burst": "1.8.29",
+    "com.unity.mathematics": "1.3.3",
     "com.unity.collab-proxy": "2.12.4",
     "com.unity.feature.development": "1.0.2",
     "com.unity.inputsystem": "1.19.0",
