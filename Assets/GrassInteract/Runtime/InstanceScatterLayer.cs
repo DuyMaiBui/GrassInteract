@@ -38,6 +38,14 @@ namespace GrassInteract
         [Tooltip("Minimum spacing (metres) between placed instances during a Place-brush stroke.")]
         [SerializeField] private float placeSpacing = 0.5f;
 
+        // ── Scale-range override ───────────────────────────────────────────────
+
+        [Tooltip("When true, ScaleRange is driven by scaleRangeOverride instead of being auto-computed from authored instance records.")]
+        [SerializeField] private bool overrideScaleRange = false;
+
+        [Tooltip("Manual scale range (x = min, y = max) used when overrideScaleRange is true.")]
+        [SerializeField] private Vector2 scaleRangeOverride = new Vector2(1f, 1f);
+
         // ── Layer-default collider config ─────────────────────────────────────
 
         [Tooltip("Fallback collider mesh when a record's colliderOverride is null.")]
@@ -81,9 +89,15 @@ namespace GrassInteract
         // ── Abstract placement data accessors ──────────────────────────────────
 
         public override Vector2 FieldBounds => ComputeFieldBoundsFromAuthored();
-        public override Vector2 ScaleRange => ComputeScaleRangeFromAuthored();
+        public override Vector2 ScaleRange => this.overrideScaleRange ? this.scaleRangeOverride : ComputeScaleRangeFromAuthored();
         public override Vector3 RotationOffsetEuler => Vector3.zero;
         public override bool IsOriented => ComputeIsOrientedFromAuthored();
+
+        /// <summary>Whether the manual scale-range override is active.</summary>
+        public bool OverrideScaleRange => this.overrideScaleRange;
+
+        /// <summary>Manual scale range (x = min, y = max) used when <see cref="OverrideScaleRange"/> is true.</summary>
+        public Vector2 ScaleRangeOverride => this.scaleRangeOverride;
 
         // ── IInstancePlacementSource ───────────────────────────────────────────
 

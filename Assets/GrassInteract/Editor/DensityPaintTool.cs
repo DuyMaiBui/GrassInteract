@@ -1,5 +1,4 @@
 #nullable enable
-using System.IO;
 using UnityEditor;
 using UnityEditor.EditorTools;
 using UnityEngine;
@@ -9,33 +8,24 @@ namespace GrassInteract.Editor
     /// <summary>
     /// Terrain-tool-style density brush for a <see cref="DensityScatterLayer"/>. Raycasts the ground,
     /// writes the R8 <c>densityMap</c>, re-scatters live through <see cref="ScatterRebuildScheduler"/>,
-    /// and persists the painted pixels back to the texture asset (PNG) on stroke end.
-    /// Brush disc + falloff ring drawn via the shared <see cref="ScatterGizmos"/>.
+    /// and persists the painted pixels back to the texture asset (PNG) on stroke end via
+    /// <see cref="DensityMapFactory.PersistPixels"/> (SSOT — no duplicate persist path here).
     ///
-    /// Paint alignment reuses the runtime <see cref="GrassFieldSpace"/> mapping (SSOT) so painted pixels
-    /// land exactly where <see cref="DensityPlacement"/> samples them. An optional <see cref="BrushStamp"/>
-    /// from the owning <see cref="TerrainScatterConfig"/> modulates the kernel.
+    /// All tool state (brush size, opacity, falloff, flow, paint mode, active stamp) is read from
+    /// <see cref="ScatterAuthoringState.I"/> — this tool no longer writes or reads EditorPrefs.
+    ///
+    /// Stamp resolution follows <see cref="StampRef"/>:
+    ///   <see cref="StampRef.StampSource.None"/>   → procedural falloff kernel (same as old StampIndex == -1)
+    ///   <see cref="StampRef.StampSource.Config"/>  → <c>field.Config.BrushStamps[index]</c>
+    ///   <see cref="StampRef.StampSource.Global"/>  → <see cref="ScatterBrushLibraryProvider.Library"/>.Stamps[index]
+    ///
+    /// The in-scene <see cref="DrawSettingsWindow"/> is intentionally minimal (brush cursor disc + mode
+    /// label only) — all settings now live in the Scatter Studio window.
     /// </summary>
     [EditorTool("Density Paint", typeof(DensityScatterLayer))]
     internal sealed class DensityPaintTool : EditorTool
     {
-        private enum PaintMode { Paint, Erase, Smooth }
-
-        // ── Brush settings (persisted via EditorPrefs) ─────────────────────────
-
-        private const string K_SIZE  = "GrassInteract.Brush.Size";
-        private const string K_OPAC  = "GrassInteract.Brush.Opacity";
-        private const string K_FALL  = "GrassInteract.Brush.Falloff";
-        private const string K_FLOW  = "GrassInteract.Brush.Flow";
-        private const string K_MODE  = "GrassInteract.Brush.Mode";
-        private const string K_STAMP = "GrassInteract.Brush.Stamp";
-
-        private static float Size    { get => EditorPrefs.GetFloat(K_SIZE, 3f);  set => EditorPrefs.SetFloat(K_SIZE, value); }
-        private static float Opacity { get => EditorPrefs.GetFloat(K_OPAC, 1f);  set => EditorPrefs.SetFloat(K_OPAC, value); }
-        private static float Falloff { get => EditorPrefs.GetFloat(K_FALL, 0.5f);set => EditorPrefs.SetFloat(K_FALL, value); }
-        private static float Flow    { get => EditorPrefs.GetFloat(K_FLOW, 0.5f);set => EditorPrefs.SetFloat(K_FLOW, value); }
-        private static PaintMode Mode { get => (PaintMode)EditorPrefs.GetInt(K_MODE, 0); set => EditorPrefs.SetInt(K_MODE, (int)value); }
-        private static int   StampIndex { get => EditorPrefs.GetInt(K_STAMP, -1); set => EditorPrefs.SetInt(K_STAMP, value); }
+        internal enum PaintMode { Paint, Erase, Smooth }
 
         // ── Active stroke state ────────────────────────────────────────────────
 
@@ -43,7 +33,7 @@ namespace GrassInteract.Editor
         private Color[]?   pixels;
         private int        texW, texH;
         private Texture2D? activeMap;
-        private Texture2D? activeStamp; // resolved at stroke start, null = procedural falloff
+        private Texture2D? activeStamp; // resolved at stroke start; null = procedural falloff
 
         public override GUIContent toolbarIcon => EditorGUIUtility.IconContent("TerrainInspector.TerrainToolSplat");
 
@@ -54,10 +44,13 @@ namespace GrassInteract.Editor
 
             (ScatterField? field, int layerIdx) = ScatterFieldLookup.FindOwningField(layer);
 
-            // Validate the density map up front — errors-over-silent-fallback.
+            // Auto-create density map on first paint if none exists.
+            if (field != null && layer.DensityMap == null)
+                TryAutoCreateDensityMap(layer, field);
+
             bool valid = layer.Validate(out string error);
 
-            this.DrawSettingsWindow(valid, valid ? null : error, field);
+            this.DrawSettingsWindow(valid, valid ? null : error);
 
             if (!valid || field == null)
                 return;
@@ -75,8 +68,10 @@ namespace GrassInteract.Editor
 
             if (hasHit)
             {
-                ScatterGizmos.BrushDisc(hit.point, hit.normal, Size, BrushColorForMode());
-                ScatterGizmos.FalloffRing(hit.point, hit.normal, Size * Falloff, Size, ScatterGizmos.BrushFalloffColor);
+                float size = ScatterAuthoringState.I.BrushSize;
+                float falloff = ScatterAuthoringState.I.BrushFalloff;
+                ScatterGizmos.BrushDisc(hit.point, hit.normal, size, this.BrushColorForMode());
+                ScatterGizmos.FalloffRing(hit.point, hit.normal, size * falloff, size, ScatterGizmos.BrushFalloffColor);
                 HandleUtility.Repaint();
             }
 
@@ -102,6 +97,40 @@ namespace GrassInteract.Editor
             }
         }
 
+        // ── Auto-create density map ────────────────────────────────────────────
+
+        /// <summary>
+        /// On the very first paint stroke for a layer with no <c>densityMap</c> assigned,
+        /// creates a blank density map via <see cref="DensityMapFactory.CreateBlank"/> and
+        /// assigns it to the layer via <see cref="SerializedObject"/> (Undo-tracked, asset-dirty).
+        /// </summary>
+        private static void TryAutoCreateDensityMap(DensityScatterLayer layer, ScatterField field)
+        {
+            int size = 512; // default resolution
+
+            Texture2D? map = DensityMapFactory.CreateBlank(size, field.Config);
+            if (map == null)
+            {
+                Debug.LogError("[DensityPaintTool] Auto-create density map failed — see previous errors.");
+                return;
+            }
+
+            Undo.RegisterCompleteObjectUndo(layer, "Auto-Create Density Map");
+
+            var so = new SerializedObject(layer);
+            var prop = so.FindProperty("densityMap");
+            if (prop != null)
+            {
+                prop.objectReferenceValue = map;
+                so.ApplyModifiedProperties();
+            }
+
+            EditorUtility.SetDirty(layer);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log($"[DensityPaintTool] Auto-created density map '{map.name}' for layer '{layer.name}'.");
+        }
+
         // ── Stroke lifecycle ───────────────────────────────────────────────────
 
         private void BeginStroke(DensityScatterLayer layer, ScatterField field)
@@ -124,30 +153,13 @@ namespace GrassInteract.Editor
                 this.activeMap.SetPixels(this.pixels);
                 this.activeMap.Apply(false);
                 EditorUtility.SetDirty(this.activeMap);
-                SaveToAsset(this.activeMap, this.pixels, this.texW, this.texH);
+                // SSOT: delegate PNG persistence to the factory (no duplicate path).
+                DensityMapFactory.PersistPixels(this.activeMap, this.pixels, this.texW, this.texH);
                 if (layerIdx >= 0) ScatterRebuildScheduler.MarkDirty(field, layerIdx);
             }
             this.pixels = null;
             this.activeMap = null;
             this.activeStamp = null;
-        }
-
-        /// <summary>Persists the painted pixels back to the texture's source PNG so edits survive reload.</summary>
-        private static void SaveToAsset(Texture2D map, Color[] px, int w, int h)
-        {
-            string path = AssetDatabase.GetAssetPath(map);
-            if (string.IsNullOrEmpty(path)) return; // runtime-only texture — nothing to persist
-
-            // Encode via a temp RGBA32 texture (R8 is not directly EncodeToPNG-able).
-            var tmp = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            tmp.SetPixels(px);
-            tmp.Apply(false);
-            byte[] png = tmp.EncodeToPNG();
-            Object.DestroyImmediate(tmp);
-            if (png == null) return;
-
-            File.WriteAllBytes(path, png);
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate); // re-imports with the map's R8 settings
         }
 
         // ── Paint kernel ───────────────────────────────────────────────────────
@@ -156,54 +168,57 @@ namespace GrassInteract.Editor
         {
             if (this.pixels == null || this.activeMap == null) return;
 
+            float size    = ScatterAuthoringState.I.BrushSize;
+            float opacity = ScatterAuthoringState.I.BrushOpacity;
+            float falloff = ScatterAuthoringState.I.BrushFalloff;
+            float flow    = ScatterAuthoringState.I.BrushFlow;
+            var   mode    = (PaintMode)ScatterAuthoringState.I.PaintMode;
+
             var space = new GrassFieldSpace(origin, bounds);
             Vector2 centerUv = space.WorldToUv(worldHit);
 
-            // Pixel-space bounding box for the brush radius (world metres → UV → pixels).
-            float radUvX = Size / Mathf.Max(0.0001f, bounds.x);
-            float radUvY = Size / Mathf.Max(0.0001f, bounds.y);
+            float radUvX = size / Mathf.Max(0.0001f, bounds.x);
+            float radUvY = size / Mathf.Max(0.0001f, bounds.y);
             int minX = Mathf.Clamp(Mathf.FloorToInt((centerUv.x - radUvX) * this.texW), 0, this.texW - 1);
             int maxX = Mathf.Clamp(Mathf.CeilToInt((centerUv.x + radUvX) * this.texW), 0, this.texW - 1);
             int minY = Mathf.Clamp(Mathf.FloorToInt((centerUv.y - radUvY) * this.texH), 0, this.texH - 1);
             int maxY = Mathf.Clamp(Mathf.CeilToInt((centerUv.y + radUvY) * this.texH), 0, this.texH - 1);
 
-            float strength = Mathf.Clamp01(Opacity) * Mathf.Clamp01(Flow);
-            float inner = Mathf.Clamp01(Falloff);
+            float strength = Mathf.Clamp01(opacity) * Mathf.Clamp01(flow);
+            float inner    = Mathf.Clamp01(falloff);
             Texture2D? stamp = this.activeStamp;
 
             for (int py = minY; py <= maxY; ++py)
             {
                 for (int px = minX; px <= maxX; ++px)
                 {
-                    // World position of this pixel center → horizontal distance to the hit.
                     var uv = new Vector2((px + 0.5f) / this.texW, (py + 0.5f) / this.texH);
                     Vector3 pw = space.UvToWorld(uv, worldHit.y);
                     float dx = pw.x - worldHit.x;
                     float dz = pw.z - worldHit.z;
                     float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
-                    if (distXZ > Size) continue;
+                    if (distXZ > size) continue;
 
-                    // Falloff: a brush stamp (when selected) replaces the procedural curve.
-                    float falloff;
+                    float brushFalloff;
                     if (stamp != null)
                     {
-                        float su = Mathf.Clamp01(dx / (2f * Size) + 0.5f);
-                        float sv = Mathf.Clamp01(dz / (2f * Size) + 0.5f);
-                        falloff = stamp.GetPixelBilinear(su, sv).r;
+                        float su = Mathf.Clamp01(dx / (2f * size) + 0.5f);
+                        float sv = Mathf.Clamp01(dz / (2f * size) + 0.5f);
+                        brushFalloff = stamp.GetPixelBilinear(su, sv).r;
                     }
                     else
                     {
-                        float t = Size <= 0f ? 0f : distXZ / Size;
-                        falloff = t <= inner ? 1f : Mathf.SmoothStep(1f, 0f, (t - inner) / Mathf.Max(0.0001f, 1f - inner));
+                        float t = size <= 0f ? 0f : distXZ / size;
+                        brushFalloff = t <= inner ? 1f : Mathf.SmoothStep(1f, 0f, (t - inner) / Mathf.Max(0.0001f, 1f - inner));
                     }
 
-                    float w = strength * falloff;
+                    float w = strength * brushFalloff;
                     if (w <= 0f) continue;
 
                     int idx = py * this.texW + px;
                     float r = this.pixels[idx].r;
 
-                    r = Mode switch
+                    r = mode switch
                     {
                         PaintMode.Paint  => Mathf.Clamp01(r + w),
                         PaintMode.Erase  => Mathf.Clamp01(r - w),
@@ -214,7 +229,7 @@ namespace GrassInteract.Editor
                 }
             }
 
-            // Live preview: update CPU pixels (DensityPlacement reads GetPixelBilinear) + GPU copy.
+            // Live preview: push CPU pixels to GPU.
             this.activeMap.SetPixels(this.pixels);
             this.activeMap.Apply(false);
         }
@@ -233,65 +248,79 @@ namespace GrassInteract.Editor
             return n > 0 ? sum / n : 0f;
         }
 
-        // ── Brush stamp ────────────────────────────────────────────────────────
+        // ── Stamp resolution ───────────────────────────────────────────────────
 
-        /// <summary>Resolves the selected stamp's shape texture, or null (procedural falloff / unreadable).</summary>
+        /// <summary>
+        /// Resolves the active <see cref="StampRef"/> from <see cref="ScatterAuthoringState"/> to a
+        /// concrete readable <see cref="Texture2D"/>, or <c>null</c> for procedural falloff.
+        ///
+        /// Resolution table (matches old StampIndex semantics):
+        ///   StampSource.None   → null (procedural; was StampIndex == -1)
+        ///   StampSource.Config → field.Config.BrushStamps[index] (was StampIndex >= 0 into Config list)
+        ///   StampSource.Global → ScatterBrushLibraryProvider.Library.Stamps[index]
+        /// </summary>
         private static Texture2D? ResolveStamp(ScatterField field)
         {
-            int idx = StampIndex;
-            if (idx < 0 || field.Config == null) return null;
-            var stamps = field.Config.BrushStamps;
-            if (idx >= stamps.Count) return null;
-            Texture2D? shape = stamps[idx].Shape;
+            StampRef stampRef = ScatterAuthoringState.I.ActiveStamp;
+
+            if (stampRef.IsNone) return null;
+
+            BrushStamp? stamp = null;
+
+            switch (stampRef.Source)
+            {
+                case StampRef.StampSource.Config:
+                    if (field.Config == null) return null;
+                    var configStamps = field.Config.BrushStamps;
+                    if (stampRef.Index < 0 || stampRef.Index >= configStamps.Count) return null;
+                    stamp = configStamps[stampRef.Index];
+                    break;
+
+                case StampRef.StampSource.Global:
+                    var globalStamps = ScatterBrushLibraryProvider.Library.Stamps;
+                    if (stampRef.Index < 0 || stampRef.Index >= globalStamps.Count) return null;
+                    stamp = globalStamps[stampRef.Index];
+                    break;
+
+                default:
+                    return null;
+            }
+
+            if (stamp == null) return null;
+            Texture2D? shape = stamp.Shape;
             return shape != null && shape.isReadable ? shape : null;
         }
 
-        // ── In-scene settings panel ────────────────────────────────────────────
+        // ── Minimal in-scene HUD ───────────────────────────────────────────────
 
-        private void DrawSettingsWindow(bool valid, string? error, ScatterField? field)
+        /// <summary>
+        /// Minimal in-scene overlay: shows the tool title, a mode label, and any validation error.
+        /// All brush settings now live in the Scatter Studio window.
+        /// </summary>
+        private void DrawSettingsWindow(bool valid, string? error)
         {
-            int stampCount = field != null && field.Config != null ? field.Config.BrushStamps.Count : 0;
-            float h = !valid ? 96f : (152f + (stampCount > 0 ? 18f : 0f));
-
+            float h = valid ? 52f : 88f;
             Handles.BeginGUI();
-            var area = new Rect(8, 8, 250, h);
+            var area = new Rect(8, 8, 200, h);
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label("Density Paint", EditorStyles.boldLabel);
 
-            if (field == null)
-                EditorGUILayout.HelpBox("No active ScatterField owns this layer.", MessageType.Warning);
-
             if (!valid)
-            {
                 EditorGUILayout.HelpBox(error ?? "Density map invalid.", MessageType.Error);
-            }
             else
             {
-                Mode    = (PaintMode)GUILayout.Toolbar((int)Mode, new[] { "Paint", "Erase", "Smooth" });
-                Size    = EditorGUILayout.Slider("Size",    Size,    0.1f, 50f);
-                Opacity = EditorGUILayout.Slider("Opacity", Opacity, 0f,   1f);
-                Falloff = EditorGUILayout.Slider("Falloff", Falloff, 0f,   1f);
-                Flow    = EditorGUILayout.Slider("Flow",    Flow,    0f,   1f);
-
-                if (stampCount > 0 && field != null && field.Config != null)
-                {
-                    var names = new string[stampCount + 1];
-                    names[0] = "None (procedural)";
-                    var stamps = field.Config.BrushStamps;
-                    for (int i = 0; i < stampCount; ++i)
-                        names[i + 1] = stamps[i].DisplayName;
-
-                    int current = StampIndex < 0 || StampIndex >= stampCount ? 0 : StampIndex + 1;
-                    int sel = EditorGUILayout.Popup("Stamp", current, names);
-                    StampIndex = sel == 0 ? -1 : sel - 1;
-                }
+                var mode = (PaintMode)ScatterAuthoringState.I.PaintMode;
+                GUILayout.Label($"Mode: {mode}", EditorStyles.miniLabel);
             }
 
             GUILayout.EndArea();
             Handles.EndGUI();
         }
 
-        private static Color BrushColorForMode() =>
-            Mode == PaintMode.Erase ? ScatterGizmos.EraseColor : ScatterGizmos.BrushColor;
+        private Color BrushColorForMode()
+        {
+            var mode = (PaintMode)ScatterAuthoringState.I.PaintMode;
+            return mode == PaintMode.Erase ? ScatterGizmos.EraseColor : ScatterGizmos.BrushColor;
+        }
     }
 }

@@ -1,0 +1,50 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement name="scatter-studio-root" class="scatter-studio-root">
+
+        <!-- ── Header ────────────────────────────────────────────────────────── -->
+        <ui:VisualElement name="header" class="header">
+            <uie:ObjectField name="field-picker" label="Scatter Field" type="GrassInteract.ScatterField, GrassInteract" class="field-picker" />
+            <ui:VisualElement class="header-controls">
+                <ui:Toggle name="preview-toggle" label="Preview" class="header-toggle" />
+                <ui:Toggle name="colliders-toggle" label="Colliders" class="header-toggle" />
+                <ui:Button name="rebuild-button" text="Rebuild" class="rebuild-button" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- ── Body (rail + panel side-by-side) ─────────────────────────────── -->
+        <ui:VisualElement name="body" class="body">
+
+            <!-- Left: layer rail -->
+            <ui:VisualElement name="layer-rail" class="layer-rail">
+                <ui:ScrollView name="layer-rail-scroll" class="layer-rail-scroll">
+                    <ui:VisualElement name="layer-list" class="layer-list" />
+                </ui:ScrollView>
+                <ui:VisualElement name="layer-rail-footer" class="layer-rail-footer">
+                    <ui:Button name="add-density-button" text="+ Density" class="add-layer-button" />
+                    <ui:Button name="add-instance-button" text="+ Instance" class="add-layer-button" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+
+            <!-- Center/Right: layer panel + reserved phase mounts -->
+            <ui:VisualElement name="content-area" class="content-area">
+
+                <!-- Layer data-binding panel (PropertyField cards) -->
+                <ui:ScrollView name="layer-panel-scroll" class="layer-panel-scroll">
+                    <ui:VisualElement name="layer-panel" class="layer-panel" />
+                </ui:ScrollView>
+
+                <!-- ── Reserved mount containers (phases 2.B / 3 / 4 attach here) ── -->
+                <!-- Phase 2.B: BrushLibraryView attaches here -->
+                <ui:VisualElement name="brush-library" class="phase-mount brush-library-mount" />
+
+                <!-- Phase 3: DensityPaintPanel attaches here -->
+                <ui:VisualElement name="density-paint-panel" class="phase-mount density-paint-panel-mount" />
+
+                <!-- Phase 4: InstancePanel attaches here -->
+                <ui:VisualElement name="instance-panel" class="phase-mount instance-panel-mount" />
+
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+    </ui:VisualElement>
+</ui:UXML>

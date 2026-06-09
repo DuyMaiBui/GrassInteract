@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.EditorTools;
 using UnityEngine;
@@ -6,38 +7,64 @@ using UnityEngine;
 namespace GrassInteract.Editor
 {
     /// <summary>
-    /// Transform-tool-style placement editor for an <see cref="InstanceScatterLayer"/>. Place /
-    /// Select+Transform / Erase authored records, with move-rotate-scale <see cref="Handles"/> writing
-    /// back to the selected record. The per-instance panel exposes collider config + a PhysicsMaterial
-    /// override (Phase 1 payload). All edits flow through the <see cref="AuthoredInstancesData"/> working
-    /// list with Undo and the debounced <see cref="ScatterRebuildScheduler"/>.
+    /// Transform-tool-style placement editor for an <see cref="InstanceScatterLayer"/>. Supports
+    /// three <see cref="PlaceMode"/>s: <see cref="PlaceMode.Place"/> (single click),
+    /// <see cref="PlaceMode.Scatter"/> (brush-radius flood), <see cref="PlaceMode.Select"/>
+    /// (single + multi-select with batch transform/collider edit), and <see cref="PlaceMode.Erase"/>.
+    ///
+    /// All tool state is read from <see cref="ScatterAuthoringState.I"/> — no <c>EditorPrefs</c> reads.
+    /// All edits flow through <see cref="AuthoredInstancesData"/> with Undo and the debounced
+    /// <see cref="ScatterRebuildScheduler"/>.
+    ///
+    /// In-scene HUD is minimal (cursor disc + mode label). Per-instance/batch editing lives in
+    /// <see cref="InstancePanel"/> (in-window).
     /// </summary>
     [EditorTool("Instance Placement", typeof(InstanceScatterLayer))]
     internal sealed class InstancePlacementTool : EditorTool
     {
-        private enum PlaceMode { Place, Select, Erase }
+        internal enum PlaceMode { Place = 0, Select = 1, Erase = 2, Scatter = 3 }
 
-        private const string K_MODE  = "GrassInteract.Place.Mode";
-        private const string K_ALIGN = "GrassInteract.Place.Align";
-        private const string K_YAW   = "GrassInteract.Place.RandYaw";
-        private const string K_SMIN  = "GrassInteract.Place.ScaleMin";
-        private const string K_SMAX  = "GrassInteract.Place.ScaleMax";
-        private const string K_ERASE = "GrassInteract.Place.EraseRadius";
+        // ── State shortcuts (read ScatterAuthoringState) ───────────────────────
 
-        private static PlaceMode Mode { get => (PlaceMode)EditorPrefs.GetInt(K_MODE, 0); set => EditorPrefs.SetInt(K_MODE, (int)value); }
-        private static bool  AlignToNormal { get => EditorPrefs.GetBool(K_ALIGN, false); set => EditorPrefs.SetBool(K_ALIGN, value); }
-        private static bool  RandomYaw     { get => EditorPrefs.GetBool(K_YAW, true);    set => EditorPrefs.SetBool(K_YAW, value); }
-        private static float ScaleMin      { get => EditorPrefs.GetFloat(K_SMIN, 1f);    set => EditorPrefs.SetFloat(K_SMIN, value); }
-        private static float ScaleMax      { get => EditorPrefs.GetFloat(K_SMAX, 1f);    set => EditorPrefs.SetFloat(K_SMAX, value); }
-        private static float EraseRadius   { get => EditorPrefs.GetFloat(K_ERASE, 2f);   set => EditorPrefs.SetFloat(K_ERASE, value); }
+        private static PlaceMode Mode
+        {
+            get => (PlaceMode)ScatterAuthoringState.I.PlaceMode;
+            set => ScatterAuthoringState.I.PlaceMode = (int)value;
+        }
 
-        private const float PICK_PIXELS  = 16f;
-        private const int   MAX_DRAW     = 4000;
-        private const float DRAW_RADIUS  = 60f;
+        private static bool  AlignToNormal => ScatterAuthoringState.I.AlignToNormal;
+        private static bool  RandomYaw     => ScatterAuthoringState.I.RandomYaw;
+        private static float ScaleMin      => ScatterAuthoringState.I.PlaceScaleMin;
+        private static float ScaleMax      => ScatterAuthoringState.I.PlaceScaleMax;
+        private static float EraseRadius   => ScatterAuthoringState.I.EraseRadius;
+        private static float BrushSize     => ScatterAuthoringState.I.BrushSize;
+
+        // ── Constants ──────────────────────────────────────────────────────────
+
+        private const float PICK_PIXELS     = 16f;
+        private const int   MAX_DRAW        = 4000;
+        private const float DRAW_RADIUS     = 60f;
+        private const int   MAX_SCATTER_PER_STROKE = 64; // cap to avoid O(n²) stalls
+
+        // ── Per-tool state ─────────────────────────────────────────────────────
 
         private int selectedIndex = -1;
+        private readonly HashSet<int> multiSelection = new();
+
+        // ── EditorTool ─────────────────────────────────────────────────────────
 
         public override GUIContent toolbarIcon => EditorGUIUtility.IconContent("Transform Icon");
+
+        public override void OnActivated()
+        {
+            InstancePlacementToolTracker.ActiveTool = this;
+        }
+
+        public override void OnWillBeDeactivated()
+        {
+            if (ReferenceEquals(InstancePlacementToolTracker.ActiveTool, this))
+                InstancePlacementToolTracker.ActiveTool = null;
+        }
 
         public override void OnToolGUI(EditorWindow window)
         {
@@ -47,7 +74,8 @@ namespace GrassInteract.Editor
             AuthoredInstancesData? authored = layer.AuthoredInstances;
             (ScatterField? field, int layerIdx) = ScatterFieldLookup.FindOwningField(layer);
 
-            this.DrawSettingsWindow(layer, authored, field, layerIdx);
+            // Minimal HUD: just cursor disc + mode label in the top-left corner.
+            this.DrawMinimalHud();
 
             if (authored == null || field == null) return;
 
@@ -57,28 +85,48 @@ namespace GrassInteract.Editor
             Vector3 camPos = sv.camera != null ? sv.camera.transform.position : Vector3.zero;
             this.DrawInstances(authored, camPos);
 
-            Vector3 origin = field.ResolveFieldOrigin();
             LayerMask mask = field.ResolveGroundMask(layer);
             Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
             bool hasHit = Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, mask.value == 0 ? ~0 : mask.value);
 
             switch (Mode)
             {
-                case PlaceMode.Place:  this.OnPlace(e, controlId, authored, layer, field, layerIdx, hasHit, hit); break;
-                case PlaceMode.Select: this.OnSelect(e, controlId, authored, field, layerIdx); break;
-                case PlaceMode.Erase:  this.OnErase(e, controlId, authored, field, layerIdx, hasHit, hit); break;
+                case PlaceMode.Place:
+                    this.OnPlace(e, controlId, authored, layer, field, layerIdx, hasHit, hit);
+                    break;
+                case PlaceMode.Scatter:
+                    this.OnScatter(e, controlId, authored, layer, field, layerIdx, hasHit, hit);
+                    break;
+                case PlaceMode.Select:
+                    this.OnSelect(e, controlId, authored, field, layerIdx);
+                    break;
+                case PlaceMode.Erase:
+                    this.OnErase(e, controlId, authored, field, layerIdx, hasHit, hit);
+                    break;
             }
 
             if (hasHit && Mode != PlaceMode.Select)
             {
                 Color c = Mode == PlaceMode.Erase ? ScatterGizmos.EraseColor : ScatterGizmos.BrushColor;
-                float r = Mode == PlaceMode.Erase ? EraseRadius : 0.5f;
+                float r = Mode == PlaceMode.Erase ? EraseRadius : (Mode == PlaceMode.Scatter ? BrushSize : 0.5f);
                 ScatterGizmos.BrushDisc(hit.point, hit.normal, r, c);
                 HandleUtility.Repaint();
             }
         }
 
-        // ── Place ──────────────────────────────────────────────────────────────
+        // ── Minimal HUD ────────────────────────────────────────────────────────
+
+        private void DrawMinimalHud()
+        {
+            Handles.BeginGUI();
+            var area = new Rect(8, 8, 180, 32);
+            GUILayout.BeginArea(area, GUI.skin.box);
+            GUILayout.Label($"Placement: {Mode}", EditorStyles.miniLabel);
+            GUILayout.EndArea();
+            Handles.EndGUI();
+        }
+
+        // ── Place (single click) ───────────────────────────────────────────────
 
         private void OnPlace(Event e, int controlId, AuthoredInstancesData authored, InstanceScatterLayer layer,
             ScatterField field, int layerIdx, bool hasHit, RaycastHit hit)
@@ -89,7 +137,7 @@ namespace GrassInteract.Editor
                 if (this.RespectsSpacing(authored, hit.point, layer.PlaceSpacing))
                 {
                     Undo.RegisterCompleteObjectUndo(authored, "Place Instance");
-                    authored.AddRecord(BuildRecord(hit.point, hit.normal));
+                    authored.AddRecord(this.BuildRecord(hit.point, hit.normal));
                     Commit(authored, field, layerIdx);
                 }
                 e.Use();
@@ -100,7 +148,59 @@ namespace GrassInteract.Editor
             }
         }
 
-        private static InstanceRecord BuildRecord(Vector3 pos, Vector3 normal)
+        // ── Scatter (brush-radius flood) ───────────────────────────────────────
+
+        private void OnScatter(Event e, int controlId, AuthoredInstancesData authored, InstanceScatterLayer layer,
+            ScatterField field, int layerIdx, bool hasHit, RaycastHit hit)
+        {
+            bool isDown = e.type == EventType.MouseDown && e.button == 0 && !e.alt && hasHit;
+            if (!isDown) return;
+
+            GUIUtility.hotControl = controlId;
+            float radius = BrushSize;
+            float spacing = layer.PlaceSpacing;
+            LayerMask mask = field.ResolveGroundMask(layer);
+
+            // Generate candidate positions within the brush disc and place those that
+            // respect spacing. Candidates are capped at MAX_SCATTER_PER_STROKE to
+            // avoid O(n²) stalls on dense fields.
+            bool anyPlaced = false;
+            int attempts = 0;
+            int maxAttempts = MAX_SCATTER_PER_STROKE * 4; // generous attempt budget
+            int placed = 0;
+
+            // We build a single undo record for the whole stroke.
+            Undo.RegisterCompleteObjectUndo(authored, "Scatter Instances");
+
+            while (attempts < maxAttempts && placed < MAX_SCATTER_PER_STROKE)
+            {
+                attempts++;
+                // Random point in disc (rejection sampling).
+                Vector2 rnd = Random.insideUnitCircle * radius;
+                Vector3 candidate = hit.point + new Vector3(rnd.x, 0f, rnd.y);
+
+                // Project the candidate onto the ground via a short raycast from above.
+                Ray probeRay = new Ray(candidate + Vector3.up * 50f, Vector3.down);
+                if (!Physics.Raycast(probeRay, out RaycastHit probeHit, 100f, mask.value == 0 ? ~0 : mask.value))
+                    continue;
+
+                if (!this.RespectsSpacing(authored, probeHit.point, spacing))
+                    continue;
+
+                authored.AddRecord(this.BuildRecord(probeHit.point, probeHit.normal));
+                anyPlaced = true;
+                placed++;
+            }
+
+            if (anyPlaced)
+                Commit(authored, field, layerIdx);
+
+            e.Use();
+        }
+
+        // ── Record factory ─────────────────────────────────────────────────────
+
+        private InstanceRecord BuildRecord(Vector3 pos, Vector3 normal)
         {
             float yaw = RandomYaw ? Random.Range(0f, 360f) : 0f;
             Quaternion align = AlignToNormal ? Quaternion.FromToRotation(Vector3.up, normal) : Quaternion.identity;
@@ -123,32 +223,75 @@ namespace GrassInteract.Editor
             return true;
         }
 
-        // ── Select + Transform ─────────────────────────────────────────────────
+        // ── Select + Transform (single + multi) ────────────────────────────────
 
         private void OnSelect(Event e, int controlId, AuthoredInstancesData authored, ScatterField field, int layerIdx)
         {
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
             {
-                this.selectedIndex = PickNearest(authored, e.mousePosition);
+                int picked = PickNearest(authored, e.mousePosition);
+                bool shift = e.shift;
+
+                if (picked >= 0)
+                {
+                    if (shift)
+                    {
+                        // Toggle in multi-selection
+                        if (this.multiSelection.Contains(picked))
+                            this.multiSelection.Remove(picked);
+                        else
+                            this.multiSelection.Add(picked);
+                        this.selectedIndex = picked;
+                    }
+                    else
+                    {
+                        // Single select — clear multi
+                        this.multiSelection.Clear();
+                        this.selectedIndex = picked;
+                    }
+                }
+                else if (!shift)
+                {
+                    // Click empty — clear all
+                    this.multiSelection.Clear();
+                    this.selectedIndex = -1;
+                }
                 e.Use();
             }
 
+            // Single-select transform handles
+            if (this.multiSelection.Count == 0)
+            {
+                this.DrawSingleSelectHandles(authored, field, layerIdx);
+                return;
+            }
+
+            // Multi-select: draw dots for each selected instance
+            foreach (int idx in this.multiSelection)
+            {
+                if (!authored.TryGetRecord(idx, out InstanceRecord r)) continue;
+                ScatterGizmos.InstanceDot(r.position, HandleUtility.GetHandleSize(r.position) * 0.12f, ScatterGizmos.SelectedColor);
+            }
+        }
+
+        private void DrawSingleSelectHandles(AuthoredInstancesData authored, ScatterField? field, int layerIdx)
+        {
             if (this.selectedIndex < 0 || !authored.TryGetRecord(this.selectedIndex, out InstanceRecord rec))
                 return;
 
             ScatterGizmos.InstanceDot(rec.position, HandleUtility.GetHandleSize(rec.position) * 0.12f, ScatterGizmos.SelectedColor);
 
             EditorGUI.BeginChangeCheck();
-            Vector3 newPos = Handles.PositionHandle(rec.position, rec.rotation);
-            Quaternion newRot = Handles.RotationHandle(rec.rotation, rec.position);
-            Vector3 newScaleVec = Handles.ScaleHandle(Vector3.one * rec.scale, rec.position, rec.rotation,
+            Vector3    newPos      = Handles.PositionHandle(rec.position, rec.rotation);
+            Quaternion newRot      = Handles.RotationHandle(rec.rotation, rec.position);
+            Vector3    newScaleVec = Handles.ScaleHandle(Vector3.one * rec.scale, rec.position, rec.rotation,
                 HandleUtility.GetHandleSize(rec.position));
-            if (EditorGUI.EndChangeCheck())
+            if (EditorGUI.EndChangeCheck() && field != null)
             {
                 Undo.RegisterCompleteObjectUndo(authored, "Transform Instance");
                 rec.position = newPos;
                 rec.rotation = newRot;
-                rec.scale = Mathf.Max(0.0001f, newScaleVec.x);
+                rec.scale    = Mathf.Max(0.0001f, newScaleVec.x);
                 authored.SetRecord(this.selectedIndex, rec);
                 Commit(authored, field, layerIdx);
             }
@@ -191,12 +334,13 @@ namespace GrassInteract.Editor
             if (removed)
             {
                 this.selectedIndex = -1;
+                this.multiSelection.Clear();
                 Commit(authored, field, layerIdx);
             }
             e.Use();
         }
 
-        // ── Drawing ────────────────────────────────────────────────────────────
+        // ── Drawing (instances as dots, with collider-indicator tint) ──────────
 
         private void DrawInstances(AuthoredInstancesData authored, Vector3 camPos)
         {
@@ -205,89 +349,17 @@ namespace GrassInteract.Editor
             int drawn = 0;
             for (int i = 0; i < list.Count && drawn < MAX_DRAW; ++i)
             {
-                if (i == this.selectedIndex) continue;
+                if (i == this.selectedIndex && this.multiSelection.Count == 0) continue;
+                if (this.multiSelection.Contains(i)) continue; // drawn in OnSelect
+
                 Vector3 p = list[i].position;
                 if ((p - camPos).sqrMagnitude > sqr) continue;
-                ScatterGizmos.InstanceDot(p, HandleUtility.GetHandleSize(p) * 0.05f, ScatterGizmos.InstanceColor);
+
+                // Tint: amber if collider-configured, else default instance color.
+                bool colliderConfigured = (list[i].overrideMask & InstanceOverrideMask.ColliderConfigured) != 0;
+                Color dotColor = colliderConfigured ? ScatterGizmos.FieldBoundsColor : ScatterGizmos.InstanceColor;
+                ScatterGizmos.InstanceDot(p, HandleUtility.GetHandleSize(p) * 0.05f, dotColor);
                 drawn++;
-            }
-        }
-
-        // ── Settings + per-instance panel ──────────────────────────────────────
-
-        private void DrawSettingsWindow(InstanceScatterLayer layer, AuthoredInstancesData? authored,
-            ScatterField? field, int layerIdx)
-        {
-            Handles.BeginGUI();
-            var area = new Rect(8, 8, 260, this.selectedIndex >= 0 ? 300 : 150);
-            GUILayout.BeginArea(area, GUI.skin.box);
-            GUILayout.Label("Instance Placement", EditorStyles.boldLabel);
-
-            if (authored == null)
-                EditorGUILayout.HelpBox("Layer has no AuthoredInstancesData sub-asset.", MessageType.Error);
-            else if (field == null)
-                EditorGUILayout.HelpBox("No active ScatterField owns this layer.", MessageType.Warning);
-
-            Mode = (PlaceMode)GUILayout.Toolbar((int)Mode, new[] { "Place", "Select", "Erase" });
-
-            switch (Mode)
-            {
-                case PlaceMode.Place:
-                    AlignToNormal = EditorGUILayout.Toggle("Align To Normal", AlignToNormal);
-                    RandomYaw     = EditorGUILayout.Toggle("Random Yaw", RandomYaw);
-                    ScaleMin      = EditorGUILayout.FloatField("Scale Min", ScaleMin);
-                    ScaleMax      = EditorGUILayout.FloatField("Scale Max", ScaleMax);
-                    GUILayout.Label($"Spacing: {layer.PlaceSpacing:0.##} m", EditorStyles.miniLabel);
-                    break;
-                case PlaceMode.Erase:
-                    EraseRadius = EditorGUILayout.Slider("Erase Radius", EraseRadius, 0.1f, 20f);
-                    break;
-                case PlaceMode.Select:
-                    if (authored != null && this.selectedIndex >= 0)
-                        this.DrawSelectedInstance(authored, field, layerIdx);
-                    else
-                        GUILayout.Label("Click an instance to select.", EditorStyles.miniLabel);
-                    break;
-            }
-
-            GUILayout.EndArea();
-            Handles.EndGUI();
-        }
-
-        private void DrawSelectedInstance(AuthoredInstancesData authored, ScatterField? field, int layerIdx)
-        {
-            if (!authored.TryGetRecord(this.selectedIndex, out InstanceRecord rec)) { this.selectedIndex = -1; return; }
-
-            GUILayout.Label($"Instance #{this.selectedIndex}", EditorStyles.boldLabel);
-
-            bool configured = (rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0;
-            bool generate = configured && rec.generateCollider;
-
-            EditorGUI.BeginChangeCheck();
-            bool newGenerate = EditorGUILayout.Toggle("Generate Collider", generate);
-            bool newConvex   = EditorGUILayout.Toggle("Convex", rec.colliderConvex);
-            float newScale   = EditorGUILayout.FloatField("Collider Scale", rec.colliderScale <= 0f ? 1f : rec.colliderScale);
-
-            var curMesh = authored.GetObjectRef(rec.colliderMeshRefIndex) as Mesh;
-            var newMesh = (Mesh?)EditorGUILayout.ObjectField("Mesh Override", curMesh, typeof(Mesh), false);
-
-            var curMat = authored.GetObjectRef(rec.colliderMaterialRefIndex) as PhysicsMaterial;
-            var newMat = (PhysicsMaterial?)EditorGUILayout.ObjectField("PhysicsMaterial", curMat, typeof(PhysicsMaterial), false);
-
-            if (EditorGUI.EndChangeCheck() && field != null)
-            {
-                Undo.RegisterCompleteObjectUndo(authored, "Edit Instance Collider");
-                if (newGenerate || newMesh != null || newMat != null)
-                {
-                    int meshRef = newMesh != null ? authored.EnsureObjectRef(newMesh) : -1;
-                    int matRef  = newMat  != null ? authored.EnsureObjectRef(newMat)  : -1;
-                    authored.SetColliderConfig(this.selectedIndex, newGenerate, newConvex, newScale, meshRef, matRef);
-                }
-                else
-                {
-                    authored.ClearColliderConfig(this.selectedIndex);
-                }
-                Commit(authored, field, layerIdx);
             }
         }
 
@@ -298,6 +370,21 @@ namespace GrassInteract.Editor
             authored.PackBlob();
             EditorUtility.SetDirty(authored);
             if (layerIdx >= 0) ScatterRebuildScheduler.MarkDirty(field, layerIdx);
+        }
+
+        // ── Public accessors for InstancePanel ────────────────────────────────
+
+        /// <summary>The currently selected single-instance index (-1 if none).</summary>
+        internal int SelectedIndex => this.selectedIndex;
+
+        /// <summary>All indices currently in the multi-selection set.</summary>
+        internal IReadOnlyCollection<int> MultiSelection => this.multiSelection;
+
+        /// <summary>Clears the single- and multi-selection.</summary>
+        internal void ClearSelection()
+        {
+            this.selectedIndex = -1;
+            this.multiSelection.Clear();
         }
     }
 }

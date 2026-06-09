@@ -1,0 +1,403 @@
+/*
+ * ScatterStudio.uss — STRUCTURAL LAYOUT ONLY (Phase 1.B)
+ *
+ * ⛔ NO colors, border-radius, or transitions here.
+ * Phase 5 appends all visual theme rules (colors, radius, hover/active states, animations).
+ * Pro/light skin variants are controlled by the .pro / .light class on the root element
+ * (set by ScatterStudioWindow based on EditorGUIUtility.isProSkin).
+ */
+
+/* ── Root ──────────────────────────────────────────────────────────────────── */
+.scatter-studio-root {
+    flex-direction: column;
+    flex-grow: 1;
+    height: 100%;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────────── */
+.header {
+    flex-direction: row;
+    flex-shrink: 0;
+    align-items: center;
+    padding: 4px 6px;
+}
+
+.field-picker {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 120px;
+    margin-right: 6px;
+}
+
+.header-controls {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.header-toggle {
+    margin-left: 4px;
+}
+
+.rebuild-button {
+    margin-left: 8px;
+    min-width: 60px;
+}
+
+/* ── Body ──────────────────────────────────────────────────────────────────── */
+.body {
+    flex-direction: row;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+/* ── Layer rail (left column) ──────────────────────────────────────────────── */
+.layer-rail {
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 160px;
+    min-width: 100px;
+}
+
+.layer-rail-scroll {
+    flex-grow: 1;
+}
+
+.layer-list {
+    flex-direction: column;
+}
+
+.layer-rail-footer {
+    flex-direction: row;
+    flex-shrink: 0;
+    padding: 4px;
+}
+
+.add-layer-button {
+    flex-grow: 1;
+    flex-basis: 0;
+    margin: 2px;
+}
+
+/* ── Content area (right of rail) ──────────────────────────────────────────── */
+.content-area {
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.layer-panel-scroll {
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.layer-panel {
+    flex-direction: column;
+    padding: 4px;
+}
+
+/* ── Reserved phase-mount containers ───────────────────────────────────────── */
+/* These are empty placeholders. Phase 2.B/3/4 attach child VisualElements here. */
+.phase-mount {
+    flex-shrink: 0;
+}
+
+.brush-library-mount {
+    /* Phase 2.B attaches BrushLibraryView here */
+}
+
+.density-paint-panel-mount {
+    /* Phase 3 attaches DensityPaintPanel here */
+}
+
+.instance-panel-mount {
+    /* Phase 4 attaches InstancePanel here */
+}
+
+/* ── Layer rail row ─────────────────────────────────────────────────────────── */
+.layer-row {
+    flex-direction: row;
+    align-items: center;
+    padding: 3px 4px;
+    height: 28px;
+    cursor: link;
+}
+
+.layer-row--selected {
+    /* Phase 5 adds background color */
+}
+
+.layer-color-chip {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    /* Phase 5 adds border-radius to make it a circle */
+}
+
+/* Density layer chip = green, Instance layer chip = amber (via USS class, not inline) */
+.layer-chip--density {
+    background-color: rgb(72, 160, 72);
+}
+
+.layer-chip--instance {
+    background-color: rgb(210, 160, 40);
+}
+
+.layer-enable-toggle {
+    flex-shrink: 0;
+    margin-right: 4px;
+    width: 16px;
+}
+
+.layer-name-label {
+    flex-grow: 1;
+    flex-shrink: 1;
+    overflow: hidden;
+    -unity-text-overflow-position: end;
+    text-overflow: ellipsis;
+}
+
+.layer-remove-button {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-left: 2px;
+    padding: 0;
+    font-size: 10px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+ * PHASE 5 — THEME RULES (appended; structural rules above are untouched)
+ *
+ * Skin scope:
+ *   Shared (skin-agnostic) — border-radius, spacing tokens, transitions — UNSCOPED
+ *   Pro / dark skin         — under .pro
+ *   Light skin              — in ScatterStudioLight.uss under .light
+ * ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared: tokens & base shapes ──────────────────────────────────────────── */
+
+/* Root background inherits from the editor skin; let skin rules override it */
+.scatter-studio-root {
+    /* base font size applied to all text children */
+    font-size: 12px;
+}
+
+/* Header — subtle bottom separator */
+.header {
+    border-bottom-width: 1px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.rebuild-button {
+    border-radius: 3px;
+}
+
+/* ── Layer rail (shared shape rules) ──────────────────────────────────────── */
+.layer-rail {
+    border-right-width: 1px;
+}
+
+.layer-row {
+    border-radius: 4px;
+    margin: 1px 3px;
+    transition-property: background-color;
+    transition-duration: 0.1s;
+}
+
+.layer-row--selected {
+    /* color set per skin; transition covers the selection flash */
+    transition-property: background-color;
+    transition-duration: 0.08s;
+}
+
+.layer-row:hover {
+    /* background overridden per skin */
+    transition-property: background-color;
+    transition-duration: 0.06s;
+}
+
+/* Color chip — circular pill shape */
+.layer-color-chip {
+    border-radius: 50%;
+    border-width: 1px;
+    /* border color per skin */
+}
+
+/* Density chip (green) */
+.layer-chip--density {
+    background-color: rgb(72, 160, 72);
+    border-color: rgba(72, 160, 72, 0.5);
+}
+
+/* Instance chip (amber) */
+.layer-chip--instance {
+    background-color: rgb(210, 160, 40);
+    border-color: rgba(210, 160, 40, 0.5);
+}
+
+.layer-name-label {
+    font-size: 12px;
+}
+
+.layer-remove-button {
+    border-radius: 3px;
+    transition-property: background-color, border-color;
+    transition-duration: 0.1s;
+}
+
+.layer-remove-button:hover {
+    /* color per skin */
+    transition-property: background-color;
+    transition-duration: 0.06s;
+}
+
+/* Rail footer — thin top separator */
+.layer-rail-footer {
+    border-top-width: 1px;
+    padding: 4px 3px;
+}
+
+.add-layer-button {
+    border-radius: 3px;
+    transition-property: background-color;
+    transition-duration: 0.1s;
+}
+
+/* ── Layer panel cards ─────────────────────────────────────────────────────── */
+.layer-panel {
+    padding: 6px;
+}
+
+.layer-panel-title {
+    font-size: 13px;
+    -unity-font-style: bold;
+    margin-bottom: 6px;
+    margin-left: 2px;
+}
+
+.layer-panel-card {
+    border-radius: 5px;
+    border-width: 1px;
+    margin-bottom: 5px;
+    padding: 4px 6px 6px 6px;
+    transition-property: border-color;
+    transition-duration: 0.12s;
+}
+
+.layer-panel-card > .unity-foldout__toggle {
+    /* Slightly bolder toggle header */
+    -unity-font-style: bold;
+    font-size: 12px;
+}
+
+.layer-panel-field {
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+/* ── Pro (dark) skin ───────────────────────────────────────────────────────── */
+
+/* Root dark background */
+.pro.scatter-studio-root,
+.pro .scatter-studio-root {
+    background-color: rgb(45, 45, 45);
+}
+
+.pro .header {
+    background-color: rgb(50, 50, 50);
+    border-bottom-color: rgb(30, 30, 30);
+}
+
+/* Layer rail */
+.pro .layer-rail {
+    background-color: rgb(48, 48, 48);
+    border-right-color: rgb(30, 30, 30);
+}
+
+.pro .layer-rail-footer {
+    background-color: rgb(48, 48, 48);
+    border-top-color: rgb(30, 30, 30);
+}
+
+/* Row states */
+.pro .layer-row:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.pro .layer-row--selected {
+    background-color: rgba(63, 127, 210, 0.35);
+}
+
+.pro .layer-row--selected:hover {
+    background-color: rgba(63, 127, 210, 0.45);
+}
+
+/* Color chip border */
+.pro .layer-color-chip {
+    border-color: rgba(0, 0, 0, 0.4);
+}
+
+/* Name label */
+.pro .layer-name-label {
+    color: rgb(210, 210, 210);
+}
+
+/* Remove button */
+.pro .layer-remove-button {
+    color: rgb(180, 180, 180);
+    background-color: transparent;
+    border-color: transparent;
+}
+
+.pro .layer-remove-button:hover {
+    background-color: rgba(220, 80, 80, 0.25);
+    color: rgb(240, 120, 120);
+    border-color: rgba(220, 80, 80, 0.4);
+}
+
+/* Add layer buttons */
+.pro .add-layer-button {
+    background-color: rgb(62, 62, 62);
+    color: rgb(200, 200, 200);
+    border-color: rgb(40, 40, 40);
+}
+
+.pro .add-layer-button:hover {
+    background-color: rgb(75, 75, 75);
+}
+
+/* Rebuild button */
+.pro .rebuild-button {
+    background-color: rgb(62, 62, 62);
+    color: rgb(200, 200, 200);
+    border-color: rgb(40, 40, 40);
+}
+
+.pro .rebuild-button:hover {
+    background-color: rgb(75, 75, 75);
+}
+
+/* Content area */
+.pro .content-area {
+    background-color: rgb(45, 45, 45);
+}
+
+/* Panel title */
+.pro .layer-panel-title {
+    color: rgb(220, 220, 220);
+}
+
+/* Foldout cards */
+.pro .layer-panel-card {
+    background-color: rgb(55, 55, 55);
+    border-color: rgb(36, 36, 36);
+}
+
+.pro .layer-panel-card:hover {
+    border-color: rgb(80, 80, 80);
+}
+
+/* ── End of ScatterStudio.uss ──────────────────────────────────────────────── */
