@@ -16,10 +16,6 @@ namespace GrassInteract.Editor
     /// </summary>
     internal sealed class LayerPanelView
     {
-        // ── Root element ──────────────────────────────────────────────────────
-
-        internal VisualElement Root { get; }
-
         // ── State ─────────────────────────────────────────────────────────────
 
         private ScatterLayer? activeLayer;
@@ -33,7 +29,6 @@ namespace GrassInteract.Editor
 
         internal LayerPanelView(VisualElement panelRoot)
         {
-            this.Root           = panelRoot;
             this.panelContainer = panelRoot.Q<VisualElement>("layer-panel");
         }
 

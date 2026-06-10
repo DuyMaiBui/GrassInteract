@@ -1,7 +1,6 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Text;
 using Unity.Collections;
 using UnityEngine;
 
@@ -10,20 +9,12 @@ namespace GrassInteract
     /// <summary>
     /// Per-instance authored override flags packed into a uint32.
     /// Bit 0 = collider configuration present (ColliderConfigured).
-    /// RendererOverride was removed in Phase A (D1 strict-V2).
     /// </summary>
     [Flags]
     public enum InstanceOverrideMask : uint
     {
-        None              = 0,
+        None               = 0,
         ColliderConfigured = 1 << 0,
-
-        // Legacy V1 bit — used only during migration to detect and skip renderer blocks.
-        // DO NOT use for new records.
-        [Obsolete("V1 layout only — present during V1->V2 migration; not written to V2 blobs.")]
-        ColliderOverride  = 1 << 0,  // same bit as ColliderConfigured (V1 compat name)
-        [Obsolete("V1 layout only — removed in Phase A D1 strict-V2.")]
-        RendererOverride  = 1 << 1,
     }
 
     /// <summary>
@@ -43,8 +34,6 @@ namespace GrassInteract
     ///   int colliderMaterialRefIndex 4 B
     ///
     /// Total: 36 B (no collider) or 56 B (with collider).
-    ///
-    /// RendererOverride is GONE per D1 strict-V2.
     /// </summary>
     [System.Serializable]
     public struct InstanceRecord
@@ -109,11 +98,8 @@ namespace GrassInteract
     /// Storage: a 1-byte version header followed by a flat byte[] blob (binary, fast I/O) plus a
     /// List{Object} for object references (meshes) indexed from the blob.
     ///
-    /// V2 blob layout: [VERSION_BYTE=2] + [records...]. V1 blobs (no header / VERSION_BYTE != 2)
-    /// are migrated in-memory on first read; the next SaveAssets writes a V2 blob.
-    ///
-    /// RendererOverride is REMOVED per Phase A D1 strict-V2. V1 RendererOverride blocks are
-    /// silently dropped on migration with a one-shot per-layer Debug.LogWarning.
+    /// V3 blob layout: [VERSION_BYTE=3] + [records...]. A blob whose version byte is not 3 is
+    /// rejected with an exception — legacy V1/V2 formats are no longer supported.
     ///
     /// Asmdef boundary: this file must NOT use UnityEditor. Editor helpers live in
     /// Editor/InstancePickingService.cs and Editor/TerrainScatterConfigEditor.cs.
@@ -127,7 +113,7 @@ namespace GrassInteract
 
         // ── Serialized storage ─────────────────────────────────────────────────
 
-        [Tooltip("Binary blob encoding all InstanceRecord entries (V2 format). " +
+        [Tooltip("Binary blob encoding all InstanceRecord entries (V3 format). " +
                  "Managed by AuthoredInstancesData — do NOT hand-edit.")]
         [SerializeField] private byte[] blob = Array.Empty<byte>();
 
@@ -359,20 +345,19 @@ namespace GrassInteract
             this.blob = buf;
         }
 
-        /// <summary>Unpacks the blob into a new List of InstanceRecords. Handles V1→V2→V3 migration.</summary>
+        /// <summary>Unpacks the V3 blob into a new List of InstanceRecords.</summary>
         private List<InstanceRecord> UnpackBlob()
         {
             if (this.blob == null || this.blob.Length == 0)
                 return new List<InstanceRecord>();
 
-            // Dispatch on version byte: 3=V3, 2=V2→V3 migration, else=V1→V2→V3 chain.
             byte version = this.blob[0];
-            if (version == 3)
-                return this.UnpackBlobV3();
-            else if (version == 2)
-                return this.MigrateV2ToV3();
-            else
-                return this.MigrateV1ToV3();
+            if (version != VERSION_BYTE)
+                throw new InvalidOperationException(
+                    $"[AuthoredInstancesData] Unsupported blob version {version} on layer '{this.name}'. " +
+                    $"Only V{VERSION_BYTE} is supported (legacy V1/V2 migration was removed).");
+
+            return this.UnpackBlobV3();
         }
 
         // ── V3 unpack ─────────────────────────────────────────────────────────
@@ -419,174 +404,6 @@ namespace GrassInteract
             return list;
         }
 
-        // ── V2 → V3 migration (reads old 16 B collider block, sets matRefIdx=-1) ─
-
-        private List<InstanceRecord> MigrateV2ToV3()
-        {
-            var list = new List<InstanceRecord>();
-            int offset = 1; // skip version byte
-            int colliderCount = 0;
-
-            while (offset + InstanceRecord.FIXED_BYTES <= this.blob.Length)
-            {
-                var rec = new InstanceRecord
-                {
-                    position = new Vector3(
-                        ReadFloat(this.blob, ref offset),
-                        ReadFloat(this.blob, ref offset),
-                        ReadFloat(this.blob, ref offset)),
-                    rotation = new Quaternion(
-                        ReadFloat(this.blob, ref offset),
-                        ReadFloat(this.blob, ref offset),
-                        ReadFloat(this.blob, ref offset),
-                        ReadFloat(this.blob, ref offset)),
-                    scale       = ReadFloat(this.blob, ref offset),
-                    overrideMask = (InstanceOverrideMask)ReadUInt(this.blob, ref offset),
-                };
-
-                if ((rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0)
-                {
-                    // V2 collider block: 4 ints (16 B) — no matRefIdx.
-                    rec.generateCollider       = ReadInt(this.blob, ref offset) != 0;
-                    rec.colliderConvex         = ReadInt(this.blob, ref offset) != 0;
-                    rec.colliderScale          = ReadFloat(this.blob, ref offset);
-                    rec.colliderMeshRefIndex   = ReadInt(this.blob, ref offset);
-                    rec.colliderMaterialRefIndex = -1;
-                    colliderCount++;
-                }
-                else
-                {
-                    rec.colliderScale          = 1f;
-                    rec.colliderMeshRefIndex   = -1;
-                    rec.colliderMaterialRefIndex = -1;
-                }
-
-                list.Add(rec);
-            }
-
-            if (colliderCount > 0)
-            {
-                Debug.LogWarning(
-                    $"[AuthoredInstancesData] Migrated {colliderCount} V2 collider records on layer " +
-                    $"'{this.name}' to V3; colliderMaterialRefIndex set to -1 (layer default).");
-            }
-
-            // Promote working list to V3 so next OnBeforeSerialize writes V3 blob.
-            this.workingList = list;
-            this.PackBlob();
-            return list;
-        }
-
-        // ── V1 → V2 → V3 chain (reuse V1→V2 logic, then promote to V3) ─
-
-        private List<InstanceRecord> MigrateV1ToV3()
-        {
-            var list = this.MigrateV1ToV2();
-            // Promote to V3 in-memory so next save writes V3.
-            this.workingList = list;
-            this.PackBlob();
-            return list;
-        }
-
-        // ── V1 → V2 migration ──────────────────────────────────────────────────
-
-        // V1 fixed header: position(12) + rotation(16) + Vector3 scale(12) + overrideMask(4) = 44 B
-        private const int V1_FIXED_BYTES    = 44;
-        private const int V1_COLLIDER_BYTES = 12; // enabled(4) + convex(4) + meshRefIndex(4)
-        private const int V1_RENDERER_BYTES = 12; // materialRefIndex(4) + shadowMode(4) + padding(4)
-
-        // V1 RendererOverride bit (bit 1).
-        private const uint V1_RENDERER_BIT = 1u << 1;
-        // V1 ColliderOverride bit (bit 0).
-        private const uint V1_COLLIDER_BIT = 1u << 0;
-
-        private List<InstanceRecord> MigrateV1ToV2()
-        {
-            var list          = new List<InstanceRecord>();
-            var rendererDropped = new List<int>();
-            var nonUniformCollapsed = new List<int>();
-            int offset = 0;
-            int recordIdx = 0;
-
-            while (offset + V1_FIXED_BYTES <= this.blob.Length)
-            {
-                // Read V1 fixed header.
-                float px = ReadFloat(this.blob, ref offset);
-                float py = ReadFloat(this.blob, ref offset);
-                float pz = ReadFloat(this.blob, ref offset);
-                float rx = ReadFloat(this.blob, ref offset);
-                float ry = ReadFloat(this.blob, ref offset);
-                float rz = ReadFloat(this.blob, ref offset);
-                float rw = ReadFloat(this.blob, ref offset);
-                float sx = ReadFloat(this.blob, ref offset);
-                float sy = ReadFloat(this.blob, ref offset);
-                float sz = ReadFloat(this.blob, ref offset);
-                uint  v1Mask = ReadUInt(this.blob, ref offset);
-
-                // Collapse non-uniform scale to uniform (average XYZ).
-                float uniformScale = (sx + sy + sz) / 3f;
-                if (Mathf.Abs(Mathf.Max(sx, Mathf.Max(sy, sz)) - Mathf.Min(sx, Mathf.Min(sy, sz))) > 0.001f)
-                    nonUniformCollapsed.Add(recordIdx);
-
-                var rec = new InstanceRecord
-                {
-                    position = new Vector3(px, py, pz),
-                    rotation = new Quaternion(rx, ry, rz, rw),
-                    scale    = uniformScale,
-                };
-
-                // V1 ColliderOverride (bit 0) → V2 ColliderConfigured.
-                if ((v1Mask & V1_COLLIDER_BIT) != 0 && offset + V1_COLLIDER_BYTES <= this.blob.Length)
-                {
-                    bool colEnabled   = ReadInt(this.blob, ref offset) != 0;
-                    bool colConvex    = ReadInt(this.blob, ref offset) != 0;
-                    int  meshRefIndex = ReadInt(this.blob, ref offset);
-
-                    rec.overrideMask       = InstanceOverrideMask.ColliderConfigured;
-                    rec.generateCollider   = colEnabled;
-                    rec.colliderConvex     = colConvex;
-                    rec.colliderScale      = 1f;
-                    rec.colliderMeshRefIndex = meshRefIndex;
-                    rec.colliderMaterialRefIndex = -1; // V1 had no PhysicMaterial → layer default
-                }
-                else
-                {
-                    rec.overrideMask         = InstanceOverrideMask.None;
-                    rec.colliderScale        = 1f;
-                    rec.colliderMeshRefIndex = -1;
-                    rec.colliderMaterialRefIndex = -1;
-                }
-
-                // V1 RendererOverride (bit 1) → skip 12 bytes, record the drop.
-                if ((v1Mask & V1_RENDERER_BIT) != 0 && offset + V1_RENDERER_BYTES <= this.blob.Length)
-                {
-                    offset += V1_RENDERER_BYTES; // skip materialRefIndex + shadowMode + padding
-                    rendererDropped.Add(recordIdx);
-                }
-
-                list.Add(rec);
-                recordIdx++;
-            }
-
-            // Emit one-shot warnings.
-            if (rendererDropped.Count > 0)
-            {
-                Debug.LogWarning(
-                    $"[AuthoredInstancesData] Migrated {rendererDropped.Count} V1 records on layer " +
-                    $"'{this.name}'; RendererOverride data dropped on indices " +
-                    $"[{JoinInts(rendererDropped)}] per D1 strict-V2.");
-            }
-            if (nonUniformCollapsed.Count > 0)
-            {
-                Debug.LogWarning(
-                    $"[AuthoredInstancesData] Migrated {nonUniformCollapsed.Count} V1 records on layer " +
-                    $"'{this.name}'; non-uniform scale collapsed to uniform (average XYZ) on indices " +
-                    $"[{JoinInts(nonUniformCollapsed)}] per D1 strict-V2 §2.");
-            }
-
-            return list;
-        }
-
         // ── CountFromBlob ────────────────────────────────────────────────────
 
         private int CountFromBlob()
@@ -594,12 +411,12 @@ namespace GrassInteract
             if (this.blob == null || this.blob.Length == 0) return 0;
 
             byte version = this.blob[0];
-            if (version == 3)
-                return this.CountFromBlobV3();
-            else if (version == 2)
-                return this.CountFromBlobV2();
-            else
-                return this.CountFromBlobV1();
+            if (version != VERSION_BYTE)
+                throw new InvalidOperationException(
+                    $"[AuthoredInstancesData] Unsupported blob version {version} on layer '{this.name}'. " +
+                    $"Only V{VERSION_BYTE} is supported (legacy V1/V2 migration was removed).");
+
+            return this.CountFromBlobV3();
         }
 
         private int CountFromBlobV3()
@@ -612,39 +429,6 @@ namespace GrassInteract
                 int size  = InstanceRecord.FIXED_BYTES;
                 if ((mask & (uint)InstanceOverrideMask.ColliderConfigured) != 0)
                     size += InstanceRecord.COLLIDER_BYTES;
-                if (offset + size > this.blob.Length) break;
-                offset += size;
-                count++;
-            }
-            return count;
-        }
-
-        private int CountFromBlobV2()
-        {
-            int offset = 1, count = 0; // skip version byte
-            while (offset + InstanceRecord.FIXED_BYTES <= this.blob.Length)
-            {
-                // overrideMask is at offset 32 within each record (12 pos + 16 rot + 4 scale = 32).
-                uint mask = ReadUIntAt(this.blob, offset + 32);
-                int size  = InstanceRecord.FIXED_BYTES;
-                if ((mask & (uint)InstanceOverrideMask.ColliderConfigured) != 0)
-                    size += 16; // V2 collider block was 16 B (4 ints, no matRefIdx)
-                if (offset + size > this.blob.Length) break;
-                offset += size;
-                count++;
-            }
-            return count;
-        }
-
-        private int CountFromBlobV1()
-        {
-            int offset = 0, count = 0;
-            while (offset + V1_FIXED_BYTES <= this.blob.Length)
-            {
-                uint mask = ReadUIntAt(this.blob, offset + 40); // V1: overrideMask at byte 40
-                int size  = V1_FIXED_BYTES;
-                if ((mask & V1_COLLIDER_BIT)  != 0) size += V1_COLLIDER_BYTES;
-                if ((mask & V1_RENDERER_BIT)  != 0) size += V1_RENDERER_BYTES;
                 if (offset + size > this.blob.Length) break;
                 offset += size;
                 count++;
@@ -715,16 +499,5 @@ namespace GrassInteract
 
         private static uint ReadUIntAt(byte[] buf, int offset) =>
             (uint)(buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24));
-
-        private static string JoinInts(List<int> items)
-        {
-            var sb = new StringBuilder();
-            for (int i = 0; i < items.Count; ++i)
-            {
-                if (i > 0) sb.Append(", ");
-                sb.Append(items[i]);
-            }
-            return sb.ToString();
-        }
     }
 }

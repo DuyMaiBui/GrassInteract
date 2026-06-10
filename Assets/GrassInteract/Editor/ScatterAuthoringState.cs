@@ -8,8 +8,7 @@ namespace GrassInteract.Editor
     /// ScriptableSingleton that is the single source of truth for all authoring tool state:
     /// density-paint brush settings, instance-placement settings, and the active stamp reference.
     /// Replaces the scattered <c>EditorPrefs</c> reads in <see cref="DensityPaintTool"/> and
-    /// <see cref="InstancePlacementTool"/>; legacy EditorPrefs values are migrated exactly once
-    /// at domain load via <see cref="MigrateFromEditorPrefs"/>.
+    /// <see cref="InstancePlacementTool"/>.
     /// </summary>
     internal sealed class ScatterAuthoringState : ScriptableSingleton<ScatterAuthoringState>
     {
@@ -136,65 +135,6 @@ namespace GrassInteract.Editor
         {
             get => this.overlayVisible;
             set { this.overlayVisible = value; this.Save(true); }
-        }
-
-        // ── Migration flag ─────────────────────────────────────────────────────
-
-        [SerializeField] private bool migratedFromEditorPrefs = false;
-
-        // ── Legacy EditorPrefs keys (read-only constants) ──────────────────────
-
-        private const string K_BRUSH_SIZE    = "GrassInteract.Brush.Size";
-        private const string K_BRUSH_OPACITY = "GrassInteract.Brush.Opacity";
-        private const string K_BRUSH_FALLOFF = "GrassInteract.Brush.Falloff";
-        private const string K_BRUSH_FLOW    = "GrassInteract.Brush.Flow";
-        private const string K_BRUSH_MODE    = "GrassInteract.Brush.Mode";
-        private const string K_BRUSH_STAMP   = "GrassInteract.Brush.Stamp";
-
-        private const string K_PLACE_MODE    = "GrassInteract.Place.Mode";
-        private const string K_PLACE_ALIGN   = "GrassInteract.Place.Align";
-        private const string K_PLACE_YAW     = "GrassInteract.Place.RandYaw";
-        private const string K_PLACE_SMIN    = "GrassInteract.Place.ScaleMin";
-        private const string K_PLACE_SMAX    = "GrassInteract.Place.ScaleMax";
-        private const string K_PLACE_ERASE   = "GrassInteract.Place.EraseRadius";
-
-        // ── One-time migration ─────────────────────────────────────────────────
-
-        /// <summary>
-        /// Runs once per project, at domain load, to lift legacy EditorPrefs values into this
-        /// singleton. Gated on <see cref="migratedFromEditorPrefs"/> — subsequent domain reloads
-        /// skip this entirely.
-        /// </summary>
-        [InitializeOnLoadMethod]
-        private static void MigrateFromEditorPrefs()
-        {
-            if (I.migratedFromEditorPrefs) return;
-
-            // Paint settings — read with the exact same defaults the original tool used.
-            I.brushSize    = EditorPrefs.GetFloat(K_BRUSH_SIZE,    3f);
-            I.brushOpacity = EditorPrefs.GetFloat(K_BRUSH_OPACITY, 1f);
-            I.brushFalloff = EditorPrefs.GetFloat(K_BRUSH_FALLOFF, 0.5f);
-            I.brushFlow    = EditorPrefs.GetFloat(K_BRUSH_FLOW,    0.5f);
-            I.paintMode    = EditorPrefs.GetInt  (K_BRUSH_MODE,    0);
-
-            // Stamp: old key stored the int index (-1 = none/procedural).
-            int legacyStampIdx = EditorPrefs.GetInt(K_BRUSH_STAMP, -1);
-            I.activeStamp = legacyStampIdx < 0
-                ? new StampRef(StampRef.StampSource.None,   0)
-                : new StampRef(StampRef.StampSource.Config, legacyStampIdx);
-
-            // Place settings — read with the exact same defaults the original tool used.
-            I.placeMode    = EditorPrefs.GetInt  (K_PLACE_MODE,  0);
-            I.alignToNormal= EditorPrefs.GetBool (K_PLACE_ALIGN, false);
-            I.randomYaw    = EditorPrefs.GetBool (K_PLACE_YAW,   true);
-            I.placeScaleMin= EditorPrefs.GetFloat(K_PLACE_SMIN,  1f);
-            I.placeScaleMax= EditorPrefs.GetFloat(K_PLACE_SMAX,  1f);
-            I.eraseRadius  = EditorPrefs.GetFloat(K_PLACE_ERASE, 2f);
-
-            I.migratedFromEditorPrefs = true;
-            I.Save(true);
-
-            Debug.Log("[ScatterAuthoringState] Migrated tool settings from EditorPrefs to ScatterAuthoringState singleton. This runs exactly once.");
         }
     }
 

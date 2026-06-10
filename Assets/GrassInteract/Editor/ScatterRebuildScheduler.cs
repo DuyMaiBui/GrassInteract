@@ -43,15 +43,6 @@ namespace GrassInteract.Editor
             dirty[key] = (field, layerIdx, EditorApplication.timeSinceStartup);
         }
 
-        /// <summary>Queues a debounced rebuild of every layer on one field.</summary>
-        public static void MarkAllLayersDirty(ScatterField field)
-        {
-            if (field == null || field.Config == null) return;
-            int count = field.Layers.Count;
-            for (int i = 0; i < count; ++i)
-                MarkDirty(field, i);
-        }
-
         /// <summary>
         /// Rebuilds one layer immediately, bypassing the debounce. Used during an active paint drag
         /// where <see cref="EditorApplication.update"/> (and thus the debounced <see cref="Tick"/>) is

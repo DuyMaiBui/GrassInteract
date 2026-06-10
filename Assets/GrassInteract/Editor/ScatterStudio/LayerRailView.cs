@@ -22,10 +22,6 @@ namespace GrassInteract.Editor
         /// <summary>Fires when the user selects a layer row, or null when selection cleared.</summary>
         internal event Action<ScatterLayer?>? LayerSelected;
 
-        // ── Root element ──────────────────────────────────────────────────────
-
-        internal VisualElement Root { get; }
-
         // ── State ─────────────────────────────────────────────────────────────
 
         private ScatterField? field;
@@ -43,8 +39,6 @@ namespace GrassInteract.Editor
 
         internal LayerRailView(VisualElement railRoot)
         {
-            this.Root = railRoot;
-
             this.layerList         = railRoot.Q<VisualElement>("layer-list");
             this.addDensityButton  = railRoot.Q<Button>("add-density-button");
             this.addInstanceButton = railRoot.Q<Button>("add-instance-button");
