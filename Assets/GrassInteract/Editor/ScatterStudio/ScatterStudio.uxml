@@ -5,7 +5,6 @@
         <ui:VisualElement name="header" class="header">
             <uie:ObjectField name="field-picker" label="Scatter Field" type="GrassInteract.ScatterField, GrassInteract" class="field-picker" />
             <ui:VisualElement class="header-controls">
-                <ui:Toggle name="preview-toggle" label="Preview" class="header-toggle" />
                 <ui:Toggle name="colliders-toggle" label="Colliders" class="header-toggle" />
                 <ui:Button name="rebuild-button" text="Rebuild" class="rebuild-button" />
             </ui:VisualElement>
@@ -25,23 +24,46 @@
                 </ui:VisualElement>
             </ui:VisualElement>
 
-            <!-- Center/Right: layer panel + reserved phase mounts -->
+            <!-- Center/Right: tabbed content area -->
             <ui:VisualElement name="content-area" class="content-area">
 
-                <!-- Layer data-binding panel (PropertyField cards) -->
-                <ui:ScrollView name="layer-panel-scroll" class="layer-panel-scroll">
-                    <ui:VisualElement name="layer-panel" class="layer-panel" />
-                </ui:ScrollView>
+                <!-- Tab bar -->
+                <ui:VisualElement name="tab-bar" class="tab-bar">
+                    <ui:Button name="tab-layer"  text="Layer"   class="tab-button tab-button--active" />
+                    <ui:Button name="tab-brushes" text="Brushes" class="tab-button" />
+                    <ui:Button name="tab-paint"  text="Paint"   class="tab-button" />
+                    <ui:Button name="tab-place"  text="Place"   class="tab-button" />
+                </ui:VisualElement>
 
-                <!-- ── Reserved mount containers (phases 2.B / 3 / 4 attach here) ── -->
-                <!-- Phase 2.B: BrushLibraryView attaches here -->
-                <ui:VisualElement name="brush-library" class="phase-mount brush-library-mount" />
+                <!-- Tab content host — each page shown one at a time -->
+                <ui:VisualElement name="tab-content" class="tab-content">
 
-                <!-- Phase 3: DensityPaintPanel attaches here -->
-                <ui:VisualElement name="density-paint-panel" class="phase-mount density-paint-panel-mount" />
+                    <!-- Page 0: Layer properties -->
+                    <ui:VisualElement name="page-layer" class="tab-page tab-page--active">
+                        <ui:ScrollView name="layer-panel-scroll" class="layer-panel-scroll">
+                            <ui:VisualElement name="layer-panel" class="layer-panel" />
+                        </ui:ScrollView>
+                    </ui:VisualElement>
 
-                <!-- Phase 4: InstancePanel attaches here -->
-                <ui:VisualElement name="instance-panel" class="phase-mount instance-panel-mount" />
+                    <!-- Page 1: Brush library -->
+                    <ui:VisualElement name="page-brushes" class="tab-page">
+                        <!-- Phase 2.B: BrushLibraryView attaches here -->
+                        <ui:VisualElement name="brush-library" class="phase-mount brush-library-mount" />
+                    </ui:VisualElement>
+
+                    <!-- Page 2: Density paint -->
+                    <ui:VisualElement name="page-paint" class="tab-page">
+                        <!-- Phase 3: DensityPaintPanel attaches here -->
+                        <ui:VisualElement name="density-paint-panel" class="phase-mount density-paint-panel-mount" />
+                    </ui:VisualElement>
+
+                    <!-- Page 3: Instance placement -->
+                    <ui:VisualElement name="page-place" class="tab-page">
+                        <!-- Phase 4: InstancePanel attaches here -->
+                        <ui:VisualElement name="instance-panel" class="phase-mount instance-panel-mount" />
+                    </ui:VisualElement>
+
+                </ui:VisualElement>
 
             </ui:VisualElement>
         </ui:VisualElement>

@@ -1,6 +1,5 @@
 #nullable enable
 using UnityEditor;
-using UnityEditor.EditorTools;
 using UnityEngine;
 
 namespace GrassInteract.Editor
@@ -9,16 +8,20 @@ namespace GrassInteract.Editor
     /// Edit-mode render driver: steps + submits every enabled <see cref="ScatterField"/> so the
     /// Scene view shows WYSIWYG preview without entering Play mode (requirement #2 full-engine render).
     ///
-    /// HIGH-risk mitigation against a busy repaint loop: the tick runs ONLY when preview is enabled
-    /// AND (a Scatter <see cref="EditorTool"/> is active OR a ScatterField/layer/config is selected),
-    /// and it repaints only on frames where a draw actually happened. Preview defaults OFF.
+    /// Rendering is ALWAYS-ON in edit mode — no selection or tool gate. The only way to pause
+    /// rendering is via the menu kill-switch: <c>Tools/GrassInteract/Disable Edit-Mode Preview</c>.
+    /// The kill-switch is an EditorPref that defaults to rendering ENABLED (kill-switch OFF).
+    ///
+    /// <see cref="PreviewEnabled"/> and <see cref="PreviewColliders"/> are preserved as readable
+    /// properties (other code and the inspector may still access them); they no longer gate rendering.
     /// </summary>
     [InitializeOnLoad]
     internal static class ScatterFieldEditorTick
     {
-        private const string PREVIEW_PREF_KEY   = "GrassInteract.PreviewEnabled";
-        private const string COLLIDERS_PREF_KEY = "GrassInteract.PreviewColliders";
-        private const float  MAX_DT             = 0.1f;
+        private const string PREVIEW_PREF_KEY    = "GrassInteract.PreviewEnabled";
+        private const string COLLIDERS_PREF_KEY  = "GrassInteract.PreviewColliders";
+        private const string KILL_SWITCH_PREF_KEY = "GrassInteract.EditModePreviewDisabled";
+        private const float  MAX_DT              = 0.1f;
 
         private static double lastTime;
         private static bool   hasLast;
@@ -28,7 +31,13 @@ namespace GrassInteract.Editor
             EditorApplication.update += Tick;
         }
 
-        /// <summary>Edit-mode render preview toggle (persisted per project). Default OFF.</summary>
+        // ─── Public properties (kept for backward-compat; no longer gate rendering) ──────────
+
+        /// <summary>
+        /// Edit-mode render preview toggle (persisted per project).
+        /// No longer gates scene rendering — rendering is always-on.
+        /// Retained so existing inspector/window bindings compile without change.
+        /// </summary>
         public static bool PreviewEnabled
         {
             get => EditorPrefs.GetBool(PREVIEW_PREF_KEY, false);
@@ -46,11 +55,33 @@ namespace GrassInteract.Editor
             set => EditorPrefs.SetBool(COLLIDERS_PREF_KEY, value);
         }
 
+        // ─── Kill-switch menu toggle ───────────────────────────────────────────────────────────
+
+        private static bool KillSwitchActive
+        {
+            get => EditorPrefs.GetBool(KILL_SWITCH_PREF_KEY, false); // default false = rendering ON
+            set => EditorPrefs.SetBool(KILL_SWITCH_PREF_KEY, value);
+        }
+
+        [MenuItem("Tools/GrassInteract/Disable Edit-Mode Preview", priority = 200)]
+        private static void ToggleKillSwitch()
+        {
+            ScatterFieldEditorTick.KillSwitchActive = !ScatterFieldEditorTick.KillSwitchActive;
+        }
+
+        [MenuItem("Tools/GrassInteract/Disable Edit-Mode Preview", validate = true, priority = 200)]
+        private static bool ToggleKillSwitchValidate()
+        {
+            Menu.SetChecked("Tools/GrassInteract/Disable Edit-Mode Preview", ScatterFieldEditorTick.KillSwitchActive);
+            return true;
+        }
+
+        // ─── Tick ─────────────────────────────────────────────────────────────────────────────
+
         private static void Tick()
         {
-            if (Application.isPlaying) { hasLast = false; return; } // play loop drives itself
-            if (!PreviewEnabled)       { hasLast = false; return; }
-            if (!ShouldTick())         { hasLast = false; return; }
+            if (Application.isPlaying)          { hasLast = false; return; } // play loop drives itself
+            if (ScatterFieldEditorTick.KillSwitchActive) { hasLast = false; return; } // user kill-switch
 
             double now = EditorApplication.timeSinceStartup;
             if (!hasLast) { lastTime = now; hasLast = true; return; } // skip first frame (huge dt)
@@ -71,26 +102,6 @@ namespace GrassInteract.Editor
             }
 
             if (drew) SceneView.RepaintAll();
-        }
-
-        // Gate: tick only when one of our tools is active OR a scatter object is selected.
-        private static bool ShouldTick()
-        {
-            System.Type? active = ToolManager.activeToolType;
-            if (active == typeof(DensityPaintTool) || active == typeof(InstancePlacementTool))
-                return true;
-
-            foreach (Object obj in Selection.objects)
-            {
-                switch (obj)
-                {
-                    case GameObject go when go.GetComponent<ScatterField>() != null: return true;
-                    case ScatterField: return true;
-                    case ScatterLayer: return true;
-                    case TerrainScatterConfig: return true;
-                }
-            }
-            return false;
         }
     }
 }
