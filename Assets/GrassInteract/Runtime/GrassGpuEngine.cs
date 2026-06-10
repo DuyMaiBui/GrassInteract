@@ -202,11 +202,11 @@ namespace GrassInteract
             // LOD distances sourced from the layer.
             // LodMaxDistances[0] = LOD0→1 boundary, [1] = LOD1→2 boundary.
             float[] dists = render.LodMaxDistances;
-            this.lod0MaxSqrDist = dists.Length > 0 ? dists[0] * dists[0] : 144f;  // default 12m
-            this.lod1MaxSqrDist = dists.Length > 1 ? dists[1] * dists[1] : 900f;  // default 30m
-            // Explicit per-layer cull boundary (SSOT: ScatterRenderConfig.RenderCullDistance). Edit == play — no isPlaying branch.
+            // Missing LOD switch distances extend the last present LOD to the cull boundary (cull<=0 → no cap),
+            // NOT an arbitrary 12/30 m default — otherwise instances past 12 m bucket into empty (mesh-less)
+            // LOD slots and vanish regardless of renderCullDistance (1-LOD prop draw-distance bug).
             float cull = render.RenderCullDistance;
-            this.maxSqrDistance = cull * cull;
+            (this.lod0MaxSqrDist, this.lod1MaxSqrDist, this.maxSqrDistance) = LodCullMath.Thresholds(dists, cull);
 
             // Per-blade cull margin — SSOT-mirror the chunk-AABB baker's bladeReachY (ChunkedBladeBuffer.cs):
             //   bladeReachY = MaxBladeHeight * maxScale + BendHeadroom,  maxScale = ScaleRange.y (or 1 if <=0).

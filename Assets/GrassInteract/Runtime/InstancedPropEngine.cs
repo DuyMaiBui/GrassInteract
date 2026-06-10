@@ -182,13 +182,11 @@ namespace GrassInteract
             this.mesh2 = meshes.Length > 2 ? meshes[2] : null;
 
             float[] dists = layer.Render.LodMaxDistances;
-            float d0 = dists.Length > 0 ? dists[0] : 12f;
-            float d1 = dists.Length > 1 ? dists[1] : 30f;
-            this.lod0MaxSqrDist = d0 * d0;
-            this.lod1MaxSqrDist = d1 * d1;
-            // Explicit per-layer cull boundary (SSOT: ScatterRenderConfig.RenderCullDistance). Edit == play — no isPlaying branch.
+            // Missing LOD switch distances extend the last present LOD to the cull boundary (cull<=0 → no cap),
+            // NOT an arbitrary 12/30 m default — otherwise instances past 12 m bucket into empty (mesh-less)
+            // LOD slots and vanish regardless of renderCullDistance (1-LOD prop draw-distance bug).
             float cull = layer.Render.RenderCullDistance;
-            this.maxSqrDistance = cull * cull;
+            (this.lod0MaxSqrDist, this.lod1MaxSqrDist, this.maxSqrDistance) = LodCullMath.Thresholds(dists, cull);
 
             float bakedScaleMax = this.instanceBuffer.ScaleMax;
             // Expand the per-instance cull margin by the max-tilt sweep so a tilted prop never pops.
