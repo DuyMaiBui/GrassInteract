@@ -204,10 +204,9 @@ namespace GrassInteract
             float[] dists = render.LodMaxDistances;
             this.lod0MaxSqrDist = dists.Length > 0 ? dists[0] * dists[0] : 144f;  // default 12m
             this.lod1MaxSqrDist = dists.Length > 1 ? dists[1] * dists[1] : 900f;  // default 30m
-            // Editor: generous distance so SceneView zoom-out doesn't hide everything.
-            // Play: 500 m minimum coarse cull beyond the last LOD boundary.
-            float minCullSqr = Application.isPlaying ? 250000f : 1e8f;
-            this.maxSqrDistance = Mathf.Max(this.lod1MaxSqrDist * 4f, minCullSqr);
+            // Explicit per-layer cull boundary (SSOT: ScatterRenderConfig.RenderCullDistance). Edit == play — no isPlaying branch.
+            float cull = render.RenderCullDistance;
+            this.maxSqrDistance = cull * cull;
 
             // Per-blade cull margin — SSOT-mirror the chunk-AABB baker's bladeReachY (ChunkedBladeBuffer.cs):
             //   bladeReachY = MaxBladeHeight * maxScale + BendHeadroom,  maxScale = ScaleRange.y (or 1 if <=0).

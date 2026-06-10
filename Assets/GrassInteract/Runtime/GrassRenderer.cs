@@ -33,6 +33,7 @@ namespace GrassInteract
     public sealed class GrassRenderer
     {
         private readonly float[] lodMaxSqrDistances;
+        private readonly float cullSqrDistance;
         private readonly Mesh[] lodMeshes; // snapshot — never read live config in the hot loop
         private readonly Material? grassMaterial;
         private RenderParams renderParams;
@@ -64,6 +65,9 @@ namespace GrassInteract
             this.lodMaxSqrDistances = new float[dists.Length];
             for (int i = 0; i < dists.Length; ++i)
                 this.lodMaxSqrDistances[i] = dists[i] * dists[i];
+
+            float cull = render.RenderCullDistance;
+            this.cullSqrDistance = cull * cull;
 
             this.lodMeshes = (Mesh[])meshes.Clone();
             this.grassMaterial = render.Material;
@@ -97,6 +101,8 @@ namespace GrassInteract
 
             // ONE LOD for the whole field: distance from the reference viewpoint to the field center.
             float sqrDist = (worldBounds.center - lodReferencePos).sqrMagnitude;
+            if (this.cullSqrDistance > 0f && sqrDist > this.cullSqrDistance)
+                return; // whole field beyond explicit cull distance
             Mesh mesh = this.lodMeshes[this.SelectLod(sqrDist)];
 
             RenderParams rp = this.renderParams;

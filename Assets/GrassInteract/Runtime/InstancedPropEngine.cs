@@ -186,8 +186,9 @@ namespace GrassInteract
             float d1 = dists.Length > 1 ? dists[1] : 30f;
             this.lod0MaxSqrDist = d0 * d0;
             this.lod1MaxSqrDist = d1 * d1;
-            float minCullSqr = Application.isPlaying ? 250000f : 1e8f;
-            this.maxSqrDistance = Mathf.Max(this.lod1MaxSqrDist * 4f, minCullSqr);
+            // Explicit per-layer cull boundary (SSOT: ScatterRenderConfig.RenderCullDistance). Edit == play — no isPlaying branch.
+            float cull = layer.Render.RenderCullDistance;
+            this.maxSqrDistance = cull * cull;
 
             float bakedScaleMax = this.instanceBuffer.ScaleMax;
             // Expand the per-instance cull margin by the max-tilt sweep so a tilted prop never pops.

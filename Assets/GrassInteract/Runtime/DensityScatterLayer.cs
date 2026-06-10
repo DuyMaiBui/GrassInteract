@@ -108,6 +108,37 @@ namespace GrassInteract
 
         // ── Validation ─────────────────────────────────────────────────────────
 
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            this.MigrateRenderCullDistance();
+        }
+
+        /// <summary>
+        /// Back-fills <see cref="ScatterRenderConfig.RenderCullDistance"/> for assets serialized before the field existed
+        /// (renderCullDistance == 0 → everything would cull at 0). Defaults to max(2 * second-last LOD switch, 500) to
+        /// preserve the legacy derived-formula far cull. Idempotent: only writes when renderCullDistance is still 0.
+        /// </summary>
+        private void MigrateRenderCullDistance()
+        {
+            if (this.render.RenderCullDistance > 0f)
+                return;
+
+            float[] dists = this.render.LodMaxDistances; // length == lods.Length - 1
+            // Legacy far cull was max(2 * secondLastLODdistance, 500). secondLastLODdistance == last switch distance.
+            float lastSwitch = dists.Length > 0 ? dists[dists.Length - 1] : 0f;
+            float migrated = Mathf.Max(2f * lastSwitch, 500f); // <2 LODs (dists empty) → 500m floor
+
+            this.render = new ScatterRenderConfig(
+                this.render.Material,
+                this.render.ShadowCastingMode,
+                this.render.Lods,
+                migrated);
+
+            UnityEditor.EditorUtility.SetDirty(this);
+        }
+#endif
+
         public override bool Validate(out string error)
         {
             if (this.densityMap == null) { error = "DensityMap is not assigned."; return false; }

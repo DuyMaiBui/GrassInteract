@@ -25,16 +25,26 @@ namespace GrassInteract
         [Tooltip("Per-LOD mesh + switch distance pairs. LOD0 (highest detail) first.")]
         [SerializeField] private ScatterLod[] lods;
 
-        public ScatterRenderConfig(Material? material, ShadowCastingMode shadowCastingMode, ScatterLod[] lods)
+        [BoxGroup("LOD Render")]
+        [Tooltip("Hard render cull distance (metres). Instances beyond this distance are not rendered. " +
+                 "The last LOD covers [last LOD switch distance .. renderCullDistance); past it = CULLED.")]
+        [Min(0f)]
+        [SerializeField] private float renderCullDistance;
+
+        public ScatterRenderConfig(Material? material, ShadowCastingMode shadowCastingMode, ScatterLod[] lods, float renderCullDistance)
         {
             this.material = material;
             this.shadowCastingMode = shadowCastingMode;
             this.lods = lods;
+            this.renderCullDistance = renderCullDistance;
         }
 
         public Material? Material => this.material;
         public ShadowCastingMode ShadowCastingMode => this.shadowCastingMode;
         public ScatterLod[] Lods => this.lods ?? System.Array.Empty<ScatterLod>();
+
+        /// <summary>Hard render cull distance (metres). Instances past this distance do not render.</summary>
+        public float RenderCullDistance => this.renderCullDistance;
 
         public Mesh[] LodMeshes
         {
