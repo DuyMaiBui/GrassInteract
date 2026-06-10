@@ -22,17 +22,10 @@ namespace GrassInteract
         [Min(0f)]
         [SerializeField] private float minVertexDistance = 0.25f;
 
-        [Min(0f)]
-        [SerializeField] private float worldRadius = 2f;
-
-        [Range(0f, 90f)]
-        [SerializeField] private float maxBendDegrees = 90f;
-
         [Range(0f, 1f)]
         [SerializeField] private float centerZonePercent = 0.4f;
 
-        [Range(0f, 1f)]
-        [SerializeField] private float strength = 1f;
+        [SerializeField] private GrassInteractorData data = new();
 
         // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -40,10 +33,10 @@ namespace GrassInteract
         public bool Emitting { get; set; } = true;
 
         public float TrailDuration     => this.trailDuration;
-        public float WorldRadius       => this.worldRadius;
-        public float MaxBendDegrees    => this.maxBendDegrees;
+        public float WorldRadius       => this.data.worldRadius;
+        public float MaxBendDegrees    => this.data.maxBendDegrees;
         public float CenterZonePercent => this.centerZonePercent;
-        public float Strength          => this.strength;
+        public float Strength          => this.data.strength;
 
         // ── Per-sample state ─────────────────────────────────────────────────────────
 

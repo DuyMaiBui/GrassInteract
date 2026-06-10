@@ -17,22 +17,19 @@ namespace GrassInteract
     [DisallowMultipleComponent]
     public sealed class GrassInteractor : MonoBehaviour
     {
-        [Min(0f)]
-        [Tooltip("Footprint radius in world metres — how wide a patch this interactor leans.")]
-        [SerializeField] private float worldRadius = 2f;
-
-        [Range(0f, 1f)]
-        [Tooltip("Lean strength at the footprint center (1 = full lean).")]
-        [SerializeField] private float strength = 1f;
+        [SerializeField] private GrassInteractorData data = new();
 
         /// <summary>World-space position of the footprint center (the transform position).</summary>
         public Vector3 WorldPosition => this.transform.position;
 
         /// <summary>Footprint radius in world metres.</summary>
-        public float Radius => this.worldRadius;
+        public float Radius => this.data.worldRadius;
 
         /// <summary>Lean strength at the footprint center, 0..1.</summary>
-        public float Strength => this.strength;
+        public float Strength => this.data.strength;
+
+        /// <summary>Maximum bend angle in degrees.</summary>
+        public float MaxBendDegrees => this.data.maxBendDegrees;
 
         // Static registry of enabled interactors. GrassBendSimulator iterates this every frame instead of
         // each interactor pushing into a per-field map — the simulator is the single consumer.
@@ -71,13 +68,13 @@ namespace GrassInteract
                     "reads this interactor, so no grass leans. Add a ScatterField " +
                     "with at least one Grass-kind layer.", this);
 
-            if (this.worldRadius <= 0f)
+            if (this.data.worldRadius <= 0f)
                 Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has worldRadius=" +
-                    $"{this.worldRadius:0.###} (<= 0) - a zero-radius footprint leans nothing. Set it > 0.", this);
+                    $"{this.data.worldRadius:0.###} (<= 0) - a zero-radius footprint leans nothing. Set it > 0.", this);
 
-            if (this.strength <= 0f)
+            if (this.data.strength <= 0f)
                 Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has strength=" +
-                    $"{this.strength:0.###} (<= 0) - zero strength leaves no lean. Set it > 0.", this);
+                    $"{this.data.strength:0.###} (<= 0) - zero strength leaves no lean. Set it > 0.", this);
         }
 
         // True when at least one enabled ScatterField
