@@ -70,6 +70,11 @@ namespace GrassInteract.Editor
         {
             if (ReferenceEquals(InstancePlacementToolTracker.ActiveTool, this))
                 InstancePlacementToolTracker.ActiveTool = null;
+
+            // OnToolGUI stops running once the tool is deactivated, so the last-pushed
+            // ghost state (visible:true) would otherwise persist and InstanceGhostPreview's
+            // permanent duringSceneGui subscription keeps drawing the mesh. Clear it here.
+            InstanceGhostPreview.Clear();
         }
 
         public override void OnToolGUI(EditorWindow window)
