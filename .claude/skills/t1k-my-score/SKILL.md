@@ -4,7 +4,7 @@ description: "Show your contribution score, rank, and 3 next-action suggestions.
 keywords: [my score, my rank, my contributions, leaderboard, how am i doing]
 effort: low
 argument-hint: "[--user gh-login]"
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
@@ -23,6 +23,13 @@ Shows your weekly/monthly contribution score, rank, recent contributions, and 3 
 ```
 
 ## Workflow
+
+### Step 0 — Flush pending contributions first
+
+Lifetime totals should reflect work done this session. Before fetching, invoke
+`t1k:contribution-flush` (fire-and-forget) so any refs the `contribution-capture`
+hook tracked but never recorded are AI-scored + POSTed first. Skip silently if it
+reports nothing pending or no endpoint — never block the score read on it.
 
 ### Step 1 — Resolve user
 

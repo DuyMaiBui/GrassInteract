@@ -5,7 +5,7 @@ keywords: [mcp, mcp server, mcp tool, invoke mcp, call mcp, list mcp, mcp manage
 argument-hint: "[server-name or task]"
 effort: medium
 tools: [Read, Glob, Grep, Bash, Task, Agent, AskUserQuestion]
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

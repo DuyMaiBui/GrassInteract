@@ -67,8 +67,8 @@ class TestIsMinimaxModel:
     def test_non_minimax_model(self):
         assert mg.is_minimax_model('gemini-2.5-flash') is False
 
-    def test_non_minimax_imagen(self):
-        assert mg.is_minimax_model('imagen-4.0-generate-001') is False
+    def test_non_minimax_gemini(self):
+        assert mg.is_minimax_model('gemini-3-pro-image-preview') is False
 
 
 class TestGenerateImage:

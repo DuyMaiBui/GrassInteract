@@ -4,7 +4,7 @@ description: "Surface high-impact GitHub issues across kit repos ranked by your 
 keywords: [find issue, what should i work on, easy issue, good first issue, contribute]
 effort: low
 argument-hint: "[--kit name] [--difficulty easy|medium|hard]"
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

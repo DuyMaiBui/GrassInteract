@@ -4,7 +4,7 @@ description: "View files/directories OR generate visual explanations, slides, or
 keywords: [visualize, diagram, slides, explain, html, view, diff]
 argument-hint: "[path] OR [--html] --explain|--slides|--diagram|--ascii [topic] OR --html --diff|--plan-review|--recap"
 effort: medium
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

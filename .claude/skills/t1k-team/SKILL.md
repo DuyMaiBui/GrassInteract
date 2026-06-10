@@ -5,7 +5,7 @@ keywords: [parallel, multi-agent, orchestrate, teammates, concurrent, delegate]
 argument-hint: "<template> <context> [--devs|--researchers|--reviewers|--debuggers N] [--delegate]"
 effort: high
 tools: [Read, Write, Edit, Glob, Grep, Bash, Agent, TeamCreate, TaskCreate, TaskUpdate, TaskList, SendMessage, AskUserQuestion, ToolSearch, Skill]
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

@@ -4,7 +4,7 @@ description: "Apply step-by-step analysis for complex problems with revision cap
 keywords: [reasoning, step-by-step, analyze, decompose, hypothesis, adaptive, sequential]
 argument-hint: "[problem to analyze step-by-step]"
 effort: low
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

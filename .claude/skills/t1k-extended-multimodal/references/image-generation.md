@@ -7,7 +7,7 @@ protected: true
 ---
 # Image Generation Reference
 
-Comprehensive guide for image creation, editing, and composition using Imagen 4 and Gemini models ("Nano Banana").
+Comprehensive guide for image creation, editing, and composition using Gemini Nano Banana models.
 
 > **Nano Banana** = Google's internal name for native image generation in Gemini API. Three variants:
 > - **Nano Banana 2** (`gemini-3.1-flash-image-preview`) - NEW DEFAULT. 3-5x faster, 95% Pro quality, web grounding, 100+ language text rendering, character consistency (5 chars/14 objects). Released Feb 2026.
@@ -65,39 +65,10 @@ Comprehensive guide for image creation, editing, and composition using Imagen 4 
 - Features: Thinking mode, Google Search grounding
 - Status: Preview (Nov 2025)
 
-### Imagen 4 (Alternative - Production)
-
-**imagen-4.0-generate-001** - Standard quality, balanced performance
-- Best for: Production workflows, marketing assets
-- Quality: High
-- Speed: Medium (~5-10s per image)
-- Cost: ~$0.02/image (estimated)
-- Output: 1-4 images per request
-- Resolution: 1K or 2K
-- Updated: June 2025
-
-**imagen-4.0-ultra-generate-001** - Maximum quality
-- Best for: Final production, marketing assets, detailed artwork
-- Quality: Ultra (highest available)
-- Speed: Slow (~15-25s per image)
-- Cost: ~$0.04/image (estimated)
-- Output: 1-4 images per request
-- Resolution: 2K preferred
-- Updated: June 2025
-
-**imagen-4.0-fast-generate-001** - Fastest generation
-- Best for: Rapid iteration, bulk generation, real-time use
-- Quality: Good
-- Speed: Fast (~2-5s per image)
-- Cost: ~$0.01/image (estimated)
-- Output: 1-4 images per request
-- Resolution: 1K
-- Updated: June 2025
-
 ### Legacy Models
 
 **gemini-2.0-flash-preview-image-generation** - Legacy
-- Status: Deprecated (use Nano Banana or Imagen 4 instead)
+- Status: Deprecated (use Nano Banana instead)
 - Context: 32,768 input / 8,192 output tokens
 
 ## Model Comparison
@@ -107,15 +78,11 @@ Comprehensive guide for image creation, editing, and composition using Imagen 4 
 | gemini-3.1-flash-image-preview | ⭐⭐⭐⭐½ | 🚀🚀 Fastest | 💵 Low | **NEW DEFAULT** - General use |
 | gemini-2.5-flash-image | ⭐⭐⭐⭐ | 🚀 Fast | 💵 Low | Previous default, stable |
 | gemini-3-pro-image | ⭐⭐⭐⭐⭐ | 💡 Medium | 💰 Medium | Text/reasoning |
-| imagen-4.0-generate | ⭐⭐⭐⭐ | 💡 Medium | 💰 Medium | Production (alternative) |
-| imagen-4.0-ultra | ⭐⭐⭐⭐⭐ | 🐢 Slow | 💰💰 High | Marketing assets |
-| imagen-4.0-fast | ⭐⭐⭐ | 🚀 Fast | 💵 Low | Bulk generation |
 
 **Selection Guide**:
 - **Default/General**: Use `gemini-3.1-flash-image-preview` (fastest, near-Pro quality, web grounding)
 - **Stable Alternative**: Use `gemini-2.5-flash-image` (previous default, fully stable)
-- **Production Quality**: Use `imagen-4.0-generate-001` (alternative for final assets)
-- **Marketing/Ultra Quality**: Use `imagen-4.0-ultra` for maximum quality
+- **Production / Quality**: Use `gemini-3-pro-image-preview` (4K text, reasoning)
 - **Text-Heavy Images**: Use `gemini-3-pro-image-preview` for 4K text rendering
 - **Complex Prompts with Reasoning**: Use `gemini-3-pro-image-preview` with Thinking mode
 - **Real-time Data Integration**: Use `gemini-3.1-flash-image-preview` or `gemini-3-pro-image-preview` with Search grounding
@@ -149,51 +116,6 @@ for i, part in enumerate(response.candidates[0].content.parts):
     if part.inline_data:
         with open(f'output-{i}.png', 'wb') as f:
             f.write(part.inline_data.data)
-```
-
-### Alternative - Imagen 4 (Production Quality)
-
-```python
-# Imagen 4 Standard - alternative for production workflows
-response = client.models.generate_images(
-    model='imagen-4.0-generate-001',
-    prompt='Professional product photography of smartphone',
-    config=types.GenerateImagesConfig(
-        numberOfImages=1,
-        aspectRatio='16:9',
-        imageSize='1K'
-    )
-)
-
-# Save Imagen 4 output
-for i, generated_image in enumerate(response.generated_images):
-    with open(f'output-{i}.png', 'wb') as f:
-        f.write(generated_image.image.image_bytes)
-```
-
-### Imagen 4 Quality Variants
-
-```python
-# Ultra quality (marketing assets)
-response = client.models.generate_images(
-    model='imagen-4.0-ultra-generate-001',
-    prompt='Professional product photography of smartphone',
-    config=types.GenerateImagesConfig(
-        numberOfImages=1,
-        imageSize='2K'  # Use 2K for ultra (Standard/Ultra only)
-    )
-)
-
-# Fast generation (bulk)
-# Note: Fast model doesn't support imageSize parameter
-response = client.models.generate_images(
-    model='imagen-4.0-fast-generate-001',
-    prompt='Quick concept sketch of robot character',
-    config=types.GenerateImagesConfig(
-        numberOfImages=4,  # Generate multiple variants (default: 4)
-        aspectRatio='1:1'
-    )
-)
 ```
 
 ### Nano Banana Pro (4K Text, Reasoning)
@@ -314,38 +236,24 @@ response2 = chat.send_message('Make the text bolder and add steam rising from th
 response3 = chat.send_message('Change the color palette to warm earth tones')
 ```
 
-## API Differences
+## API Reference
 
-### Imagen 4 vs Nano Banana (Gemini Native)
+### Nano Banana (Gemini Native)
 
-| Feature | Imagen 4 | Nano Banana (Gemini) |
-|---------|----------|---------------------|
-| Method | `generate_images()` | `generate_content()` |
-| Config | `GenerateImagesConfig` | `GenerateContentConfig` |
-| Prompt param | `prompt` (string) | `contents` (string/list) |
-| Image count | `numberOfImages` (camelCase) | N/A (single per request) |
-| Aspect ratio | `aspectRatio` (camelCase) | `aspect_ratio` (snake_case) |
-| Size | `imageSize` | `image_size` |
-| Response | `generated_images[i].image.image_bytes` | `candidates[0].content.parts[i].inline_data.data` |
-| Multi-image input | ❌ | ✅ Up to 14 references |
-| Multi-turn chat | ❌ | ✅ Conversational |
-| Search grounding | ❌ | ✅ (Pro only) |
-| Thinking mode | ❌ | ✅ (Pro only) |
-| Text rendering | Limited | 4K (Pro) |
-
-**Imagen 4** uses `generate_images()`:
-```python
-response = client.models.generate_images(
-    model='imagen-4.0-generate-001',
-    prompt='...',
-    config=types.GenerateImagesConfig(
-        numberOfImages=1,      # camelCase
-        aspectRatio='16:9',    # camelCase
-        imageSize='1K'         # Standard/Ultra only
-    )
-)
-# Access: response.generated_images[0].image.image_bytes
-```
+| Feature | Nano Banana (Gemini) |
+|---------|---------------------|
+| Method | `generate_content()` |
+| Config | `GenerateContentConfig` |
+| Prompt param | `contents` (string/list) |
+| Image count | N/A (single per request) |
+| Aspect ratio | `aspect_ratio` (snake_case) |
+| Size | `image_size` |
+| Response | `candidates[0].content.parts[i].inline_data.data` |
+| Multi-image input | ✅ Up to 14 references |
+| Multi-turn chat | ✅ Conversational |
+| Search grounding | ✅ (Pro only) |
+| Thinking mode | ✅ (Pro only) |
+| Text rendering | 4K (Pro) |
 
 **Nano Banana** uses `generate_content()`:
 ```python
@@ -366,7 +274,6 @@ response = client.models.generate_content(
 **Critical Notes**:
 1. `response_modalities` values MUST be uppercase: `'IMAGE'`, `'TEXT'`
 2. `image_size` value MUST have uppercase K: `'1K'`, `'2K'`, `'4K'`
-3. Imagen 4 Fast model doesn't support `imageSize` parameter
 
 ## Aspect Ratios
 
@@ -899,16 +806,6 @@ if len(prompt) > 1000:
 ```
 
 ## Limitations
-
-### Imagen 4 Constraints
-- **Language**: English prompts only
-- **Prompt length**: Maximum 480 tokens
-- **Output**: 1-4 images per request
-- **Watermark**: All images include SynthID watermark
-- **Fast model**: No `imageSize` parameter support (fixed resolution)
-- **Text rendering**: Limited to ~25 characters for optimal results
-- **Regional restrictions**: Child images restricted in EEA, CH, UK
-- **Cannot replicate**: Specific people or copyrighted characters
 
 ### Nano Banana (Gemini) Constraints
 - **Language**: English prompts primary support

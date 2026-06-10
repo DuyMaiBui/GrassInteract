@@ -8,10 +8,9 @@ Supports all Gemini modalities:
 - Image: Captioning, detection, OCR, analysis
 - Video: Summarization, Q&A, scene detection
 - Document: PDF extraction, structured output
-- Generation: Image creation via Imagen 4 or Nano Banana (Gemini native)
+- Generation: Image creation via Nano Banana (Gemini native)
   - Nano Banana 2 (gemini-3.1-flash-image-preview): Fastest, 95% Pro quality (default)
   - Nano Banana Pro (gemini-3-pro-image-preview): Quality/4K text/reasoning
-  - Imagen 4 (imagen-4.0-*): Production-grade generation
 """
 
 from __future__ import annotations
@@ -75,15 +74,9 @@ except ImportError:
 
 # Image generation model configuration
 # Default: gemini-3.1-flash-image-preview (Nano Banana 2 - 3-5x faster, 95% Pro quality)
-# Alternative: imagen-4.0-generate-001 (production quality)
 # All image generation requires billing - no completely free option exists
 IMAGE_MODEL_DEFAULT = 'gemini-3.1-flash-image-preview'  # Nano Banana 2 (fastest, near-Pro quality)
 IMAGE_MODEL_FALLBACK = 'gemini-2.5-flash-image'  # Fallback if Nano Banana 2 fails
-IMAGEN_MODELS = {
-    'imagen-4.0-generate-001',
-    'imagen-4.0-ultra-generate-001',
-    'imagen-4.0-fast-generate-001',
-}
 # Video models have no fallback - Veo always requires billing
 
 
@@ -151,7 +144,6 @@ def get_default_model(task: str) -> str:
         if model:
             return model
         # Default to Nano Banana 2 (fastest, near-Pro quality)
-        # Alternative: imagen-4.0-generate-001 for production quality
         return 'gemini-3.1-flash-image-preview'
 
     elif task == 'generate-video':
@@ -191,9 +183,6 @@ def validate_model_task_combination(model: str, task: str) -> None:
     # Image generation models
     if task == 'generate':
         valid_image_models = [
-            'imagen-4.0-generate-001',
-            'imagen-4.0-ultra-generate-001',
-            'imagen-4.0-fast-generate-001',
             'gemini-3.1-flash-image-preview',
             'gemini-3-pro-image-preview',
             'gemini-2.5-flash-image',
@@ -203,7 +192,7 @@ def validate_model_task_combination(model: str, task: str) -> None:
             # Allow gemini models for analysis-based generation (backward compat)
             if not model.startswith('gemini-'):
                 raise ValueError(
-                    f"Image generation requires Imagen/Gemini image model, got '{model}'\n"
+                    f"Image generation requires a Gemini image model, got '{model}'\n"
                     f"Valid models: {', '.join(valid_image_models)}"
                 )
 
@@ -337,7 +326,6 @@ FREE_TIER_NO_ACCESS_MSG = """
 [FREE TIER LIMITATION] Image/Video generation is NOT available on free tier.
 
 Free tier users have zero quota (limit: 0) for:
-- All Imagen models (imagen-4.0-*)
 - All Veo models (veo-*)
 - Gemini image models (gemini-*-image, gemini-*-image-preview)
 
@@ -347,94 +335,6 @@ To use image/video generation:
 
 STOP: Do not retry image/video generation on free tier - it will always fail.
 """.strip()
-
-
-def generate_image_imagen4(
-    client,
-    prompt: str,
-    model: str,
-    num_images: int = 1,
-    aspect_ratio: str = '1:1',
-    size: str = '1K',
-    verbose: bool = False
-) -> Dict[str, Any]:
-    """Generate image using Imagen 4 models.
-
-    Returns special status 'billing_required' if model needs billing,
-    allowing caller to fallback to free-tier generate_content API.
-    """
-    try:
-        # Build config based on model (Fast doesn't support imageSize)
-        config_params = {
-            'numberOfImages': num_images,
-            'aspectRatio': aspect_ratio
-        }
-
-        # Only Standard and Ultra support imageSize parameter
-        if 'fast' not in model.lower() and model.startswith('imagen-'):
-            config_params['imageSize'] = size
-
-        gen_config = types.GenerateImagesConfig(**config_params)
-
-        if verbose:
-            print(f"  Generating with: {model}")
-            print(f"  Config: {num_images} images, {aspect_ratio}", end='')
-            if 'fast' not in model.lower() and model.startswith('imagen-'):
-                print(f", {size}")
-            else:
-                print()
-
-        response = client.models.generate_images(
-            model=model,
-            prompt=prompt,
-            config=gen_config
-        )
-
-        # Save images
-        generated_files = []
-        for i, generated_image in enumerate(response.generated_images):
-            # Find project root
-            script_dir = Path(__file__).parent
-            project_root = script_dir
-            for parent in [script_dir] + list(script_dir.parents):
-                if (parent / '.git').exists() or (parent / '.claude').exists():
-                    project_root = parent
-                    break
-
-            output_dir = project_root / 'docs' / 'assets'
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = output_dir / f"imagen4_generated_{int(time.time())}_{i}.png"
-
-            with open(output_file, 'wb') as f:
-                f.write(generated_image.image.image_bytes)
-            generated_files.append(str(output_file))
-
-            if verbose:
-                print(f"  Saved: {output_file}")
-
-        return {
-            'status': 'success',
-            'generated_images': generated_files,
-            'model': model
-        }
-
-    except Exception as e:
-        # Return special status for billing errors so caller can fallback
-        if _is_billing_error(e) and model in IMAGEN_MODELS:
-            return {
-                'status': 'billing_required',
-                'original_model': model,
-                'error': str(e)
-            }
-
-        if verbose:
-            print(f"  Error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        return {
-            'status': 'error',
-            'error': str(e)
-        }
 
 
 def generate_video_veo(
@@ -879,61 +779,23 @@ def batch_process(
         if verbose:
             print(f"\nGenerating image from prompt...")
 
-        # Use Imagen 4 API for imagen models
-        if model.startswith('imagen-') or model in IMAGEN_MODELS:
-            result = generate_image_imagen4(
-                client=client,
-                prompt=prompt,
-                model=model,
-                num_images=num_images,
-                aspect_ratio=aspect_ratio or '1:1',
-                size=size or '1K',  # Default to 1K for Imagen models
-                verbose=verbose
-            )
-
-            # Silent fallback to cheaper model if Imagen billing required
-            if result.get('status') == 'billing_required':
-                if verbose:
-                    print(f"  Falling back to: {IMAGE_MODEL_FALLBACK}")
-                result = process_file(
-                    client=client,
-                    file_path=None,
-                    prompt=prompt,
-                    model=IMAGE_MODEL_FALLBACK,
-                    task=task,
-                    format_output=format_output,
-                    aspect_ratio=aspect_ratio,
-                    image_size=size,
-                    verbose=verbose
-                )
-                # Check if free tier (zero quota) - stop immediately with clear message
-                error_str = result.get('error', '')
-                if result.get('status') == 'error':
-                    if _is_free_tier_quota_error(Exception(error_str)):
-                        result['error'] = FREE_TIER_NO_ACCESS_MSG
-                    elif _is_billing_error(Exception(error_str)):
-                        result['error'] = (
-                            "Image generation requires billing. Enable billing at: "
-                            "https://aistudio.google.com/apikey or use Google Cloud credits."
-                        )
-        else:
-            # Nano Banana (Flash/Pro) or other models via generate_content API
-            result = process_file(
-                client=client,
-                file_path=None,
-                prompt=prompt,
-                model=model,
-                task=task,
-                format_output=format_output,
-                aspect_ratio=aspect_ratio,
-                image_size=size,
-                verbose=verbose
-            )
-            # Check for free tier error
-            if result.get('status') == 'error':
-                error_str = result.get('error', '')
-                if _is_free_tier_quota_error(Exception(error_str)):
-                    result['error'] = FREE_TIER_NO_ACCESS_MSG
+        # Nano Banana (Flash/Pro) image generation via generate_content API
+        result = process_file(
+            client=client,
+            file_path=None,
+            prompt=prompt,
+            model=model,
+            task=task,
+            format_output=format_output,
+            aspect_ratio=aspect_ratio,
+            image_size=size,
+            verbose=verbose
+        )
+        # Check for free tier error
+        if result.get('status') == 'error':
+            error_str = result.get('error', '')
+            if _is_free_tier_quota_error(Exception(error_str)):
+                result['error'] = FREE_TIER_NO_ACCESS_MSG
 
         results.append(result)
 
@@ -1172,10 +1034,6 @@ Examples:
   # Generate images with Nano Banana Pro (4K text, reasoning)
   %(prog)s --task generate --prompt "Travel poster with text 'EXPLORE'" \\
     --model gemini-3-pro-image-preview --aspect-ratio 3:4 --size 4K
-
-  # Generate images with Imagen 4 (production quality)
-  %(prog)s --task generate --prompt "Product photo of coffee mug" \\
-    --model imagen-4.0-ultra-generate-001 --aspect-ratio 1:1 --size 2K
         """
     )
 
@@ -1191,7 +1049,7 @@ Examples:
                        help='Output format (default: text)')
 
     # Image generation options
-    # All 10 aspect ratios supported by Nano Banana / Imagen 4
+    # All 10 aspect ratios supported by Nano Banana
     parser.add_argument('--aspect-ratio',
                        choices=['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
                        help='Aspect ratio for image/video generation')
@@ -1200,7 +1058,7 @@ Examples:
     # 4K available for Nano Banana Pro (gemini-3-pro-image-preview)
     # Note: Not all models support --size, only use when needed
     parser.add_argument('--size', choices=['1K', '2K', '4K'], default=None,
-                       help='Image size - 1K/2K for Imagen 4, 1K/2K/4K for Nano Banana (optional)')
+                       help='Image size - 1K/2K/4K for Nano Banana (optional)')
 
     # Video generation options
     parser.add_argument('--resolution', choices=['720p', '1080p'], default='1080p',

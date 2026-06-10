@@ -4,7 +4,7 @@ description: "Manage ClickUp tasks, comments, time tracking, docs, and chat via 
 keywords: [clickup, click up, clickup task, clickup mcp, clickup comment, clickup time tracking, clickup doc, clickup page, clickup chat, clickup reminder, create task, update task, find tasks, log time]
 argument-hint: "[operation or task identifier]"
 effort: medium
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

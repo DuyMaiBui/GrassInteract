@@ -1,7 +1,7 @@
 ---
 name: t1k:extended-multimodal
 description: >
-  Analyze images/audio/video with Gemini API. Generate images (Imagen 4, MiniMax),
+  Analyze images/audio/video with Gemini API. Generate images (Nano Banana, MiniMax),
   videos (Veo 3, Hailuo), speech (MiniMax TTS), music (MiniMax). Use for vision analysis,
   transcription, OCR, design extraction, multimodal AI tasks.
 license: MIT
@@ -11,7 +11,7 @@ allowed-tools:
   - Write
   - Edit
 argument-hint: "[file-path] [prompt]"
-version: 2.13.2
+version: 2.13.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
@@ -73,7 +73,7 @@ python scripts/gemini_batch_process.py --files img.png --task analyze \
 | Provider | Type | Model | Notes |
 |---|---|---|---|
 | Gemini | Image gen | `gemini-3.1-flash-image-preview` | Nano Banana 2 — DEFAULT |
-| Gemini | Image gen | `imagen-4.0-generate-001` | Production-grade |
+| Gemini | Image gen | `gemini-3-pro-image-preview` | Nano Banana Pro — production / 4K text |
 | Gemini | Video gen | `veo-3.1-generate-preview` | 8s clips with audio |
 | Gemini | Analysis | `gemini-2.5-flash` | Recommended |
 | MiniMax | Image gen | `image-01` | $0.03/image |
