@@ -1,6 +1,7 @@
 #nullable enable
 using UnityEditor;
 using UnityEditor.UIElements;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace GrassInteract.Editor
@@ -73,7 +74,7 @@ namespace GrassInteract.Editor
             this.panelContainer.Add(nameLabel);
 
             // Shared struct property groups — iterate the serialized properties by known names
-            this.AddFoldoutCard("Render",    "render");
+            this.AddRenderCardWithBar();
             this.AddFoldoutCard("Wind",      "wind");
             this.AddFoldoutCard("Deform",    "deform");
             this.AddFoldoutCard("Bounds",    "bounds");
@@ -127,6 +128,47 @@ namespace GrassInteract.Editor
 
             if (anyAdded)
                 this.panelContainer.Add(foldout);
+        }
+
+        /// <summary>
+        /// Dedicated Render foldout: PropertyField for the "render" struct + an IMGUIContainer
+        /// that hosts the <see cref="LodDistanceBar"/> below the numeric fields.
+        /// Kept separate from <see cref="AddFoldoutCard"/> so the generic helper stays unchanged.
+        /// </summary>
+        private void AddRenderCardWithBar()
+        {
+            if (this.layerSO == null) return;
+
+            SerializedProperty? renderProp = this.layerSO.FindProperty("render");
+            if (renderProp == null) return;
+
+            var foldout = new Foldout();
+            foldout.text  = "Render";
+            foldout.value = true;
+            foldout.AddToClassList("layer-panel-card");
+
+            var propField = new PropertyField(renderProp);
+            propField.AddToClassList("layer-panel-field");
+            foldout.Add(propField);
+
+            // Capture the property path — SerializedObject may be rebound by Unity Bind.
+            // Re-find the property inside the lambda so it stays valid after rebind.
+            string renderPath = renderProp.propertyPath;
+            SerializedObject so = this.layerSO;
+
+            var barContainer = new IMGUIContainer(() =>
+            {
+                so.Update();
+                SerializedProperty? rp = so.FindProperty(renderPath);
+                if (rp == null) return;
+
+                Rect r = GUILayoutUtility.GetRect(0f, LodDistanceBar.BAR_HEIGHT,
+                    GUILayout.ExpandWidth(true));
+                LodDistanceBar.Draw(r, rp);
+            });
+
+            foldout.Add(barContainer);
+            this.panelContainer.Add(foldout);
         }
     }
 }
