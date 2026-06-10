@@ -111,6 +111,22 @@ namespace GrassInteract.Editor
             set { this.eraseRadius = value; this.Save(true); }
         }
 
+        // ── Active layer (transient — not persisted across domain reload) ─────────
+        //
+        // NOT a [SerializeField]: DensityScatterLayer is a sub-asset whose identity must be
+        // re-established each editor session. DensityPaintPanel.BindLayer() sets this when the
+        // user selects a layer in Scatter Studio; DensityPaintTool (global, unscoped EditorTool)
+        // reads it instead of this.target (which is always null for a global EditorTool).
+
+        [System.NonSerialized]
+        private DensityScatterLayer? activeLayer;
+
+        internal DensityScatterLayer? ActiveLayer
+        {
+            get => this.activeLayer;
+            set => this.activeLayer = value;
+        }
+
         // ── Overlay visibility ─────────────────────────────────────────────────
 
         [SerializeField] private bool overlayVisible = false;

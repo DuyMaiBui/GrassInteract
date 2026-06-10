@@ -147,16 +147,88 @@ namespace GrassInteract.Editor
             string path = AssetDatabase.GetAssetPath(map);
             if (string.IsNullOrEmpty(path)) return; // runtime-only texture — nothing to persist
 
-            // Encode via a temp RGBA32 texture (R8 is not directly EncodeToPNG-able).
-            var tmp = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            tmp.SetPixels(pixels);
-            tmp.Apply(false);
-            byte[] png = tmp.EncodeToPNG();
-            Object.DestroyImmediate(tmp);
-            if (png == null) return;
+            string ext = Path.GetExtension(path).ToLowerInvariant();
 
-            File.WriteAllBytes(path, png);
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate); // re-imports with the map's R8 settings
+            // Image-file-backed density map (the SSOT format produced by CreateBlank): the pixel data
+            // lives in a source image on disk, so re-encode the pixels and re-import with R8 settings.
+            if (ext == ".png")
+            {
+                // Encode via a temp RGBA32 texture (R8 is not directly EncodeToPNG-able).
+                var tmp = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                tmp.SetPixels(pixels);
+                tmp.Apply(false);
+                byte[] png = tmp.EncodeToPNG();
+                Object.DestroyImmediate(tmp);
+                if (png == null) return;
+
+                File.WriteAllBytes(path, png);
+                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate); // re-imports with the map's R8 settings
+                return;
+            }
+
+            // Native serialized Texture2D asset (e.g. a hand-authored '.asset'): the pixel data lives
+            // INSIDE the asset, not in a source image file. Writing PNG bytes here would corrupt the
+            // .asset and Unity would fail to load it ("Unknown error occurred while loading"). Persist
+            // by writing the pixels onto the texture and re-serialising the asset.
+            map.SetPixels(pixels);
+            map.Apply(false);
+            EditorUtility.SetDirty(map);
+            AssetDatabase.SaveAssets();
+        }
+
+        // ── Readback helpers ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Reads a <see cref="RenderTexture"/> back to CPU as a <c>Color[]</c> array where each
+        /// element carries the R channel in all RGBA slots — matching the R8 density semantics used
+        /// by <see cref="PersistPixels"/>.
+        ///
+        /// <para>
+        /// Push/pop of <see cref="RenderTexture.active"/> is done in a try/finally so the active RT
+        /// is restored even if an exception is thrown mid-read.
+        /// </para>
+        ///
+        /// <para>
+        /// Precision note: the intermediate <see cref="Texture2D"/> uses RGBA32 — a single-byte-per-
+        /// channel quantisation. Since density maps are R8 by contract this is lossless; the remark
+        /// exists only so future callers are not surprised by the 8-bit floor.
+        /// </para>
+        /// </summary>
+        /// <param name="rt">The source render texture. Must not be null.</param>
+        /// <returns>
+        /// A <c>Color[]</c> of length <c>rt.width * rt.height</c> where
+        /// <c>Color.r == Color.g == Color.b == &lt;density&gt;</c> and <c>Color.a == 1</c>.
+        /// </returns>
+        internal static Color[] ReadbackToPixels(RenderTexture rt)
+        {
+            int w = rt.width;
+            int h = rt.height;
+
+            var readTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            RenderTexture? prev = RenderTexture.active;
+            try
+            {
+                RenderTexture.active = rt;
+                readTex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+                readTex.Apply(false);
+            }
+            finally
+            {
+                RenderTexture.active = prev;
+            }
+
+            Color[] raw = readTex.GetPixels();
+            Object.DestroyImmediate(readTex);
+
+            // Map R channel to full RGBA colour — matches PersistPixels R8 density semantics.
+            var result = new Color[raw.Length];
+            for (int i = 0; i < raw.Length; ++i)
+            {
+                float r = raw[i].r;
+                result[i] = new Color(r, r, r, 1f);
+            }
+
+            return result;
         }
 
         // ── Private helpers ───────────────────────────────────────────────────

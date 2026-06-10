@@ -52,6 +52,20 @@ namespace GrassInteract.Editor
                 MarkDirty(field, i);
         }
 
+        /// <summary>
+        /// Rebuilds one layer immediately, bypassing the debounce. Used during an active paint drag
+        /// where <see cref="EditorApplication.update"/> (and thus the debounced <see cref="Tick"/>) is
+        /// starved, so the painter drives live updates directly at its own 0.15s throttle. Clears any
+        /// pending dirty mark for the same key so a later <see cref="Tick"/> does not rebuild redundantly.
+        /// </summary>
+        public static void RebuildImmediate(ScatterField field, int layerIdx)
+        {
+            if (field == null) return;
+            dirty.Remove(new DirtyKey(field.GetInstanceID(), layerIdx));
+            field.RebuildLayer(layerIdx);
+            SceneView.RepaintAll();
+        }
+
         private static void Tick()
         {
             if (dirty.Count == 0) return;

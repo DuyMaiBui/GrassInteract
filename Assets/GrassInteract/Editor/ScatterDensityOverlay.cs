@@ -18,6 +18,10 @@ namespace GrassInteract.Editor
     /// uses) so UV↔world mapping can never drift. Gated behind
     /// <see cref="ScatterAuthoringState.I"/>.<see cref="ScatterAuthoringState.OverlayVisible"/>
     /// (default off), which is also toggled by <see cref="DensityPaintPanel"/>.
+    ///
+    /// P1 contract: no fallback shader. If <c>Hidden/GrassInteract/DensityHeatmap</c> is absent,
+    /// one warning is emitted and the overlay draws nothing. The <c>Sprites/Default</c> fallback
+    /// has been removed — it would render an unbound-texture white plane (errors-over-fallback).
     /// </summary>
     [InitializeOnLoad]
     internal static class ScatterDensityOverlay
@@ -38,6 +42,11 @@ namespace GrassInteract.Editor
         private static DensityScatterLayer? activeLayer;
         private static ScatterField?        activeField;
 
+        // ── Live RT seam (P1/P3): non-null during an active GPU stroke ─────────
+        // DensityPaintGPU calls SetActiveRenderTexture to bind its in-flight RT so the overlay
+        // shows the live stroke. Cleared (set to null) by DensityPaintGPU.EndStroke.
+        private static RenderTexture? liveStrokeRt;
+
         // ── Heatmap shader source ──────────────────────────────────────────────
 
         private const string SHADER_NAME = "Hidden/GrassInteract/DensityHeatmap";
@@ -54,6 +63,7 @@ namespace GrassInteract.Editor
         {
             SceneView.duringSceneGui -= OnSceneGui;
             AssemblyReloadEvents.beforeAssemblyReload -= Cleanup;
+            liveStrokeRt = null;
             DestroyResources();
         }
 
@@ -69,6 +79,19 @@ namespace GrassInteract.Editor
             activeField = field;
         }
 
+        /// <summary>
+        /// Binds a live GPU <see cref="RenderTexture"/> so the overlay shows the in-flight stroke
+        /// instead of the (stale) CPU density map texture. Called by <see cref="DensityPaintGPU"/>
+        /// at stroke start; cleared (null) at stroke end.
+        ///
+        /// When <paramref name="rt"/> is null the overlay falls back to the CPU density map as
+        /// before (backwards-compatible with the pre-P3 path).
+        /// </summary>
+        internal static void SetActiveRenderTexture(RenderTexture? rt)
+        {
+            liveStrokeRt = rt;
+        }
+
         // ── Scene GUI callback ─────────────────────────────────────────────────
 
         private static void OnSceneGui(SceneView sceneView)
@@ -76,8 +99,9 @@ namespace GrassInteract.Editor
             if (!ScatterAuthoringState.I.OverlayVisible) return;
             if (activeLayer == null || activeField == null) return;
 
-            Texture2D? densityMap = activeLayer.DensityMap;
-            if (densityMap == null) return;
+            // Prefer the live RT when mid-stroke; otherwise use the CPU density map.
+            Texture? displayTex = liveStrokeRt != null ? (Texture)liveStrokeRt : activeLayer.DensityMap;
+            if (displayTex == null) return;
 
             // Build resources lazily — once per domain.
             EnsureResources();
@@ -100,8 +124,8 @@ namespace GrassInteract.Editor
             // Build/update the quad mesh with current field extent.
             UpdateQuadMesh(quadMesh, bl, br, tl, tr);
 
-            // Bind the current density map texture.
-            heatmapMaterial.SetTexture(ShaderPropDensity, densityMap);
+            // Bind the display texture (live RT or CPU density map).
+            heatmapMaterial.SetTexture(ShaderPropDensity, displayTex);
             if (rampTexture != null)
                 heatmapMaterial.SetTexture(ShaderPropRamp, rampTexture);
 
@@ -201,41 +225,29 @@ namespace GrassInteract.Editor
             return col;
         }
 
-        private static Material CreateHeatmapMaterial()
+        /// <summary>
+        /// Creates the heatmap material from the dedicated hidden shader.
+        /// P1 contract: if the shader is absent, log one warning and return null — no Sprites/Default
+        /// fallback (that would render a white plane with an unbound _MainTex).
+        /// </summary>
+        private static Material? CreateHeatmapMaterial()
         {
-            // Try the dedicated hidden shader first; fall back to a runtime-built one.
             Shader? shader = Shader.Find(SHADER_NAME);
-            if (shader == null)
-                shader = BuildFallbackShader();
 
             if (shader == null)
             {
-                Debug.LogWarning("[ScatterDensityOverlay] Could not find or build heatmap shader — overlay disabled.");
-                return null!;
+                Debug.LogWarning($"[ScatterDensityOverlay] Shader '{SHADER_NAME}' not found — " +
+                                 "heatmap overlay disabled. Create the shader asset to enable it.");
+                return null;
             }
 
             var mat = new Material(shader)
             {
-                name           = "DensityHeatmapMat",
-                hideFlags      = HideFlags.HideAndDontSave,
+                name      = "DensityHeatmapMat",
+                hideFlags = HideFlags.HideAndDontSave,
             };
             mat.SetFloat(ShaderPropAlpha, 0.75f);
             return mat;
-        }
-
-        /// <summary>
-        /// Builds a minimal transparent-blended quad shader at runtime when the dedicated
-        /// <c>Hidden/GrassInteract/DensityHeatmap</c> asset is absent.
-        /// </summary>
-        private static Shader? BuildFallbackShader()
-        {
-            // Use a transparent/overlay-friendly sprite shader that accepts _MainTex.
-            // This covers the case where the dedicated shader file hasn't been created yet.
-            Shader? s = Shader.Find("Sprites/Default");
-            if (s != null) return s;
-
-            s = Shader.Find("Unlit/Transparent");
-            return s; // may still be null on stripped builds — caller handles null
         }
 
         private static void DestroyResources()

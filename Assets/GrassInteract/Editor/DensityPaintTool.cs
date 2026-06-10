@@ -7,9 +7,18 @@ namespace GrassInteract.Editor
 {
     /// <summary>
     /// Terrain-tool-style density brush for a <see cref="DensityScatterLayer"/>. Raycasts the ground,
-    /// writes the R8 <c>densityMap</c>, re-scatters live through <see cref="ScatterRebuildScheduler"/>,
-    /// and persists the painted pixels back to the texture asset (PNG) on stroke end via
+    /// splats the brush via <see cref="DensityPaintGPU"/> into a GPU <c>RenderTexture</c>, and
+    /// re-scatters live through <see cref="ScatterRebuildScheduler"/> on the 0.15s tick. Persists
+    /// the painted pixels back to the texture asset (PNG) on stroke end via
     /// <see cref="DensityMapFactory.PersistPixels"/> (SSOT — no duplicate persist path here).
+    ///
+    /// <para>
+    /// <b>Gating contract (score-20 risk):</b> <see cref="DensityPlacement"/> reads CPU pixels
+    /// via <c>GetPixelBilinear</c> — the GPU RT alone will NOT re-scatter. CPU pixels are updated
+    /// only on the 0.15s scheduler tick via <see cref="DensityPaintGPU.RequestLiveReadback"/>.
+    /// <see cref="MouseDrag"/> does NOT call any readback — only <see cref="ScatterRebuildScheduler.MarkDirty"/>
+    /// is called per-drag, which coalesces and fires the tick after the debounce delay.
+    /// </para>
     ///
     /// All tool state (brush size, opacity, falloff, flow, paint mode, active stamp) is read from
     /// <see cref="ScatterAuthoringState.I"/> — this tool no longer writes or reads EditorPrefs.
@@ -18,29 +27,65 @@ namespace GrassInteract.Editor
     ///   <see cref="StampRef.StampSource.None"/>   → procedural falloff kernel (same as old StampIndex == -1)
     ///   <see cref="StampRef.StampSource.Config"/>  → <c>field.Config.BrushStamps[index]</c>
     ///   <see cref="StampRef.StampSource.Global"/>  → <see cref="ScatterBrushLibraryProvider.Library"/>.Stamps[index]
-    ///
-    /// The in-scene <see cref="DrawSettingsWindow"/> is intentionally minimal (brush cursor disc + mode
-    /// label only) — all settings now live in the Scatter Studio window.
     /// </summary>
-    [EditorTool("Density Paint", typeof(DensityScatterLayer))]
+    // Global (unscoped) EditorTool — no typeof() target.
+    // DensityScatterLayer is a ScriptableObject sub-asset; Unity's tool context does NOT
+    // track sub-asset selections as typed EditorTool targets, so specifying
+    // typeof(DensityScatterLayer) silently prevents activation.
+    // The active layer is read from ScatterAuthoringState.I.ActiveLayer instead of this.target.
+    [EditorTool("Density Paint")]
     internal sealed class DensityPaintTool : EditorTool
     {
         internal enum PaintMode { Paint, Erase, Smooth }
 
+        // ── Constants ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Stamp spacing as a fraction of brush radius — controls how densely stamps tile
+        /// along a drag stroke. 0.25 gives terrain-like continuous fill without overlap gaps.
+        /// </summary>
+        private const float SPACING_FACTOR = 0.25f;
+
+        /// <summary>Minimum seconds between live readback requests (SF-1 gate).</summary>
+        private const double READBACK_INTERVAL_SECONDS = 0.15;
+
         // ── Active stroke state ────────────────────────────────────────────────
 
-        private bool       painting;
-        private Color[]?   pixels;
-        private int        texW, texH;
-        private Texture2D? activeMap;
-        private Texture2D? activeStamp; // resolved at stroke start; null = procedural falloff
+        private bool            painting;
+        private Texture2D?      activeMap;
+
+        /// <summary>
+        /// Resolved at stroke start AND on every hover event (SF-5).
+        /// null = procedural falloff.
+        /// </summary>
+        private Texture2D?      activeStamp;
+        private readonly DensityPaintGPU gpu = new DensityPaintGPU();
+
+        // ── Cached stroke context (used for per-drag MarkDirty + readback) ─────
+
+        private ScatterField? activeField;
+        private int           activeLayerIdx;
+
+        // ── Live-update throttle ───────────────────────────────────────────────
+
+        /// <summary>
+        /// EditorApplication.timeSinceStartup when the last live readback ran.
+        /// Prevents readbacks at ~60Hz — gated to at most once per
+        /// <see cref="READBACK_INTERVAL_SECONDS"/> (SF-1 fix).
+        /// </summary>
+        private double lastReadbackTime;
 
         public override GUIContent toolbarIcon => EditorGUIUtility.IconContent("TerrainInspector.TerrainToolSplat");
 
         public override void OnToolGUI(EditorWindow window)
         {
             if (window is not SceneView) return;
-            if (this.target is not DensityScatterLayer layer) return;
+
+            // Global EditorTool — read the active layer from ScatterAuthoringState rather than
+            // this.target (which is always null for an unscoped tool). The layer is set by
+            // DensityPaintPanel.BindLayer() when the user selects a layer in Scatter Studio.
+            DensityScatterLayer? layer = ScatterAuthoringState.I.ActiveLayer;
+            if (layer == null) return;
 
             (ScatterField? field, int layerIdx) = ScatterFieldLookup.FindOwningField(layer);
 
@@ -73,10 +118,24 @@ namespace GrassInteract.Editor
 
             if (hasHit)
             {
-                float size = ScatterAuthoringState.I.BrushSize;
+                float size    = ScatterAuthoringState.I.BrushSize;
                 float falloff = ScatterAuthoringState.I.BrushFalloff;
-                ScatterGizmos.BrushDisc(hit.point, hit.normal, size, this.BrushColorForMode());
-                ScatterGizmos.FalloffRing(hit.point, hit.normal, size * falloff, size, ScatterGizmos.BrushFalloffColor);
+
+                // SF-5: resolve the active stamp on every hover so the decal preview shows the
+                // current stamp shape before the first click — not only at BeginStroke.
+                this.activeStamp = ResolveStamp(field);
+
+                // Push the brush state; ScatterBrushPreview draws it in world space from its
+                // SceneView.duringSceneGui callback (DrawMeshNow does not render in world space from
+                // OnToolGUI — it would draw in the Scene-view corner instead).
+                ScatterBrushPreview.Set(
+                    hit.point,
+                    hit.normal,
+                    size,
+                    this.activeStamp,
+                    this.BrushColorForMode(),
+                    falloff);
+
                 HandleUtility.Repaint();
             }
 
@@ -84,13 +143,45 @@ namespace GrassInteract.Editor
             {
                 case EventType.MouseDown when e.button == 0 && !e.alt && hasHit:
                     GUIUtility.hotControl = controlId;
-                    this.BeginStroke(layer, field);
-                    this.PaintAt(hit.point, origin, bounds);
+                    this.BeginStroke(layer, field, layerIdx);
+                    {
+                        var space = new GrassFieldSpace(origin, bounds);
+                        Vector2 centerUv = space.WorldToUv(hit.point);
+
+                        // NTH-2: compute separate X and Y UV radii to honour non-square fields.
+                        float radUvX = ScatterAuthoringState.I.BrushSize / Mathf.Max(0.0001f, bounds.x);
+                        float radUvY = ScatterAuthoringState.I.BrushSize / Mathf.Max(0.0001f, bounds.y);
+
+                        float strength = GetStrength();
+                        float inner    = Mathf.Clamp01(ScatterAuthoringState.I.BrushFalloff);
+                        int   mode     = ScatterAuthoringState.I.PaintMode;
+                        this.gpu.StrokeTo(centerUv, centerUv, radUvX, radUvY, SPACING_FACTOR, strength, this.activeStamp, mode, inner);
+                        // Live re-scatter immediately for the first dab — synchronous throttled
+                        // readback + immediate rebuild (EditorApplication.update is starved mid-drag).
+                        this.LiveUpdate(field, layerIdx);
+                    }
                     e.Use();
                     break;
 
                 case EventType.MouseDrag when e.button == 0 && this.painting:
-                    if (hasHit) this.PaintAt(hit.point, origin, bounds);
+                    if (hasHit)
+                    {
+                        var space = new GrassFieldSpace(origin, bounds);
+                        Vector2 toUv = space.WorldToUv(hit.point);
+
+                        // NTH-2: separate X and Y radii.
+                        float radUvX = ScatterAuthoringState.I.BrushSize / Mathf.Max(0.0001f, bounds.x);
+                        float radUvY = ScatterAuthoringState.I.BrushSize / Mathf.Max(0.0001f, bounds.y);
+
+                        float strength = GetStrength();
+                        float inner    = Mathf.Clamp01(ScatterAuthoringState.I.BrushFalloff);
+                        int   mode     = ScatterAuthoringState.I.PaintMode;
+
+                        Vector2 fromUv = this.gpu.TryGetLastUv(out Vector2 last) ? last : toUv;
+                        this.gpu.StrokeTo(fromUv, toUv, radUvX, radUvY, SPACING_FACTOR, strength, this.activeStamp, mode, inner);
+                        // Live re-scatter at the 0.15s throttle while dragging (see LiveUpdate).
+                        this.LiveUpdate(field, layerIdx);
+                    }
                     e.Use();
                     break;
 
@@ -138,119 +229,61 @@ namespace GrassInteract.Editor
 
         // ── Stroke lifecycle ───────────────────────────────────────────────────
 
-        private void BeginStroke(DensityScatterLayer layer, ScatterField field)
+        private void BeginStroke(DensityScatterLayer layer, ScatterField field, int layerIdx)
         {
             Texture2D map = layer.DensityMap!;
+            // Snapshot the CPU texture for Undo — EndStroke writes pixels back so undo restores pre-stroke.
             Undo.RegisterCompleteObjectUndo(map, "Paint Density");
-            this.activeMap = map;
-            this.texW = map.width;
-            this.texH = map.height;
-            this.pixels = map.GetPixels();
-            this.activeStamp = ResolveStamp(field);
-            this.painting = true;
+
+            this.activeMap       = map;
+            // activeStamp is already current from the hover-resolve in OnToolGUI (SF-5).
+            // Re-resolve here as a safety net in case BeginStroke is called without a prior hover.
+            this.activeStamp     = ResolveStamp(field);
+            this.activeField     = field;
+            this.activeLayerIdx  = layerIdx;
+            this.painting        = true;
+            this.lastReadbackTime = 0;  // 0 → the first LiveUpdate (MouseDown) fires immediately
+
+            this.gpu.BeginStroke(map);
         }
 
         private void EndStroke(ScatterField field, int layerIdx)
         {
             this.painting = false;
-            if (this.activeMap != null && this.pixels != null)
-            {
-                this.activeMap.SetPixels(this.pixels);
-                this.activeMap.Apply(false);
-                EditorUtility.SetDirty(this.activeMap);
-                // SSOT: delegate PNG persistence to the factory (no duplicate path).
-                DensityMapFactory.PersistPixels(this.activeMap, this.pixels, this.texW, this.texH);
-                if (layerIdx >= 0) ScatterRebuildScheduler.MarkDirty(field, layerIdx);
-            }
-            this.pixels = null;
-            this.activeMap = null;
-            this.activeStamp = null;
+
+            // Final readback → persist to PNG (all inside gpu.EndStroke).
+            this.gpu.EndStroke();
+
+            // Rebuild immediately so the final stroke state shows without waiting for the
+            // drag-starved scheduler tick.
+            if (layerIdx >= 0) ScatterRebuildScheduler.RebuildImmediate(field, layerIdx);
+
+            this.activeMap      = null;
+            this.activeField    = null;
+            this.activeLayerIdx = 0;
         }
 
-        // ── Paint kernel ───────────────────────────────────────────────────────
+        // ── Live update during a stroke ────────────────────────────────────────
 
-        private void PaintAt(Vector3 worldHit, Vector3 origin, Vector2 bounds)
+        /// <summary>
+        /// Synchronously reads the painted RT back to the CPU density map and rebuilds the layer
+        /// immediately, throttled to once per <see cref="READBACK_INTERVAL_SECONDS"/> (SF-1: not
+        /// per-frame). Driven from the <c>MouseDown</c>/<c>MouseDrag</c> handlers — which DO fire
+        /// during an active drag — rather than <see cref="EditorApplication.update"/>, which Unity
+        /// starves while the user drags in the Scene view (that was why grass only updated on
+        /// mouse-up). Synchronous readback + immediate rebuild bypass the starved update loop.
+        /// </summary>
+        private void LiveUpdate(ScatterField field, int layerIdx)
         {
-            if (this.pixels == null || this.activeMap == null) return;
+            if (field == null) return;
 
-            float size    = ScatterAuthoringState.I.BrushSize;
-            float opacity = ScatterAuthoringState.I.BrushOpacity;
-            float falloff = ScatterAuthoringState.I.BrushFalloff;
-            float flow    = ScatterAuthoringState.I.BrushFlow;
-            var   mode    = (PaintMode)ScatterAuthoringState.I.PaintMode;
+            // SF-1: throttle to at most once per 0.15s regardless of mouse-event frequency.
+            double now = EditorApplication.timeSinceStartup;
+            if (now - this.lastReadbackTime < READBACK_INTERVAL_SECONDS) return;
+            this.lastReadbackTime = now;
 
-            var space = new GrassFieldSpace(origin, bounds);
-            Vector2 centerUv = space.WorldToUv(worldHit);
-
-            float radUvX = size / Mathf.Max(0.0001f, bounds.x);
-            float radUvY = size / Mathf.Max(0.0001f, bounds.y);
-            int minX = Mathf.Clamp(Mathf.FloorToInt((centerUv.x - radUvX) * this.texW), 0, this.texW - 1);
-            int maxX = Mathf.Clamp(Mathf.CeilToInt((centerUv.x + radUvX) * this.texW), 0, this.texW - 1);
-            int minY = Mathf.Clamp(Mathf.FloorToInt((centerUv.y - radUvY) * this.texH), 0, this.texH - 1);
-            int maxY = Mathf.Clamp(Mathf.CeilToInt((centerUv.y + radUvY) * this.texH), 0, this.texH - 1);
-
-            float strength = Mathf.Clamp01(opacity) * Mathf.Clamp01(flow);
-            float inner    = Mathf.Clamp01(falloff);
-            Texture2D? stamp = this.activeStamp;
-
-            for (int py = minY; py <= maxY; ++py)
-            {
-                for (int px = minX; px <= maxX; ++px)
-                {
-                    var uv = new Vector2((px + 0.5f) / this.texW, (py + 0.5f) / this.texH);
-                    Vector3 pw = space.UvToWorld(uv, worldHit.y);
-                    float dx = pw.x - worldHit.x;
-                    float dz = pw.z - worldHit.z;
-                    float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
-                    if (distXZ > size) continue;
-
-                    float brushFalloff;
-                    if (stamp != null)
-                    {
-                        float su = Mathf.Clamp01(dx / (2f * size) + 0.5f);
-                        float sv = Mathf.Clamp01(dz / (2f * size) + 0.5f);
-                        brushFalloff = stamp.GetPixelBilinear(su, sv).r;
-                    }
-                    else
-                    {
-                        float t = size <= 0f ? 0f : distXZ / size;
-                        brushFalloff = t <= inner ? 1f : Mathf.SmoothStep(1f, 0f, (t - inner) / Mathf.Max(0.0001f, 1f - inner));
-                    }
-
-                    float w = strength * brushFalloff;
-                    if (w <= 0f) continue;
-
-                    int idx = py * this.texW + px;
-                    float r = this.pixels[idx].r;
-
-                    r = mode switch
-                    {
-                        PaintMode.Paint  => Mathf.Clamp01(r + w),
-                        PaintMode.Erase  => Mathf.Clamp01(r - w),
-                        PaintMode.Smooth => Mathf.Lerp(r, this.NeighborAverage(px, py), w),
-                        _ => r,
-                    };
-                    this.pixels[idx] = new Color(r, r, r, 1f);
-                }
-            }
-
-            // Live preview: push CPU pixels to GPU.
-            this.activeMap.SetPixels(this.pixels);
-            this.activeMap.Apply(false);
-        }
-
-        private float NeighborAverage(int px, int py)
-        {
-            if (this.pixels == null) return 0f;
-            float sum = 0f; int n = 0;
-            for (int dy = -1; dy <= 1; ++dy)
-            for (int dx = -1; dx <= 1; ++dx)
-            {
-                int nx = px + dx, ny = py + dy;
-                if (nx < 0 || ny < 0 || nx >= this.texW || ny >= this.texH) continue;
-                sum += this.pixels[ny * this.texW + nx].r; n++;
-            }
-            return n > 0 ? sum / n : 0f;
+            this.gpu.ReadbackNow();
+            ScatterRebuildScheduler.RebuildImmediate(field, layerIdx);
         }
 
         // ── Stamp resolution ───────────────────────────────────────────────────
@@ -258,6 +291,10 @@ namespace GrassInteract.Editor
         /// <summary>
         /// Resolves the active <see cref="StampRef"/> from <see cref="ScatterAuthoringState"/> to a
         /// concrete readable <see cref="Texture2D"/>, or <c>null</c> for procedural falloff.
+        ///
+        /// SSOT: this is the ONLY stamp resolver in the codebase.
+        /// <see cref="ScatterBrushPreview"/> and <see cref="DensityPaintGPU"/> consume the
+        /// already-resolved texture; they do NOT re-resolve <see cref="StampRef"/>.
         ///
         /// Resolution table (matches old StampIndex semantics):
         ///   StampSource.None   → null (procedural; was StampIndex == -1)
@@ -326,6 +363,12 @@ namespace GrassInteract.Editor
         {
             var mode = (PaintMode)ScatterAuthoringState.I.PaintMode;
             return mode == PaintMode.Erase ? ScatterGizmos.EraseColor : ScatterGizmos.BrushColor;
+        }
+
+        private static float GetStrength()
+        {
+            return Mathf.Clamp01(ScatterAuthoringState.I.BrushOpacity)
+                 * Mathf.Clamp01(ScatterAuthoringState.I.BrushFlow);
         }
     }
 }

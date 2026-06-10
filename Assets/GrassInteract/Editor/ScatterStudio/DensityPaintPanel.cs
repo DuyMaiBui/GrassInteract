@@ -183,6 +183,9 @@ namespace GrassInteract.Editor
                 }
             }
 
+            // Keep ScatterAuthoringState in sync so DensityPaintTool (global EditorTool) can read it.
+            ScatterAuthoringState.I.ActiveLayer = this.activeLayer;
+
             // Update the scene-overlay binding.
             ScatterDensityOverlay.SetActiveLayer(this.activeLayer, this.activeField);
 
@@ -194,11 +197,17 @@ namespace GrassInteract.Editor
         /// Targets a specific density layer (driven by layer-rail selection) so paint activation +
         /// overlay + thumbnail act on the selected layer rather than the field's first density layer.
         /// Non-density selections leave the last bound layer in place (the Paint tab is disabled then).
+        /// Also stores the layer in ScatterAuthoringState so the global DensityPaintTool can read it.
         /// </summary>
         internal void BindLayer(DensityScatterLayer? layer)
         {
             if (layer == null) return;
             this.activeLayer = layer;
+
+            // Keep ScatterAuthoringState in sync so DensityPaintTool (a global, unscoped EditorTool)
+            // can resolve the active layer from OnToolGUI without depending on this.target.
+            ScatterAuthoringState.I.ActiveLayer = layer;
+
             ScatterDensityOverlay.SetActiveLayer(this.activeLayer, this.activeField);
             this.RefreshThumbnail();
         }
@@ -265,24 +274,18 @@ namespace GrassInteract.Editor
                 return;
             }
 
-            // DensityPaintTool is a component tool targeting DensityScatterLayer, so ToolManager can
-            // only activate it when that layer is the active selection. Select the layer, then
-            // activate on the next editor tick — activating synchronously (before the tool context
-            // refreshes for the new selection) throws InvalidOperationException.
-            DensityScatterLayer layer = this.activeLayer;
-            Selection.activeObject = layer;
-            EditorApplication.delayCall += () =>
+            // DensityPaintTool is now a global (unscoped) EditorTool — no typeof() target type.
+            // A global tool activates unconditionally via SetActiveTool; no Selection manipulation
+            // or delayCall is required. The active layer is already stored in ScatterAuthoringState
+            // by BindLayer(), so the tool's OnToolGUI can resolve it immediately.
+            try
             {
-                if (Selection.activeObject != layer) return;
-                try
-                {
-                    ToolManager.SetActiveTool<DensityPaintTool>();
-                }
-                catch (System.InvalidOperationException ex)
-                {
-                    Debug.LogWarning($"[Scatter Studio] Could not activate Density Paint tool: {ex.Message}");
-                }
-            };
+                ToolManager.SetActiveTool<DensityPaintTool>();
+            }
+            catch (System.InvalidOperationException ex)
+            {
+                Debug.LogWarning($"[Scatter Studio] Could not activate Density Paint tool: {ex.Message}");
+            }
         }
 
         // ── Undo ──────────────────────────────────────────────────────────────

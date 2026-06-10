@@ -3,6 +3,7 @@
     "rootNamespace": "GrassInteract.Tests",
     "references": [
         "GrassInteract",
+        "GrassInteract.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "Unity.Collections"
