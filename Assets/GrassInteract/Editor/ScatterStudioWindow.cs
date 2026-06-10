@@ -37,6 +37,13 @@ namespace GrassInteract.Editor
         private const string USS_PATH       = "Assets/GrassInteract/Editor/ScatterStudio/ScatterStudio.uss";
         private const string LIGHT_USS_PATH = "Assets/GrassInteract/Editor/ScatterStudio/ScatterStudioLight.uss";
 
+        // ── Session persistence keys ──────────────────────────────────────────
+        // SessionState survives domain reload (recompile) but clears on editor restart,
+        // so the restored binding is never stale across sessions.
+
+        private const string SESSION_KEY_FIELD  = "GrassInteract.ScatterStudio.FieldGID";
+        private const string SESSION_KEY_CONFIG = "GrassInteract.ScatterStudio.ConfigGUID";
+
         // ── Tab indices ───────────────────────────────────────────────────────
 
         private const int TAB_LAYER   = 0;
@@ -208,8 +215,8 @@ namespace GrassInteract.Editor
             // Hook selection changes
             Selection.selectionChanged += this.OnSelectionChanged;
 
-            // Seed with current selection
-            this.SyncToSelection();
+            // Restore the field/config bound before the last domain reload; else seed from selection.
+            this.RestoreOrSyncSelection();
         }
 
         private void OnDestroy()
@@ -344,6 +351,57 @@ namespace GrassInteract.Editor
             this.SyncToSelection();
         }
 
+        /// <summary>
+        /// Restores the field/config bound before the last domain reload from <see cref="SessionState"/>.
+        /// Falls back to config-only mode if the scene field can't resolve, then to the live selection.
+        /// </summary>
+        private void RestoreOrSyncSelection()
+        {
+            // 1. Try the ScatterField scene object via its GlobalObjectId.
+            string fieldGid = SessionState.GetString(SESSION_KEY_FIELD, string.Empty);
+            if (!string.IsNullOrEmpty(fieldGid) && GlobalObjectId.TryParse(fieldGid, out GlobalObjectId gid))
+            {
+                if (GlobalObjectId.GlobalObjectIdentifierToObjectSlow(gid) is ScatterField field)
+                {
+                    this.SetActiveField(field);
+                    return;
+                }
+            }
+
+            // 2. Fall back to config-only mode via the asset GUID.
+            string configGuid = SessionState.GetString(SESSION_KEY_CONFIG, string.Empty);
+            if (!string.IsNullOrEmpty(configGuid))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(configGuid);
+                var config = AssetDatabase.LoadAssetAtPath<TerrainScatterConfig>(path);
+                if (config != null)
+                {
+                    this.SetActiveConfig(config, null);
+                    return;
+                }
+            }
+
+            // 3. Nothing persisted (or it no longer resolves) — seed from the live selection.
+            this.SyncToSelection();
+        }
+
+        /// <summary>Writes the current field/config identity to <see cref="SessionState"/> for restore.</summary>
+        private static void SaveSessionBinding(ScatterField? field, TerrainScatterConfig? config)
+        {
+            if (field != null)
+                SessionState.SetString(SESSION_KEY_FIELD, GlobalObjectId.GetGlobalObjectIdSlow(field).ToString());
+            else
+                SessionState.EraseString(SESSION_KEY_FIELD);
+
+            string configGuid = config != null
+                ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(config))
+                : string.Empty;
+            if (!string.IsNullOrEmpty(configGuid))
+                SessionState.SetString(SESSION_KEY_CONFIG, configGuid);
+            else
+                SessionState.EraseString(SESSION_KEY_CONFIG);
+        }
+
         private void SyncToSelection()
         {
             // Prefer a ScatterField directly in the selection
@@ -388,6 +446,9 @@ namespace GrassInteract.Editor
 
             this.activeField  = field;
             this.activeConfig = config;
+
+            // Persist for restore across the next domain reload (recompile).
+            SaveSessionBinding(field, config);
 
             // Sync the field picker
             var fieldPicker = this.rootVisualElement.Q<ObjectField>("field-picker");
