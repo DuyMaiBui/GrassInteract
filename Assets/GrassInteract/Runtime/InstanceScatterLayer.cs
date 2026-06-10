@@ -34,10 +34,6 @@ namespace GrassInteract
         [Tooltip("Sub-asset holding authored per-instance records.")]
         [SerializeField] private AuthoredInstancesData? authoredInstances;
 
-        [Range(0.05f, 5f)]
-        [Tooltip("Minimum spacing (metres) between placed instances during a Place-brush stroke.")]
-        [SerializeField] private float placeSpacing = 0.5f;
-
         // ── Scale-range override ───────────────────────────────────────────────
 
         [Tooltip("When true, ScaleRange is driven by scaleRangeOverride instead of being auto-computed from authored instance records.")]
@@ -102,7 +98,6 @@ namespace GrassInteract
         // ── IInstancePlacementSource ───────────────────────────────────────────
 
         public AuthoredInstancesData? AuthoredInstances => this.authoredInstances;
-        public float PlaceSpacing => this.placeSpacing;
 
         // ── Bounds (IInstancePlacementSource — delegate to the embedded struct) ─
         public float MaxBladeHeight => this.bounds.MaxBladeHeight;

@@ -12,7 +12,6 @@ namespace GrassInteract
     public interface IInstancePlacementSource
     {
         AuthoredInstancesData? AuthoredInstances { get; }
-        float PlaceSpacing { get; }
 
         // ── Bounds (for AABB computation) ─────────────────────────────────────
         Vector2 FieldBounds { get; }

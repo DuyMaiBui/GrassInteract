@@ -124,11 +124,10 @@ namespace GrassInteract.Editor
                 {
                     // Push ghost state — the actual DrawMeshNow fires from
                     // InstanceGhostPreview.OnSceneGui during the Repaint phase.
-                    bool spacingOk = this.RespectsSpacing(authored, hit.point, layer.PlaceSpacing);
-                    InstanceGhostPreview.Set(layer, hit.point, hit.normal, spacingOk, visible: true);
+                    // Placement is unconditional (no spacing requirement), so the ghost is always valid.
+                    InstanceGhostPreview.Set(layer, hit.point, hit.normal, spacingOk: true, visible: true);
                     // Wire disc: cursor ring + fallback when ghost has no LOD0 mesh.
-                    ScatterGizmos.BrushDisc(hit.point, hit.normal, 0.5f,
-                        spacingOk ? ScatterGizmos.BrushColor : ScatterGizmos.EraseColor);
+                    ScatterGizmos.BrushDisc(hit.point, hit.normal, 0.5f, ScatterGizmos.BrushColor);
                 }
                 else
                 {
@@ -172,16 +171,14 @@ namespace GrassInteract.Editor
             if (e.type == EventType.MouseDown && e.button == 0 && !e.alt && hasHit)
             {
                 GUIUtility.hotControl = controlId;
-                if (this.RespectsSpacing(authored, hit.point, layer.PlaceSpacing))
-                {
-                    Undo.RegisterCompleteObjectUndo(authored, "Place Instance");
-                    authored.AddRecord(this.BuildRecord(hit.point, hit.normal));
-                    // Use RebuildImmediate so the instance appears in the scene immediately on
-                    // click — MarkDirty has a 150ms debounce which feels laggy for single-clicks.
-                    authored.PackBlob();
-                    EditorUtility.SetDirty(authored);
-                    if (layerIdx >= 0) ScatterRebuildScheduler.RebuildImmediate(field, layerIdx);
-                }
+                // Free placement — no spacing requirement; every click places an instance.
+                Undo.RegisterCompleteObjectUndo(authored, "Place Instance");
+                authored.AddRecord(this.BuildRecord(hit.point, hit.normal));
+                // Use RebuildImmediate so the instance appears in the scene immediately on
+                // click — MarkDirty has a 150ms debounce which feels laggy for single-clicks.
+                authored.PackBlob();
+                EditorUtility.SetDirty(authored);
+                if (layerIdx >= 0) ScatterRebuildScheduler.RebuildImmediate(field, layerIdx);
                 e.Use();
             }
             else if (e.type == EventType.MouseUp && e.button == 0)
@@ -200,12 +197,11 @@ namespace GrassInteract.Editor
 
             GUIUtility.hotControl = controlId;
             float radius = BrushSize;
-            float spacing = layer.PlaceSpacing;
             LayerMask mask = field.ResolveGroundMask(layer);
 
-            // Generate candidate positions within the brush disc and place those that
-            // respect spacing. Candidates are capped at MAX_SCATTER_PER_STROKE to
-            // avoid O(n²) stalls on dense fields.
+            // Generate candidate positions within the brush disc and place each that lands on
+            // the ground. Candidates are capped at MAX_SCATTER_PER_STROKE to bound the stroke
+            // cost. No spacing requirement — overlapping/dense clumps are allowed.
             bool anyPlaced = false;
             int attempts = 0;
             int maxAttempts = MAX_SCATTER_PER_STROKE * 4; // generous attempt budget
@@ -224,9 +220,6 @@ namespace GrassInteract.Editor
                 // Project the candidate onto the ground via a short raycast from above.
                 Ray probeRay = new Ray(candidate + Vector3.up * 50f, Vector3.down);
                 if (!Physics.Raycast(probeRay, out RaycastHit probeHit, 100f, mask.value == 0 ? ~0 : mask.value))
-                    continue;
-
-                if (!this.RespectsSpacing(authored, probeHit.point, spacing))
                     continue;
 
                 authored.AddRecord(this.BuildRecord(probeHit.point, probeHit.normal));
@@ -254,15 +247,6 @@ namespace GrassInteract.Editor
                 overrideMask = InstanceOverrideMask.None,
                 colliderScale = 1f, colliderMeshRefIndex = -1, colliderMaterialRefIndex = -1,
             };
-        }
-
-        private bool RespectsSpacing(AuthoredInstancesData authored, Vector3 pos, float spacing)
-        {
-            float sqr = spacing * spacing;
-            var list = authored.WorkingList;
-            for (int i = 0; i < list.Count; ++i)
-                if ((list[i].position - pos).sqrMagnitude < sqr) return false;
-            return true;
         }
 
         // ── Select + Transform (single + multi) ────────────────────────────────
