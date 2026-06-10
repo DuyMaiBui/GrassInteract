@@ -263,16 +263,21 @@ namespace GrassInteract.Editor
             this.activeTabIndex = tabIndex;
 
             // Button active-class toggling
-            SetTabActive(this.tabLayerBtn,  tabIndex == TAB_LAYER);
+            SetTabActive(this.tabLayerBtn,   tabIndex == TAB_LAYER);
             SetTabActive(this.tabBrushesBtn, tabIndex == TAB_BRUSHES);
-            SetTabActive(this.tabPaintBtn,  tabIndex == TAB_PAINT);
-            SetTabActive(this.tabPlaceBtn,  tabIndex == TAB_PLACE);
+            SetTabActive(this.tabPaintBtn,   tabIndex == TAB_PAINT);
+            SetTabActive(this.tabPlaceBtn,   tabIndex == TAB_PLACE);
 
             // Page visibility
             SetPageVisible(this.pageLayer,   tabIndex == TAB_LAYER);
             SetPageVisible(this.pageBrushes, tabIndex == TAB_BRUSHES);
             SetPageVisible(this.pagePaint,   tabIndex == TAB_PAINT);
             SetPageVisible(this.pagePlace,   tabIndex == TAB_PLACE);
+
+            // Auto-activate the scoped InstancePlacementTool when the Place tab is shown,
+            // so clicking the tab is sufficient — no separate button press required.
+            if (tabIndex == TAB_PLACE)
+                this.instancePanel?.ActivateTool();
         }
 
         private static void SetTabActive(Button? btn, bool active)

@@ -126,6 +126,21 @@ namespace GrassInteract.Editor
             set => this.activeLayer = value;
         }
 
+        // ── Active instance layer (transient — not persisted across domain reload) ──
+        //
+        // NOT a [SerializeField]: InstanceScatterLayer is a sub-asset. InstancePanel.BindLayer()
+        // sets this when the user selects a layer; InstancePlacementTool (global, unscoped
+        // EditorTool) reads it instead of this.target (always null for a global EditorTool).
+
+        [System.NonSerialized]
+        private InstanceScatterLayer? activeInstanceLayer;
+
+        internal InstanceScatterLayer? ActiveInstanceLayer
+        {
+            get => this.activeInstanceLayer;
+            set => this.activeInstanceLayer = value;
+        }
+
         // ── Overlay visibility ─────────────────────────────────────────────────
 
         [SerializeField] private bool overlayVisible = false;

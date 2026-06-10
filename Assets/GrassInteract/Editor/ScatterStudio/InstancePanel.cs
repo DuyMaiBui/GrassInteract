@@ -7,6 +7,8 @@ using UnityEditor.UIElements;
 
 namespace GrassInteract.Editor
 {
+    using UnityEditor.EditorTools;
+
     /// <summary>
     /// In-window UI Toolkit panel that replaces the old <c>DrawSelectedInstance</c> scene-overlay.
     /// Attaches to the <c>#instance-panel</c> <see cref="VisualElement"/> reserved in
@@ -37,6 +39,18 @@ namespace GrassInteract.Editor
         private InstanceScatterLayer?  activeLayer;
         private SerializedObject?      layerSO;
 
+        // ── Tool-activation button + mode toolbar ─────────────────────────────
+
+        private Button? activateBtn;
+
+        // Mode toolbar: Place / Select / Erase.
+        private Button? btnPlace;
+        private Button? btnSelect;
+        private Button? btnErase;
+
+        // All three handles (Move/Rotate/Scale) are always drawn simultaneously in Select
+        // mode — no per-gizmo buttons needed. The gizmo row is intentionally omitted.
+
         // ── IMGUI container (for complex multi-control Handles-style rows) ────
 
         private IMGUIContainer? imguiContainer;
@@ -64,6 +78,45 @@ namespace GrassInteract.Editor
             header.style.marginBottom = 4f;
             header.style.marginLeft   = 4f;
             this.root.Add(header);
+
+            // ── Activate-tool button ──────────────────────────────────────────
+            // InstancePlacementTool is a scoped EditorTool (typeof InstanceScatterLayer).
+            // It won't appear in the SceneView until it is explicitly activated AND the
+            // active Unity selection is the target InstanceScatterLayer.
+            this.activateBtn = new Button(this.OnActivatePlacementTool)
+            {
+                text = "Activate Placement Tool",
+                style =
+                {
+                    marginTop    = 6f,
+                    marginBottom = 6f,
+                    marginLeft   = 4f,
+                    marginRight  = 4f,
+                },
+            };
+            this.root.Add(this.activateBtn);
+
+            // ── Mode toolbar: Place / Select / Erase ─────────────────────────
+            var modeRow = new VisualElement();
+            modeRow.style.flexDirection  = FlexDirection.Row;
+            modeRow.style.marginLeft     = 4f;
+            modeRow.style.marginRight    = 4f;
+            modeRow.style.marginBottom   = 4f;
+
+            this.btnPlace = new Button(() => this.SetMode(0)) { text = "Place" };
+            this.btnSelect = new Button(() => this.SetMode(1)) { text = "Select" };
+            this.btnErase  = new Button(() => this.SetMode(2)) { text = "Erase" };
+            foreach (var b in new[] { this.btnPlace, this.btnSelect, this.btnErase })
+            {
+                b.style.flexGrow = 1f;
+            }
+            modeRow.Add(this.btnPlace);
+            modeRow.Add(this.btnSelect);
+            modeRow.Add(this.btnErase);
+            this.root.Add(modeRow);
+
+            // Initial style pass (mode buttons).
+            this.RefreshModeButtonStyles();
 
             // ── IMGUI container for the per-instance / batch edit controls ────
             // (uses EditorGUI helpers which require IMGUI — keeps AuthoredInstancesData
@@ -100,6 +153,20 @@ namespace GrassInteract.Editor
         // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>
+        /// Activates <see cref="InstancePlacementTool"/> in the SceneView.
+        /// Selects the bound <see cref="InstanceScatterLayer"/> first so Unity's scoped
+        /// tool context is satisfied, then calls
+        /// <see cref="ToolManager.SetActiveTool{T}"/>. Safe to call when no layer is
+        /// bound — logs a warning and returns.
+        /// Called by <see cref="ScatterStudioWindow"/> when the Place tab is selected,
+        /// and by the "Activate Placement Tool" button.
+        /// </summary>
+        internal void ActivateTool()
+        {
+            this.OnActivatePlacementTool();
+        }
+
+        /// <summary>
         /// Binds the panel to a (possibly null) scatter field. Call whenever the active
         /// <see cref="ScatterField"/> or selected <see cref="ScatterLayer"/> changes.
         /// </summary>
@@ -127,6 +194,7 @@ namespace GrassInteract.Editor
             }
 
             this.RefreshScaleOverrideUI();
+            this.RefreshModeButtonStyles();
         }
 
         /// <summary>
@@ -138,7 +206,65 @@ namespace GrassInteract.Editor
         {
             this.activeLayer = layer;
             this.layerSO     = layer != null ? new SerializedObject(layer) : null;
+
+            // Keep ScatterAuthoringState in sync so InstancePlacementTool (global, unscoped
+            // EditorTool) can resolve the active layer from OnToolGUI without this.target.
+            ScatterAuthoringState.I.ActiveInstanceLayer = layer;
+
             this.RefreshScaleOverrideUI();
+            this.RefreshModeButtonStyles();
+        }
+
+        // ── Tool activation ───────────────────────────────────────────────────
+
+        private void OnActivatePlacementTool()
+        {
+            if (this.activeLayer == null)
+            {
+                Debug.LogWarning("[Scatter Studio] No InstanceScatterLayer bound — " +
+                                 "select or add an instance layer first.");
+                return;
+            }
+
+            // InstancePlacementTool is now a global (unscoped) EditorTool — no typeof() target.
+            // A global tool activates unconditionally; no Selection manipulation or delayCall
+            // required. The active layer is already stored in ScatterAuthoringState by
+            // BindLayer(), so the tool's OnToolGUI can resolve it immediately.
+            try
+            {
+                ToolManager.SetActiveTool<InstancePlacementTool>();
+            }
+            catch (System.InvalidOperationException ex)
+            {
+                Debug.LogWarning($"[Scatter Studio] Could not activate Instance Placement tool: {ex.Message}");
+            }
+        }
+
+        // ── Mode + gizmo helpers ───────────────────────────────────────────────
+
+        private void SetMode(int mode)
+        {
+            ScatterAuthoringState.I.PlaceMode = mode;
+            this.RefreshModeButtonStyles();
+            SceneView.RepaintAll();
+        }
+
+        private void RefreshModeButtonStyles()
+        {
+            int mode = ScatterAuthoringState.I.PlaceMode;
+
+            // Highlight active mode button with a tinted background.
+            StyleButton(this.btnPlace,  mode == 0);
+            StyleButton(this.btnSelect, mode == 1);
+            StyleButton(this.btnErase,  mode == 2);
+
+            static void StyleButton(Button? btn, bool active)
+            {
+                if (btn == null) return;
+                btn.style.backgroundColor = active
+                    ? new StyleColor(new Color(0.3f, 0.6f, 1f, 0.4f))
+                    : StyleKeyword.Null;
+            }
         }
 
         // ── Scale-range override UI ────────────────────────────────────────────
@@ -219,8 +345,23 @@ namespace GrassInteract.Editor
             if (tool == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Activate the Instance Placement EditorTool in the scene view to select instances.",
+                    "Activate the Instance Placement EditorTool above to place and select instances.",
                     MessageType.Info);
+                return;
+            }
+
+            // In non-Select modes the instance edit controls are not relevant.
+            int currentMode = ScatterAuthoringState.I.PlaceMode;
+            if (currentMode != 1) // 1 = Select
+            {
+                string modeLabel = currentMode switch
+                {
+                    0 => "Place mode — click in the scene to place instances.",
+                    2 => "Erase mode — drag over instances to remove them.",
+                    3 => "Scatter mode — click to flood-fill instances in the brush area.",
+                    _ => "Click in the scene to use the active mode.",
+                };
+                EditorGUILayout.HelpBox(modeLabel, MessageType.None);
                 return;
             }
 
@@ -243,13 +384,33 @@ namespace GrassInteract.Editor
 
             GUILayout.Label($"Instance #{selectedIdx}", EditorStyles.boldLabel);
 
+            // ── Transform section (single-select only) ────────────────────────
+            EditorGUI.BeginChangeCheck();
+            Vector3    newPosition = EditorGUILayout.Vector3Field("Position", rec.position);
+            Vector3    newEuler    = EditorGUILayout.Vector3Field("Rotation", rec.rotation.eulerAngles);
+            float      newScale    = EditorGUILayout.FloatField("Scale",     rec.scale);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RegisterCompleteObjectUndo(authored, "Edit Instance Transform");
+                rec.position = newPosition;
+                rec.rotation = Quaternion.Euler(newEuler);
+                rec.scale    = Mathf.Max(0.0001f, newScale);
+                authored.SetRecord(selectedIdx, rec);
+                authored.PackBlob();
+                EditorUtility.SetDirty(authored);
+                if (layerIdx >= 0) ScatterRebuildScheduler.MarkDirty(this.activeField, layerIdx);
+            }
+
+            EditorGUILayout.Space(4f);
+
+            // ── Collider section ──────────────────────────────────────────────
             bool configured = (rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0;
             bool generate   = configured && rec.generateCollider;
 
             EditorGUI.BeginChangeCheck();
-            bool newGenerate = EditorGUILayout.Toggle("Generate Collider", generate);
-            bool newConvex   = EditorGUILayout.Toggle("Convex", rec.colliderConvex);
-            float newScale   = EditorGUILayout.FloatField("Collider Scale", rec.colliderScale <= 0f ? 1f : rec.colliderScale);
+            bool  newGenerate      = EditorGUILayout.Toggle("Generate Collider", generate);
+            bool  newConvex        = EditorGUILayout.Toggle("Convex", rec.colliderConvex);
+            float newColliderScale = EditorGUILayout.FloatField("Collider Scale", rec.colliderScale <= 0f ? 1f : rec.colliderScale);
 
             var curMesh = authored.GetObjectRef(rec.colliderMeshRefIndex) as Mesh;
             var newMesh = (Mesh?)EditorGUILayout.ObjectField("Mesh Override", curMesh, typeof(Mesh), false);
@@ -264,7 +425,7 @@ namespace GrassInteract.Editor
                 {
                     int meshRef = newMesh != null ? authored.EnsureObjectRef(newMesh) : -1;
                     int matRef  = newMat  != null ? authored.EnsureObjectRef(newMat)  : -1;
-                    authored.SetColliderConfig(selectedIdx, newGenerate, newConvex, newScale, meshRef, matRef);
+                    authored.SetColliderConfig(selectedIdx, newGenerate, newConvex, newColliderScale, meshRef, matRef);
                 }
                 else
                 {

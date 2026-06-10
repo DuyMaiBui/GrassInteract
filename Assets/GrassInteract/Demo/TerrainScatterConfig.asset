@@ -59,65 +59,6 @@ MonoBehaviour:
   randomPitchRange: {x: 0, y: 0}
   randomRollRange: {x: 0, y: 0}
   alignToNormal: 0
---- !u!114 &-3438968068992208322
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1abe7025d8db77e408740d14122533b7, type: 3}
-  m_Name: DensityGrass_CPU
-  m_EditorClassIdentifier: GrassInteract::GrassInteract.DensityScatterLayer
-  render:
-    material: {fileID: 2100000, guid: 24f635406cba40e4f89e8dbc3d77efbd, type: 2}
-    shadowCastingMode: 0
-    lods:
-    - mesh: {fileID: 4300000, guid: 30c9f5412a6ee444fb709fca694dc445, type: 2}
-      maxDistance: 15
-    - mesh: {fileID: 4300000, guid: be0e89d45928ea84e8395163acaab451, type: 2}
-      maxDistance: 30
-    - mesh: {fileID: 4300000, guid: a3511f82ea2acd348b4bb0853c1f1ed0, type: 2}
-      maxDistance: 60
-  wind:
-    windMode: 0
-    windDirection: {x: 1, y: 0.3}
-    windStrength: 0.35
-    windFrequency: 1.2
-    windNoiseScale: 0.5
-    windGustScale: 0.02
-    windRippleScale: 0.3
-    windGustSpeed: 0.5
-    windRippleSpeed: 1
-    windRippleWeight: 0.4
-  deform:
-    affectedByWind: 1
-    affectedByInteractors: 1
-    bendStrength: 1.2
-    flatten: 0.4
-    recoveryRate: 2
-  bounds:
-    maxBladeHeight: 0.6
-    bendHeadroom: 0.5
-    chunkSize: 8
-  placement:
-    groundSnapMask:
-      serializedVersion: 2
-      m_Bits: 1
-  densityMap: {fileID: 2800000, guid: 70cf2f898488edd448bee4dbe75c80d2, type: 2}
-  targetInstances: 40000
-  fieldBounds: {x: 44, y: 44}
-  scaleRange: {x: 0.8, y: 1.2}
-  seed: 42
-  slopeRange: {x: 0, y: 80}
-  splatLayerIndex: -1
-  splatThreshold: 0.5
-  rotationOffsetEuler: {x: 0, y: 0, z: 0}
-  randomPitchRange: {x: 0, y: 0}
-  randomRollRange: {x: 0, y: 0}
-  alignToNormal: 0
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -133,7 +74,6 @@ MonoBehaviour:
   cullCompute: {fileID: 7200000, guid: 8eebdf92a89a18b49a0375c9c59d93d4, type: 3}
   indirectMaterial: {fileID: 2100000, guid: eba123c4c127aba418b716f13a91ec8c, type: 2}
   layers:
-  - {fileID: -3438968068992208322}
   - {fileID: -5658152768671947507}
   - {fileID: 903031883208119945}
   brushStamps: []
@@ -189,7 +129,7 @@ MonoBehaviour:
     colliderFollowsTilt: 0
   authoredInstances: {fileID: 2688114887699544648}
   placeSpacing: 2
-  overrideScaleRange: 0
+  overrideScaleRange: 1
   scaleRangeOverride: {x: 1, y: 1}
   defaultColliderMesh: {fileID: 0}
   defaultColliderConvex: 0

@@ -19,7 +19,13 @@ namespace GrassInteract.Editor
     /// In-scene HUD is minimal (cursor disc + mode label). Per-instance/batch editing lives in
     /// <see cref="InstancePanel"/> (in-window).
     /// </summary>
-    [EditorTool("Instance Placement", typeof(InstanceScatterLayer))]
+    // Global (unscoped) EditorTool — no typeof() target.
+    // InstanceScatterLayer is a ScriptableObject sub-asset; Unity's tool context does NOT
+    // track sub-asset selections as typed EditorTool targets, so specifying
+    // typeof(InstanceScatterLayer) silently prevents activation (same issue as DensityPaintTool).
+    // The active layer is read from ScatterAuthoringState.I.ActiveInstanceLayer instead of
+    // this.target. InstancePanel.BindLayer() keeps that field in sync.
+    [EditorTool("Instance Placement")]
     internal sealed class InstancePlacementTool : EditorTool
     {
         internal enum PlaceMode { Place = 0, Select = 1, Erase = 2, Scatter = 3 }
@@ -32,16 +38,17 @@ namespace GrassInteract.Editor
             set => ScatterAuthoringState.I.PlaceMode = (int)value;
         }
 
-        private static bool  AlignToNormal => ScatterAuthoringState.I.AlignToNormal;
-        private static bool  RandomYaw     => ScatterAuthoringState.I.RandomYaw;
-        private static float ScaleMin      => ScatterAuthoringState.I.PlaceScaleMin;
-        private static float ScaleMax      => ScatterAuthoringState.I.PlaceScaleMax;
-        private static float EraseRadius   => ScatterAuthoringState.I.EraseRadius;
-        private static float BrushSize     => ScatterAuthoringState.I.BrushSize;
+        private static bool  AlignToNormal  => ScatterAuthoringState.I.AlignToNormal;
+        private static bool  RandomYaw      => ScatterAuthoringState.I.RandomYaw;
+        private static float ScaleMin       => ScatterAuthoringState.I.PlaceScaleMin;
+        private static float ScaleMax       => ScatterAuthoringState.I.PlaceScaleMax;
+        private static float EraseRadius    => ScatterAuthoringState.I.EraseRadius;
+        private static float BrushSize      => ScatterAuthoringState.I.BrushSize;
 
         // ── Constants ──────────────────────────────────────────────────────────
 
-        private const float PICK_PIXELS     = 16f;
+        // Pick radius: pixels from the instance pivot. Overridden per-instance by mesh size below.
+        private const float PICK_PIXELS_MIN  = 8f;
         private const int   MAX_DRAW        = 4000;
         private const float DRAW_RADIUS     = 60f;
         private const int   MAX_SCATTER_PER_STROKE = 64; // cap to avoid O(n²) stalls
@@ -69,7 +76,8 @@ namespace GrassInteract.Editor
         public override void OnToolGUI(EditorWindow window)
         {
             if (window is not SceneView sv) return;
-            if (this.target is not InstanceScatterLayer layer) return;
+            InstanceScatterLayer? layer = ScatterAuthoringState.I.ActiveInstanceLayer;
+            if (layer == null) return;
 
             AuthoredInstancesData? authored = layer.AuthoredInstances;
             (ScatterField? field, int layerIdx) = ScatterFieldLookup.FindOwningField(layer);
@@ -103,7 +111,7 @@ namespace GrassInteract.Editor
                     this.OnScatter(e, controlId, authored, layer, field, layerIdx, hasHit, hit);
                     break;
                 case PlaceMode.Select:
-                    this.OnSelect(e, controlId, authored, field, layerIdx);
+                    this.OnSelect(e, controlId, authored, field, layerIdx, layer);
                     break;
                 case PlaceMode.Erase:
                     this.OnErase(e, controlId, authored, field, layerIdx, hasHit, hit);
@@ -112,10 +120,30 @@ namespace GrassInteract.Editor
 
             if (hasHit && Mode != PlaceMode.Select)
             {
-                Color c = Mode == PlaceMode.Erase ? ScatterGizmos.EraseColor : ScatterGizmos.BrushColor;
-                float r = Mode == PlaceMode.Erase ? EraseRadius : (Mode == PlaceMode.Scatter ? BrushSize : 0.5f);
-                ScatterGizmos.BrushDisc(hit.point, hit.normal, r, c);
+                if (Mode == PlaceMode.Place)
+                {
+                    // Push ghost state — the actual DrawMeshNow fires from
+                    // InstanceGhostPreview.OnSceneGui during the Repaint phase.
+                    bool spacingOk = this.RespectsSpacing(authored, hit.point, layer.PlaceSpacing);
+                    InstanceGhostPreview.Set(layer, hit.point, hit.normal, spacingOk, visible: true);
+                    // Wire disc: cursor ring + fallback when ghost has no LOD0 mesh.
+                    ScatterGizmos.BrushDisc(hit.point, hit.normal, 0.5f,
+                        spacingOk ? ScatterGizmos.BrushColor : ScatterGizmos.EraseColor);
+                }
+                else
+                {
+                    // Not Place mode — hide any lingering ghost.
+                    InstanceGhostPreview.Clear();
+                    Color c = Mode == PlaceMode.Erase ? ScatterGizmos.EraseColor : ScatterGizmos.BrushColor;
+                    float r = Mode == PlaceMode.Erase ? EraseRadius : BrushSize;
+                    ScatterGizmos.BrushDisc(hit.point, hit.normal, r, c);
+                }
                 HandleUtility.Repaint();
+            }
+            else
+            {
+                // No hit or Select mode — ensure ghost is hidden.
+                InstanceGhostPreview.Clear();
             }
         }
 
@@ -124,9 +152,14 @@ namespace GrassInteract.Editor
         private void DrawMinimalHud()
         {
             Handles.BeginGUI();
-            var area = new Rect(8, 8, 180, 32);
+            // Height grows by one line when the yaw-randomized hint is shown.
+            bool showYawHint = Mode == PlaceMode.Place && RandomYaw;
+            float hudHeight = showYawHint ? 46f : 32f;
+            var area = new Rect(8, 8, 200, hudHeight);
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label($"Placement: {Mode}", EditorStyles.miniLabel);
+            if (showYawHint)
+                GUILayout.Label("(yaw randomized on place)", EditorStyles.miniLabel);
             GUILayout.EndArea();
             Handles.EndGUI();
         }
@@ -143,7 +176,11 @@ namespace GrassInteract.Editor
                 {
                     Undo.RegisterCompleteObjectUndo(authored, "Place Instance");
                     authored.AddRecord(this.BuildRecord(hit.point, hit.normal));
-                    Commit(authored, field, layerIdx);
+                    // Use RebuildImmediate so the instance appears in the scene immediately on
+                    // click — MarkDirty has a 150ms debounce which feels laggy for single-clicks.
+                    authored.PackBlob();
+                    EditorUtility.SetDirty(authored);
+                    if (layerIdx >= 0) ScatterRebuildScheduler.RebuildImmediate(field, layerIdx);
                 }
                 e.Use();
             }
@@ -230,11 +267,32 @@ namespace GrassInteract.Editor
 
         // ── Select + Transform (single + multi) ────────────────────────────────
 
-        private void OnSelect(Event e, int controlId, AuthoredInstancesData authored, ScatterField field, int layerIdx)
+        private void OnSelect(Event e, int controlId, AuthoredInstancesData authored,
+            ScatterField field, int layerIdx, InstanceScatterLayer layer)
         {
-            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
+            // ── Draw handles FIRST so they can register their control IDs and ──
+            // ── claim hotControl on MouseDown before the pick logic sees the event.
+            // If a handle grabs the drag, GUIUtility.hotControl != 0 / event is Used.
+            if (this.multiSelection.Count == 0)
             {
-                int picked = PickNearest(authored, e.mousePosition);
+                this.DrawSingleSelectHandles(authored, field, layerIdx);
+            }
+            else
+            {
+                // Multi-select: draw dots for each selected instance
+                foreach (int idx in this.multiSelection)
+                {
+                    if (!authored.TryGetRecord(idx, out InstanceRecord r)) continue;
+                    ScatterGizmos.InstanceDot(r.position, HandleUtility.GetHandleSize(r.position) * 0.12f, ScatterGizmos.SelectedColor);
+                }
+            }
+
+            // ── Pick: only if this MouseDown was NOT consumed by a handle above ──
+            // Guard: hotControl == 0 means no handle claimed the drag; proceed with pick.
+            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt
+                && GUIUtility.hotControl == 0)
+            {
+                int picked = PickNearest(authored, e.mousePosition, layer);
                 bool shift = e.shift;
 
                 if (picked >= 0)
@@ -263,20 +321,6 @@ namespace GrassInteract.Editor
                 }
                 e.Use();
             }
-
-            // Single-select transform handles
-            if (this.multiSelection.Count == 0)
-            {
-                this.DrawSingleSelectHandles(authored, field, layerIdx);
-                return;
-            }
-
-            // Multi-select: draw dots for each selected instance
-            foreach (int idx in this.multiSelection)
-            {
-                if (!authored.TryGetRecord(idx, out InstanceRecord r)) continue;
-                ScatterGizmos.InstanceDot(r.position, HandleUtility.GetHandleSize(r.position) * 0.12f, ScatterGizmos.SelectedColor);
-            }
         }
 
         private void DrawSingleSelectHandles(AuthoredInstancesData authored, ScatterField? field, int layerIdx)
@@ -286,31 +330,109 @@ namespace GrassInteract.Editor
 
             ScatterGizmos.InstanceDot(rec.position, HandleUtility.GetHandleSize(rec.position) * 0.12f, ScatterGizmos.SelectedColor);
 
+            // ── Scene label: pos / rot(euler) / scale / collider state ────────
+            bool colliderOn = (rec.overrideMask & InstanceOverrideMask.ColliderConfigured) != 0;
+            Vector3 euler   = rec.rotation.eulerAngles;
+            string label    = $"pos ({rec.position.x:F2}, {rec.position.y:F2}, {rec.position.z:F2})\n" +
+                              $"rot ({euler.x:F1}, {euler.y:F1}, {euler.z:F1})\n" +
+                              $"scale {rec.scale:F3}  collider:{(colliderOn ? "on" : "off")}";
+            Handles.Label(rec.position + Vector3.up * (HandleUtility.GetHandleSize(rec.position) * 0.5f),
+                label, EditorStyles.miniLabel);
+
+            // ── All three handles drawn simultaneously ─────────────────────────
+            // Each has its own Begin/EndChangeCheck so only the actively dragged
+            // handle writes back and the others don't clobber the unchanged channels.
+
+            // ── Position handle ────────────────────────────────────────────────
             EditorGUI.BeginChangeCheck();
-            Vector3    newPos      = Handles.PositionHandle(rec.position, rec.rotation);
-            Quaternion newRot      = Handles.RotationHandle(rec.rotation, rec.position);
-            Vector3    newScaleVec = Handles.ScaleHandle(Vector3.one * rec.scale, rec.position, rec.rotation,
+            Vector3 newPos = Handles.PositionHandle(rec.position, rec.rotation);
+            if (EditorGUI.EndChangeCheck() && field != null)
+            {
+                Undo.RegisterCompleteObjectUndo(authored, "Move Instance");
+                rec.position = newPos;
+                authored.SetRecord(this.selectedIndex, rec);
+                Commit(authored, field, layerIdx);
+                return; // one operation per frame is enough
+            }
+
+            // ── Rotation handle ────────────────────────────────────────────────
+            EditorGUI.BeginChangeCheck();
+            Quaternion newRot = Handles.RotationHandle(rec.rotation, rec.position);
+            if (EditorGUI.EndChangeCheck() && field != null)
+            {
+                Undo.RegisterCompleteObjectUndo(authored, "Rotate Instance");
+                rec.rotation = newRot;
+                authored.SetRecord(this.selectedIndex, rec);
+                Commit(authored, field, layerIdx);
+                return;
+            }
+
+            // ── Scale handle ───────────────────────────────────────────────────
+            EditorGUI.BeginChangeCheck();
+            Vector3 newScaleVec = Handles.ScaleHandle(
+                Vector3.one * rec.scale,
+                rec.position,
+                rec.rotation,
                 HandleUtility.GetHandleSize(rec.position));
             if (EditorGUI.EndChangeCheck() && field != null)
             {
-                Undo.RegisterCompleteObjectUndo(authored, "Transform Instance");
-                rec.position = newPos;
-                rec.rotation = newRot;
-                rec.scale    = Mathf.Max(0.0001f, newScaleVec.x);
+                Undo.RegisterCompleteObjectUndo(authored, "Scale Instance");
+                rec.scale = Mathf.Max(0.0001f, newScaleVec.x);
                 authored.SetRecord(this.selectedIndex, rec);
                 Commit(authored, field, layerIdx);
             }
         }
 
-        private static int PickNearest(AuthoredInstancesData authored, Vector2 mouse)
+        /// <summary>
+        /// Picks the instance whose screen-space disc (sized by LOD0 mesh bounds × instance scale)
+        /// contains <paramref name="mouse"/>. Falls back to a minimum radius of
+        /// <see cref="PICK_PIXELS_MIN"/> so small/distant instances remain clickable.
+        /// Returns the closest overlapping index, or -1 if none.
+        /// </summary>
+        private static int PickNearest(AuthoredInstancesData authored, Vector2 mouse,
+            InstanceScatterLayer? layer)
         {
+            // Compute a world-space reference radius from LOD0 mesh bounds.
+            // This is the half-diagonal of the mesh's AABB scaled up by the instance scale.
+            // Screen-project it to pixels via HandleUtility.GetHandleSize (which gives the
+            // handle "unit" in world space at that depth) to get a per-instance pixel radius.
+            float meshWorldRadius = 0.5f; // fallback: 0.5 m radius
+            if (layer != null)
+            {
+                var lods = layer.Render.Lods;
+                if (lods.Length > 0 && lods[0].mesh != null)
+                    meshWorldRadius = lods[0].mesh!.bounds.extents.magnitude;
+            }
+
             var list = authored.WorkingList;
-            int best = -1; float bestDist = PICK_PIXELS;
+            int   best     = -1;
+            float bestDist = float.PositiveInfinity;
+
             for (int i = 0; i < list.Count; ++i)
             {
-                Vector2 gui = HandleUtility.WorldToGUIPoint(list[i].position);
-                float d = Vector2.Distance(gui, mouse);
-                if (d < bestDist) { bestDist = d; best = i; }
+                Vector3 worldPos  = list[i].position;
+                float   instScale = list[i].scale;
+
+                // World-space pick radius = mesh radius × instance scale.
+                float worldPickRadius = meshWorldRadius * instScale;
+
+                // Convert the world-space pick radius to screen pixels.
+                // GetHandleSize returns the size of one "handle unit" at worldPos depth.
+                // We divide worldPickRadius by that unit to get the screen-space radius.
+                float handleUnit   = HandleUtility.GetHandleSize(worldPos);
+                float screenRadius = (worldPickRadius / handleUnit) * EditorGUIUtility.pixelsPerPoint * 80f;
+                // The *80f factor maps from the normalised handle space to approximate screen pixels.
+                // Clamped to PICK_PIXELS_MIN so tiny/distant instances stay selectable.
+                screenRadius = Mathf.Max(screenRadius, PICK_PIXELS_MIN);
+
+                Vector2 gui = HandleUtility.WorldToGUIPoint(worldPos);
+                float d     = Vector2.Distance(gui, mouse);
+
+                if (d <= screenRadius && d < bestDist)
+                {
+                    bestDist = d;
+                    best = i;
+                }
             }
             return best;
         }
