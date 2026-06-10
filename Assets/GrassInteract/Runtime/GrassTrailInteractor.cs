@@ -14,6 +14,7 @@ namespace GrassInteract
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(GrassInteractorData))]
     public sealed class GrassTrailInteractor : MonoBehaviour
     {
         [Min(0f)]
@@ -25,7 +26,8 @@ namespace GrassInteract
         [Range(0f, 1f)]
         [SerializeField] private float centerZonePercent = 0.4f;
 
-        [SerializeField] private GrassInteractorData data = new();
+        private GrassInteractorData? dataCache;
+        private GrassInteractorData Data => this.dataCache ??= this.GetComponent<GrassInteractorData>();
 
         // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -33,10 +35,10 @@ namespace GrassInteract
         public bool Emitting { get; set; } = true;
 
         public float TrailDuration     => this.trailDuration;
-        public float WorldRadius       => this.data.worldRadius;
-        public float MaxBendDegrees    => this.data.maxBendDegrees;
+        public float WorldRadius       => this.Data.WorldRadius;
+        public float MaxBendDegrees    => this.Data.MaxBendDegrees;
         public float CenterZonePercent => this.centerZonePercent;
-        public float Strength          => this.data.strength;
+        public float Strength          => this.Data.Strength;
 
         // ── Per-sample state ─────────────────────────────────────────────────────────
 

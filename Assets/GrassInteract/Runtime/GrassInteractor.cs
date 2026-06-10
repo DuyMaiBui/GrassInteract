@@ -10,26 +10,31 @@ namespace GrassInteract
     /// reads that registry each frame, leans every blade inside this interactor's circular footprint away
     /// from the footprint center, and recovers the blades toward upright after the interactor leaves.
     ///
+    /// Bend parameters (radius, strength, maxBendDegrees) live on the sibling
+    /// <see cref="GrassInteractorData"/> component — edit them there.
+    ///
     /// Cost note: the simulator's per-blade cost scales with the number of interactors WHOSE footprint the
     /// blade falls inside (out-of-range interactors are skipped per blade via a distance early-out).
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(GrassInteractorData))]
     public sealed class GrassInteractor : MonoBehaviour
     {
-        [SerializeField] private GrassInteractorData data = new();
+        private GrassInteractorData? dataCache;
+        private GrassInteractorData Data => this.dataCache ??= this.GetComponent<GrassInteractorData>();
 
         /// <summary>World-space position of the footprint center (the transform position).</summary>
         public Vector3 WorldPosition => this.transform.position;
 
         /// <summary>Footprint radius in world metres.</summary>
-        public float Radius => this.data.worldRadius;
+        public float Radius => this.Data.WorldRadius;
 
         /// <summary>Lean strength at the footprint center, 0..1.</summary>
-        public float Strength => this.data.strength;
+        public float Strength => this.Data.Strength;
 
         /// <summary>Maximum bend angle in degrees.</summary>
-        public float MaxBendDegrees => this.data.maxBendDegrees;
+        public float MaxBendDegrees => this.Data.MaxBendDegrees;
 
         // Static registry of enabled interactors. GrassBendSimulator iterates this every frame instead of
         // each interactor pushing into a per-field map — the simulator is the single consumer.
@@ -68,13 +73,13 @@ namespace GrassInteract
                     "reads this interactor, so no grass leans. Add a ScatterField " +
                     "with at least one Grass-kind layer.", this);
 
-            if (this.data.worldRadius <= 0f)
+            if (this.Data.WorldRadius <= 0f)
                 Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has worldRadius=" +
-                    $"{this.data.worldRadius:0.###} (<= 0) - a zero-radius footprint leans nothing. Set it > 0.", this);
+                    $"{this.Data.WorldRadius:0.###} (<= 0) - a zero-radius footprint leans nothing. Set it > 0.", this);
 
-            if (this.data.strength <= 0f)
+            if (this.Data.Strength <= 0f)
                 Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has strength=" +
-                    $"{this.data.strength:0.###} (<= 0) - zero strength leaves no lean. Set it > 0.", this);
+                    $"{this.Data.Strength:0.###} (<= 0) - zero strength leaves no lean. Set it > 0.", this);
         }
 
         // True when at least one enabled ScatterField
