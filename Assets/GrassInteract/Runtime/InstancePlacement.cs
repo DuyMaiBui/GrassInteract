@@ -30,6 +30,11 @@ namespace GrassInteract
             var normalSlabs   = new Vector3[slabCount][];
             var slabCounts    = new int[slabCount];
 
+            // Track the TIGHT world-space extent of the actual instance positions. Authored instances
+            // sit at arbitrary world positions (unlike density scatter, which fills origin ± FieldBounds),
+            // so the render bounds MUST come from the real positions — see BuildInstanceBounds.
+            float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
+            float minZ = float.PositiveInfinity, maxZ = float.NegativeInfinity;
             float minY = float.PositiveInfinity;
             float maxY = float.NegativeInfinity;
 
@@ -59,6 +64,10 @@ namespace GrassInteract
                     // passed here does not affect the GPU byte stream on non-oriented layers.
                     nrmSlab[k] = Vector3.up;
 
+                    if (pos.x < minX) minX = pos.x;
+                    if (pos.x > maxX) maxX = pos.x;
+                    if (pos.z < minZ) minZ = pos.z;
+                    if (pos.z > maxZ) maxZ = pos.z;
                     if (pos.y < minY) minY = pos.y;
                     if (pos.y > maxY) maxY = pos.y;
                 }
@@ -69,39 +78,45 @@ namespace GrassInteract
                 slabCounts[b]    = count;
             }
 
-            Vector2 bounds = this.source.FieldBounds;
-            float halfX    = bounds.x * 0.5f;
-            float halfZ    = bounds.y * 0.5f;
             float maxScale = this.source.ScaleRange.y;
-            Bounds worldBounds = BuildFieldBounds(this.source, origin, bounds, halfX, halfZ, maxScale, minY, maxY);
+            Bounds worldBounds = BuildInstanceBounds(this.source, origin, maxScale, minX, maxX, minY, maxY, minZ, maxZ);
 
             return new GrassScatterResult(baseSlabs, slabCounts, positionSlabs, normalSlabs, total, worldBounds);
         }
 
         /// <summary>
-        /// One field-wide AABB mirroring <c>GrassScatter.BuildFieldBounds</c>.
-        /// Kept private until R5 promotes the helper to internal static on GrassScatter.
+        /// World-render AABB for authored instances: the TIGHT bounding box of the ACTUAL instance
+        /// positions, inflated by lateral sway pad (XZ) and bent-prop reach (Y), with a minimum extent on
+        /// every axis.
+        ///
+        /// Unlike density layers — whose positions fill <c>origin ± FieldBounds</c>, so an origin-centred
+        /// box sized to <c>FieldBounds</c> is correct — authored instances sit at arbitrary world positions
+        /// that may be far from the field origin, and <c>FieldBounds</c> is only their EXTENT. An
+        /// origin-centred box therefore need not contain them, and a single/colinear set yields a
+        /// zero-extent box; either way <see cref="Graphics.RenderMeshIndirect"/> frustum-culls the WHOLE
+        /// draw (zero-extent or out-of-frustum bounds → nothing renders, surviving rebuild + domain reload).
+        /// Deriving the box from the real positions + a minimum extent fixes both.
         /// </summary>
-        private static Bounds BuildFieldBounds(IInstancePlacementSource source, Vector3 origin, Vector2 bounds,
-            float halfX, float halfZ, float maxScale, float minY, float maxY)
+        private static Bounds BuildInstanceBounds(IInstancePlacementSource source, Vector3 origin,
+            float maxScale, float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
         {
-            float maxBladeHeight = source.MaxBladeHeight;
-            float bendHeadroom   = source.BendHeadroom;
-            float bladeReachY = maxBladeHeight * maxScale + bendHeadroom;
-            float lateralPad = maxScale + bendHeadroom;
+            float bladeReachY = source.MaxBladeHeight * maxScale + source.BendHeadroom;
+            float lateralPad  = maxScale + source.BendHeadroom;
 
-            if (float.IsPositiveInfinity(minY))
-            {
-                minY = origin.y;
-                maxY = origin.y;
-            }
+            // Empty layer (no records): a small valid box at the origin (never zero-extent / NaN).
+            if (float.IsPositiveInfinity(minX))
+                return new Bounds(origin, Vector3.one * Mathf.Max(1f, lateralPad * 2f));
 
-            float yLow = minY;
-            float yHigh = maxY + bladeReachY;
-            var center = new Vector3(origin.x, (yLow + yHigh) * 0.5f, origin.z);
-            var size = new Vector3(bounds.x, Mathf.Max(yHigh - yLow, 0.01f), bounds.y);
-            var aabb = new Bounds(center, size);
-            aabb.Expand(new Vector3(lateralPad, 0f, lateralPad));
+            var aabb = new Bounds();
+            aabb.SetMinMax(
+                new Vector3(minX, minY, minZ),
+                new Vector3(maxX, maxY + bladeReachY, maxZ));
+            aabb.Expand(new Vector3(lateralPad, 0f, lateralPad)); // XZ sway headroom
+
+            // Guard: a single instance / colinear set has zero extent on an axis; RenderMeshIndirect culls
+            // zero-extent draws, so clamp every axis to a small positive minimum.
+            Vector3 sz = aabb.size;
+            aabb.size = new Vector3(Mathf.Max(sz.x, 0.5f), Mathf.Max(sz.y, 0.5f), Mathf.Max(sz.z, 0.5f));
             return aabb;
         }
     }

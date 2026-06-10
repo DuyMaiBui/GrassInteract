@@ -89,6 +89,7 @@ namespace GrassInteract.Editor
             else if (layer is InstanceScatterLayer)
             {
                 this.AddFoldoutCard("Tilt", "tilt");
+                this.AddFoldoutCard("Anchor", "anchorOffsetLocal");
                 this.AddFoldoutCard("Instance", "authoredInstances",
                     "overrideScaleRange", "scaleRangeOverride");
                 this.AddFoldoutCard("Collider", "defaultColliderMesh", "defaultColliderConvex",

@@ -40,9 +40,9 @@ namespace GrassInteract
         private static readonly int ID_WindNoiseScale        = Shader.PropertyToID("_WindNoiseScale");
         private static readonly int ID_BendStrength          = Shader.PropertyToID("_BendStrength");
         private static readonly int ID_Flatten               = Shader.PropertyToID("_Flatten");
-        private static readonly int ID_CamPosWS              = Shader.PropertyToID("_CamPosWS");
         private static readonly int ID_InstanceTilt          = Shader.PropertyToID("_InstanceTilt");
         private static readonly int ID_TiltEnabled           = Shader.PropertyToID("_TiltEnabled");
+        private static readonly int ID_AnchorOffset          = Shader.PropertyToID("_AnchorOffset");
 
         // ── Injected ─────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -236,6 +236,14 @@ namespace GrassInteract
             this.lodMat1.SetFloat(ID_TiltEnabled, tiltFlag);
             this.lodMat2.SetFloat(ID_TiltEnabled, tiltFlag);
 
+            // Per-layer deform sampling anchor (instance-only). Static — set once at Build.
+            // Shader samples wind/interactor from posWS + baseRot*(_AnchorOffset.xyz * scale).
+            Vector3 anchor = instLayer != null ? instLayer.AnchorOffsetLocal : Vector3.zero;
+            var anchorV = new Vector4(anchor.x, anchor.y, anchor.z, 0f);
+            this.lodMat0.SetVector(ID_AnchorOffset, anchorV);
+            this.lodMat1.SetVector(ID_AnchorOffset, anchorV);
+            this.lodMat2.SetVector(ID_AnchorOffset, anchorV);
+
             this.affectedByWind        = layer.Deform.AffectedByWind;
             this.affectedByInteractors = layer.Deform.AffectedByInteractors;
             this.interactsWithDeform   = this.affectedByWind || this.affectedByInteractors;
@@ -265,7 +273,10 @@ namespace GrassInteract
 
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
-            Shader.SetGlobalFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
+            // _ScaleMax2 is a PER-LAYER scale-decode bound consumed only by the render VS (NOT the cull
+            // compute). Set it PER-MATERIAL so a second scatter layer's ScaleMax can't clobber ours via the
+            // shared global. (Root-cause class: per-layer render uniforms must never go through SetGlobal.)
+            this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
 
             if (this.tiltSim?.TiltBuffer != null)
                 Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
@@ -320,27 +331,32 @@ namespace GrassInteract
 
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
-            Shader.SetGlobalFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
+            // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
+            this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
 
             if (this.tiltSim?.TiltBuffer != null)
                 Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
 
             if (this.affectedByWind)
             {
-                Vector3 camPos = cullCam.transform.position;
+                // PER-MATERIAL wind/bend/flatten — NOT SetGlobal. These are per-layer config; routing them
+                // through global state let a wind-enabled instance layer clobber the density layer's wind
+                // every frame (last-Submit-wins on deferred indirect draws). Setting them on THIS layer's
+                // own LOD material clones keeps each layer's deform independent.
                 Vector2 cfgDir = this.windSnapshotDir;
-                Shader.SetGlobalFloat(ID_GrassTime,      this.deformTime);
-                Shader.SetGlobalVector(ID_WindDir,        new Vector4(cfgDir.x, cfgDir.y, 0f, 0f));
-                Shader.SetGlobalFloat(ID_WindStrength,    this.windSnapshotStrength);
-                Shader.SetGlobalFloat(ID_WindFrequency,   this.windSnapshotFrequency);
-                Shader.SetGlobalFloat(ID_WindNoiseScale,  this.windSnapshotNoiseScale);
-                Shader.SetGlobalFloat(ID_BendStrength,    this.windSnapshotBendStrength);
-                Shader.SetGlobalFloat(ID_Flatten,         this.windSnapshotFlatten);
-                Shader.SetGlobalVector(ID_CamPosWS,       new Vector4(camPos.x, camPos.y, camPos.z, 0f));
+                this.SetLodFloat (ID_GrassTime,     this.deformTime);
+                this.SetLodVector(ID_WindDir,       new Vector4(cfgDir.x, cfgDir.y, 0f, 0f));
+                this.SetLodFloat (ID_WindStrength,  this.windSnapshotStrength);
+                this.SetLodFloat (ID_WindFrequency, this.windSnapshotFrequency);
+                this.SetLodFloat (ID_WindNoiseScale,this.windSnapshotNoiseScale);
+                this.SetLodFloat (ID_BendStrength,  this.windSnapshotBendStrength);
+                this.SetLodFloat (ID_Flatten,       this.windSnapshotFlatten);
             }
 
             if (this.affectedByInteractors && this.interactorBuffer != null)
             {
+                // Interactor buffer + count are genuinely scene-wide (one registry of active interactors),
+                // so they stay global — every layer reads the same live interactor set.
                 this.interactorBuffer.Upload(GrassInteractor.Active);
                 Shader.SetGlobalBuffer(ID_Interactors,      this.interactorBuffer.Buffer);
                 Shader.SetGlobalInteger(ID_InteractorCount, this.interactorBuffer.Count);
@@ -548,6 +564,22 @@ namespace GrassInteract
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+
+        /// <summary>Sets a float on all three LOD material clones (per-material, never global).</summary>
+        private void SetLodFloat(int id, float v)
+        {
+            if (this.lodMat0 != null) this.lodMat0.SetFloat(id, v);
+            if (this.lodMat1 != null) this.lodMat1.SetFloat(id, v);
+            if (this.lodMat2 != null) this.lodMat2.SetFloat(id, v);
+        }
+
+        /// <summary>Sets a vector on all three LOD material clones (per-material, never global).</summary>
+        private void SetLodVector(int id, Vector4 v)
+        {
+            if (this.lodMat0 != null) this.lodMat0.SetVector(id, v);
+            if (this.lodMat1 != null) this.lodMat1.SetVector(id, v);
+            if (this.lodMat2 != null) this.lodMat2.SetVector(id, v);
+        }
 
         private RenderParams MakeRenderParams(Material mat, Camera? drawCamera) =>
             new RenderParams(mat)

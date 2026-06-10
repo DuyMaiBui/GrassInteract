@@ -43,10 +43,15 @@ namespace GrassInteract.Editor
 
         private Button? activateBtn;
 
-        // Mode toolbar: Place / Select / Erase.
+        // Mode toolbar: Place / Select / Erase / Anchor.
         private Button? btnPlace;
         private Button? btnSelect;
         private Button? btnErase;
+        private Button? btnAnchor;
+
+        // Isolated 3D anchor editor (LOD0 + draggable marker), shown only in Anchor mode.
+        private readonly AnchorPreviewPanel anchorPreview = new();
+        private IMGUIContainer? anchorPreviewContainer;
 
         // All three handles (Move/Rotate/Scale) are always drawn simultaneously in Select
         // mode — no per-gizmo buttons needed. The gizmo row is intentionally omitted.
@@ -106,17 +111,34 @@ namespace GrassInteract.Editor
             this.btnPlace = new Button(() => this.SetMode(0)) { text = "Place" };
             this.btnSelect = new Button(() => this.SetMode(1)) { text = "Select" };
             this.btnErase  = new Button(() => this.SetMode(2)) { text = "Erase" };
-            foreach (var b in new[] { this.btnPlace, this.btnSelect, this.btnErase })
+            // Anchor = PlaceMode.Anchor (4): drag a Scene-view handle to set the layer's deform anchor.
+            this.btnAnchor = new Button(() => this.SetMode(4)) { text = "Anchor" };
+            foreach (var b in new[] { this.btnPlace, this.btnSelect, this.btnErase, this.btnAnchor })
             {
                 b.style.flexGrow = 1f;
             }
             modeRow.Add(this.btnPlace);
             modeRow.Add(this.btnSelect);
             modeRow.Add(this.btnErase);
+            modeRow.Add(this.btnAnchor);
             this.root.Add(modeRow);
+
+            // ── Isolated anchor preview (LOD0 + draggable marker; Anchor mode only) ──
+            this.anchorPreviewContainer = new IMGUIContainer(this.DrawAnchorPreview)
+            {
+                style =
+                {
+                    marginLeft   = 4f,
+                    marginRight  = 4f,
+                    marginBottom = 4f,
+                    display      = DisplayStyle.None,
+                },
+            };
+            this.root.Add(this.anchorPreviewContainer);
 
             // Initial style pass (mode buttons).
             this.RefreshModeButtonStyles();
+            this.RefreshAnchorPreviewVisibility();
 
             // ── IMGUI container for the per-instance / batch edit controls ────
             // (uses EditorGUI helpers which require IMGUI — keeps AuthoredInstancesData
@@ -195,6 +217,8 @@ namespace GrassInteract.Editor
 
             this.RefreshScaleOverrideUI();
             this.RefreshModeButtonStyles();
+            this.RefreshAnchorPreviewVisibility();
+            this.anchorPreviewContainer?.MarkDirtyRepaint();
         }
 
         /// <summary>
@@ -213,6 +237,8 @@ namespace GrassInteract.Editor
 
             this.RefreshScaleOverrideUI();
             this.RefreshModeButtonStyles();
+            this.RefreshAnchorPreviewVisibility();
+            this.anchorPreviewContainer?.MarkDirtyRepaint();
         }
 
         // ── Tool activation ───────────────────────────────────────────────────
@@ -246,7 +272,36 @@ namespace GrassInteract.Editor
         {
             ScatterAuthoringState.I.PlaceMode = mode;
             this.RefreshModeButtonStyles();
+            this.RefreshAnchorPreviewVisibility();
             SceneView.RepaintAll();
+        }
+
+        /// <summary>Shows the isolated anchor preview only while Anchor mode (PlaceMode 4) is active.</summary>
+        private void RefreshAnchorPreviewVisibility()
+        {
+            if (this.anchorPreviewContainer == null) return;
+            bool anchorMode = ScatterAuthoringState.I.PlaceMode == 4;
+            this.anchorPreviewContainer.style.display = anchorMode ? DisplayStyle.Flex : DisplayStyle.None;
+            if (anchorMode) this.anchorPreviewContainer.MarkDirtyRepaint();
+        }
+
+        /// <summary>Renders the isolated anchor editor for the bound layer (resolves its owning field).</summary>
+        private void DrawAnchorPreview()
+        {
+            if (this.activeLayer == null)
+            {
+                this.anchorPreview.Draw(null, null, -1);
+                return;
+            }
+            (ScatterField? field, int layerIdx) = ScatterFieldLookup.FindOwningField(this.activeLayer);
+            this.anchorPreview.Draw(this.activeLayer, field ?? this.activeField, layerIdx);
+        }
+
+        /// <summary>Releases the anchor preview's GPU resources + Undo subscription. Call on window teardown.</summary>
+        internal void Cleanup()
+        {
+            Undo.undoRedoPerformed -= this.OnUndoRedo;
+            this.anchorPreview.Cleanup();
         }
 
         private void RefreshModeButtonStyles()
@@ -257,6 +312,7 @@ namespace GrassInteract.Editor
             StyleButton(this.btnPlace,  mode == 0);
             StyleButton(this.btnSelect, mode == 1);
             StyleButton(this.btnErase,  mode == 2);
+            StyleButton(this.btnAnchor, mode == 4);
 
             static void StyleButton(Button? btn, bool active)
             {

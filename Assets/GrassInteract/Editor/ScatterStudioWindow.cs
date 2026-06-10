@@ -215,6 +215,7 @@ namespace GrassInteract.Editor
         private void OnDestroy()
         {
             Selection.selectionChanged -= this.OnSelectionChanged;
+            this.instancePanel?.Cleanup();
         }
 
         // ── Header wiring ─────────────────────────────────────────────────────

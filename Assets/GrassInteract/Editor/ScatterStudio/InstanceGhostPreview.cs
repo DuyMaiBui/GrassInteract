@@ -124,10 +124,10 @@ namespace GrassInteract.Editor
 
             Mesh mesh = lods[0].mesh!;
 
-            // Mirror BuildRecord transform minus randomness:
-            //   pos   = ghostHitPoint
-            //   rot   = AlignToNormal ? FromToRotation(up, normal) : identity  (yaw = 0)
+            // Mirror BuildRecord exactly:
+            //   rot   = AlignToNormal ? FromToRotation(up, normal) : identity  (no random yaw)
             //   scale = midpoint of [ScaleMin, ScaleMax]
+            //   pivot = hitPoint − rot·(anchor·scale)  → the anchor lands on the cursor (place-from-anchor)
             bool  alignToNormal = ScatterAuthoringState.I.AlignToNormal;
             float scaleMin      = ScatterAuthoringState.I.PlaceScaleMin;
             float scaleMax      = ScatterAuthoringState.I.PlaceScaleMax;
@@ -138,7 +138,8 @@ namespace GrassInteract.Editor
             float scale = (scaleMin + scaleMax) * 0.5f;
             if (scale <= 0f) scale = 1f;
 
-            Matrix4x4 matrix = Matrix4x4.TRS(ghostHitPoint, rot, Vector3.one * scale);
+            Vector3 pivot = ghostHitPoint - rot * (ghostLayer.AnchorOffsetLocal * scale);
+            Matrix4x4 matrix = Matrix4x4.TRS(pivot, rot, Vector3.one * scale);
 
             Color    tint = ghostSpacingOk ? COLOR_OK : COLOR_BAD;
             Material mat  = ResolveDrawMaterial(render.Material, tint);

@@ -30,7 +30,7 @@ namespace GrassInteract
         private const float DEG_PER_UNIT = 55f;
 
         private readonly int count;
-        private readonly Vector3[] basePos;     // baked-order pivot positions
+        private readonly Vector3[] anchorPos;   // baked-order deform sampling anchors (pivot + yawRot*(offset*scale))
         private readonly Vector2[] currentLean; // persistent recovery state (XZ), recovers toward 0
         private readonly Vector4[] outTilt;     // quaternion (xyzw) per instance, uploaded each frame
         private GraphicsBuffer? tiltBuffer;
@@ -55,14 +55,36 @@ namespace GrassInteract
             this.count = bakedInstances?.Length ?? 0;
 
             int alloc = Mathf.Max(1, this.count);
-            this.basePos     = new Vector3[alloc];
+            this.anchorPos   = new Vector3[alloc];
             this.currentLean = new Vector2[alloc];
             this.outTilt     = new Vector4[alloc];
 
             for (int i = 0; i < alloc; ++i)
                 this.outTilt[i] = new Vector4(0f, 0f, 0f, 1f); // identity
+
+            // Deform sampling anchor = pivot + yawRot*(localOffset * scale). Mirrors the shader anchor for the
+            // common (non-oriented) InstanceScatterLayer case, where baseRot == Yaw(yaw) (the layer's
+            // RotationOffsetEuler is always zero). For oriented props the shader additionally applies
+            // surface-normal alignment + pitch/roll; this sim uses yaw-only, so the anchor's XZ proximity for
+            // tilt is a close approximation there (documented; refine to full baseRot reconstruction if needed).
+            Vector3 anchorLocal = layer.AnchorOffsetLocal;
+            float scaleMax = baked.ScaleMax > 0f ? baked.ScaleMax : 1f;
+            bool hasAnchor = anchorLocal != Vector3.zero;
             for (int i = 0; i < this.count; ++i)
-                this.basePos[i] = bakedInstances![i].posWS;
+            {
+                Vector3 p = bakedInstances![i].posWS;
+                if (hasAnchor)
+                {
+                    uint packed = bakedInstances[i].packedYawScale;
+                    float yawDeg = (packed >> 16) / 65535f * 360f;
+                    float scale  = (packed & 0xFFFFu) / 65535f * scaleMax;
+                    this.anchorPos[i] = p + Quaternion.Euler(0f, yawDeg, 0f) * (anchorLocal * scale);
+                }
+                else
+                {
+                    this.anchorPos[i] = p;
+                }
+            }
 
             this.tiltBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, alloc, sizeof(float) * 4);
             this.tiltBuffer.SetData(this.outTilt);
@@ -88,7 +110,8 @@ namespace GrassInteract
 
             for (int i = 0; i < this.count; ++i)
             {
-                Vector3 p = this.basePos[i];
+                // Sample interactor proximity from the deform anchor, not the pivot.
+                Vector3 p = this.anchorPos[i];
 
                 // Accumulate lean AWAY from every interactor whose footprint covers this instance.
                 Vector2 target = Vector2.zero;

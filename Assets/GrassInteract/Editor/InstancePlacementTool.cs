@@ -28,7 +28,7 @@ namespace GrassInteract.Editor
     [EditorTool("Instance Placement")]
     internal sealed class InstancePlacementTool : EditorTool
     {
-        internal enum PlaceMode { Place = 0, Select = 1, Erase = 2, Scatter = 3 }
+        internal enum PlaceMode { Place = 0, Select = 1, Erase = 2, Scatter = 3, Anchor = 4 }
 
         // ── State shortcuts (read ScatterAuthoringState) ───────────────────────
 
@@ -39,7 +39,6 @@ namespace GrassInteract.Editor
         }
 
         private static bool  AlignToNormal  => ScatterAuthoringState.I.AlignToNormal;
-        private static bool  RandomYaw      => ScatterAuthoringState.I.RandomYaw;
         private static float ScaleMin       => ScatterAuthoringState.I.PlaceScaleMin;
         private static float ScaleMax       => ScatterAuthoringState.I.PlaceScaleMax;
         private static float EraseRadius    => ScatterAuthoringState.I.EraseRadius;
@@ -116,9 +115,12 @@ namespace GrassInteract.Editor
                 case PlaceMode.Erase:
                     this.OnErase(e, controlId, authored, field, layerIdx, hasHit, hit);
                     break;
+                case PlaceMode.Anchor:
+                    this.OnAnchor(authored, layer, field, layerIdx);
+                    break;
             }
 
-            if (hasHit && Mode != PlaceMode.Select)
+            if (hasHit && Mode != PlaceMode.Select && Mode != PlaceMode.Anchor)
             {
                 if (Mode == PlaceMode.Place)
                 {
@@ -151,14 +153,9 @@ namespace GrassInteract.Editor
         private void DrawMinimalHud()
         {
             Handles.BeginGUI();
-            // Height grows by one line when the yaw-randomized hint is shown.
-            bool showYawHint = Mode == PlaceMode.Place && RandomYaw;
-            float hudHeight = showYawHint ? 46f : 32f;
-            var area = new Rect(8, 8, 200, hudHeight);
+            var area = new Rect(8, 8, 200, 32f);
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label($"Placement: {Mode}", EditorStyles.miniLabel);
-            if (showYawHint)
-                GUILayout.Label("(yaw randomized on place)", EditorStyles.miniLabel);
             GUILayout.EndArea();
             Handles.EndGUI();
         }
@@ -173,7 +170,7 @@ namespace GrassInteract.Editor
                 GUIUtility.hotControl = controlId;
                 // Free placement — no spacing requirement; every click places an instance.
                 Undo.RegisterCompleteObjectUndo(authored, "Place Instance");
-                authored.AddRecord(this.BuildRecord(hit.point, hit.normal));
+                authored.AddRecord(this.BuildRecord(hit.point, hit.normal, layer));
                 // Use RebuildImmediate so the instance appears in the scene immediately on
                 // click — MarkDirty has a 150ms debounce which feels laggy for single-clicks.
                 authored.PackBlob();
@@ -222,7 +219,7 @@ namespace GrassInteract.Editor
                 if (!Physics.Raycast(probeRay, out RaycastHit probeHit, 100f, mask.value == 0 ? ~0 : mask.value))
                     continue;
 
-                authored.AddRecord(this.BuildRecord(probeHit.point, probeHit.normal));
+                authored.AddRecord(this.BuildRecord(probeHit.point, probeHit.normal, layer));
                 anyPlaced = true;
                 placed++;
             }
@@ -235,15 +232,19 @@ namespace GrassInteract.Editor
 
         // ── Record factory ─────────────────────────────────────────────────────
 
-        private InstanceRecord BuildRecord(Vector3 pos, Vector3 normal)
+        private InstanceRecord BuildRecord(Vector3 hitPoint, Vector3 normal, InstanceScatterLayer layer)
         {
-            float yaw = RandomYaw ? Random.Range(0f, 360f) : 0f;
-            Quaternion align = AlignToNormal ? Quaternion.FromToRotation(Vector3.up, normal) : Quaternion.identity;
-            Quaternion rot = align * Quaternion.Euler(0f, yaw, 0f);
+            // No random yaw — placement is deterministic so the placed instance matches the ghost preview.
+            Quaternion rot = AlignToNormal ? Quaternion.FromToRotation(Vector3.up, normal) : Quaternion.identity;
             float scale = Random.Range(Mathf.Min(ScaleMin, ScaleMax), Mathf.Max(ScaleMin, ScaleMax));
+
+            // Place FROM the anchor: offset the pivot so the deform anchor lands exactly on the clicked
+            // point. At runtime the shader/sim sample from pivot + rot·(anchor·scale) == hitPoint.
+            Vector3 pivot = hitPoint - rot * (layer.AnchorOffsetLocal * scale);
+
             return new InstanceRecord
             {
-                position = pos, rotation = rot, scale = scale,
+                position = pivot, rotation = rot, scale = scale,
                 overrideMask = InstanceOverrideMask.None,
                 colliderScale = 1f, colliderMeshRefIndex = -1, colliderMaterialRefIndex = -1,
             };
@@ -449,6 +450,70 @@ namespace GrassInteract.Editor
                 Commit(authored, field, layerIdx);
             }
             e.Use();
+        }
+
+        // ── Anchor (per-layer deform anchor offset, via a Scene-view handle) ───
+
+        /// <summary>
+        /// Edits the layer's per-layer <see cref="InstanceScatterLayer.AnchorOffsetLocal"/> with a
+        /// Scene-view position handle. The handle sits at the world anchor of a REFERENCE instance
+        /// (the selected one, else the first authored record): <c>pivot + rot·(offset·scale)</c> —
+        /// the exact point the shader/sim sample wind + interactors from. Dragging the handle
+        /// back-projects to a new local offset (rotation- and scale-normalised) and re-bakes the layer.
+        /// </summary>
+        private void OnAnchor(AuthoredInstancesData authored, InstanceScatterLayer layer,
+            ScatterField field, int layerIdx)
+        {
+            var list = authored.WorkingList;
+            if (list.Count == 0)
+            {
+                Handles.BeginGUI();
+                GUILayout.BeginArea(new Rect(8, 44, 280, 20), GUI.skin.box);
+                GUILayout.Label("Anchor: place at least one instance first.", EditorStyles.miniLabel);
+                GUILayout.EndArea();
+                Handles.EndGUI();
+                return;
+            }
+
+            int refIdx = (this.selectedIndex >= 0 && this.selectedIndex < list.Count) ? this.selectedIndex : 0;
+            InstanceRecord rec = list[refIdx];
+
+            Vector3    pivot       = rec.position;
+            Quaternion rot         = rec.rotation;
+            float      scale       = Mathf.Max(1e-4f, rec.scale);
+            Vector3    anchorLocal = layer.AnchorOffsetLocal;
+
+            // World anchor = pivot + rot·(localOffset · scale). Mirrors the shader/sim sampling point.
+            Vector3 worldAnchor = pivot + rot * (anchorLocal * scale);
+
+            // Visual: pivot dot, dotted connector, and the local-offset readout at the handle.
+            ScatterGizmos.InstanceDot(pivot, HandleUtility.GetHandleSize(pivot) * 0.06f, ScatterGizmos.InstanceColor);
+            Handles.color = ScatterGizmos.SelectedColor;
+            Handles.DrawDottedLine(pivot, worldAnchor, 3f);
+            Handles.Label(worldAnchor + Vector3.up * (HandleUtility.GetHandleSize(worldAnchor) * 0.4f),
+                $"Anchor (ref #{refIdx})\nlocal ({anchorLocal.x:F2}, {anchorLocal.y:F2}, {anchorLocal.z:F2})",
+                EditorStyles.miniLabel);
+
+            // Position handle, oriented to the instance so the axes feel local to the prop.
+            EditorGUI.BeginChangeCheck();
+            Vector3 newWorld = Handles.PositionHandle(worldAnchor, rot);
+            if (EditorGUI.EndChangeCheck())
+            {
+                // Back-project: localOffset = inverse(rot)·(newWorld − pivot) / scale.
+                Vector3 newLocal = (Quaternion.Inverse(rot) * (newWorld - pivot)) / scale;
+
+                var so = new SerializedObject(layer);
+                SerializedProperty? prop = so.FindProperty("anchorOffsetLocal");
+                if (prop != null)
+                {
+                    Undo.RegisterCompleteObjectUndo(layer, "Edit Anchor Offset");
+                    prop.vector3Value = newLocal;
+                    so.ApplyModifiedPropertiesWithoutUndo();
+                    EditorUtility.SetDirty(layer);
+                    // Re-bake so InstancedPropEngine.Build pushes the new _AnchorOffset to the materials.
+                    if (layerIdx >= 0) ScatterRebuildScheduler.MarkDirty(field, layerIdx);
+                }
+            }
         }
 
         // ── Drawing (instances as dots, with collider-indicator tint) ──────────

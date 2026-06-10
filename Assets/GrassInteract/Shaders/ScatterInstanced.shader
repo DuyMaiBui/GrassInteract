@@ -106,6 +106,9 @@ Shader "GrassInteract/ScatterInstanced"
                 float _InteractorsEnabled;
                 // Phase B: rigid whole-instance tilt gate. 0=off, 1=apply _InstanceTilt.
                 float _TiltEnabled;
+                // Per-layer deform sampling anchor (local space). Wind phase + interactor lean sample from
+                // posWS + baseRot*(_AnchorOffset.xyz * scale) instead of the pivot. (0,0,0) = pivot (legacy).
+                float4 _AnchorOffset;
             CBUFFER_END
 
             TEXTURE2D(_BaseMap);
@@ -251,11 +254,16 @@ Shader "GrassInteract/ScatterInstanced"
 
                 float3x3 baseRot = SCATTER_BaseRot(inst, yawDeg);
 
+                // Deform sampling anchor: pivot + baseRot*(localOffset * scale). Wind phase and interactor
+                // proximity are evaluated HERE (not at the pivot) so the offset rides the instance's
+                // orientation and scales with it. Deform is still applied about the pivot below.
+                float3 anchorWS = inst.posWS + mul(baseRot, _AnchorOffset.xyz * scale);
+
                 // Wind contribution (independent gate).
                 float2 windXZ = float2(0, 0);
                 if (_WindEnabled >= 0.5f)
                 {
-                    float phase = (inst.posWS.x * 0.37f + inst.posWS.z * 0.21f) * _WindNoiseScale * SCATTER_TWO_PI;
+                    float phase = (anchorWS.x * 0.37f + anchorWS.z * 0.21f) * _WindNoiseScale * SCATTER_TWO_PI;
                     float wave  = sin(_GrassTime * _WindFrequency + phase) * _WindStrength;
                     windXZ      = _WindDir * wave;
                 }
@@ -267,7 +275,7 @@ Shader "GrassInteract/ScatterInstanced"
                     for (int i = 0; i < _InteractorCount; ++i)
                     {
                         SCATTER_InteractorGpu ip = _Interactors[i];
-                        float2 delta = inst.posWS.xz - ip.posWS.xz;
+                        float2 delta = anchorWS.xz - ip.posWS.xz;
                         float  d     = length(delta);
                         if (ip.radius <= 0.0f || d >= ip.radius) continue;
                         float  fall  = 1.0f - d / ip.radius;
@@ -276,10 +284,11 @@ Shader "GrassInteract/ScatterInstanced"
                     }
                 }
 
-                float3x3 rot;
+                // Lean rotation (identity when no deform). Kept SEPARATE from baseRot so it can pivot
+                // about the ANCHOR — composing it into baseRot would pivot the bend about the mesh origin.
+                float3x3 leanMat = float3x3(1,0,0, 0,1,0, 0,0,1);
                 if (_WindEnabled >= 0.5f || _InteractorsEnabled >= 0.5f)
                 {
-                    // Lean composition path.
                     float2 lean     = windXZ + bendXZ;
                     float leanPitch = lean.y * SCATTER_DEG_PER_METRE;
                     float leanRoll  = -lean.x * SCATTER_DEG_PER_METRE;
@@ -290,19 +299,26 @@ Shader "GrassInteract/ScatterInstanced"
                         leanPitch *= s;
                         leanRoll  *= s;
                     }
-                    float3x3 leanMat = SCATTER_EulerMatrix(leanPitch, 0.0f, leanRoll);
-                    rot = mul(leanMat, baseRot);
+                    leanMat = SCATTER_EulerMatrix(leanPitch, 0.0f, leanRoll);
+                }
+
+                float3 baseV = mul(baseRot, localPos * scale);
+                if (_WindEnabled < 0.5f && _InteractorsEnabled < 0.5f && _TiltEnabled < 0.5f)
+                {
+                    // Pure static path — byte-identical to Phase 3+4 (no anchor round-trip / FP drift).
+                    posWS    = inst.posWS + baseV;
+                    normalWS = mul(baseRot, localNormal);
                 }
                 else
                 {
-                    // Static path — byte-identical to Phase 3+4.
-                    rot = baseRot;
+                    // Deform pivots ABOUT THE ANCHOR: rotate the vertex (wind/interactor lean, then rigid
+                    // tilt) AROUND the anchor point so wind + interactors bend the instance about its anchor,
+                    // not its mesh origin. anchorRel = anchorWS - pivot.
+                    float3 anchorRel = anchorWS - inst.posWS;
+                    posWS    = inst.posWS + anchorRel + SCATTER_RotateByQuat(mul(leanMat, baseV - anchorRel), tiltQ);
+                    // Normals are directions — rotate by lean then tilt, no pivot translation.
+                    normalWS = SCATTER_RotateByQuat(mul(leanMat, mul(baseRot, localNormal)), tiltQ);
                 }
-
-                // Rigid whole-instance tilt about the pivot (identity quat when _TiltEnabled == 0).
-                float3 tiltOffset = SCATTER_RotateByQuat(mul(rot, localPos * scale), tiltQ);
-                posWS    = inst.posWS + tiltOffset;
-                normalWS = SCATTER_RotateByQuat(mul(rot, localNormal), tiltQ);
             }
 
             struct Varyings
@@ -386,6 +402,7 @@ Shader "GrassInteract/ScatterInstanced"
             float _WindEnabled;
             float _InteractorsEnabled;
             float _TiltEnabled;
+            float4 _AnchorOffset;
             float _GrassTime; float2 _WindDir; float _WindStrength; float _WindFrequency;
             float _WindNoiseScale; float _BendStrength; float _Flatten; int _InteractorCount;
             // Explicitly declare shadow-direction uniforms (mirrors GrassInteractIndirect.shader pattern).
@@ -406,17 +423,25 @@ Shader "GrassInteract/ScatterInstanced"
                 uint hi=(inst.packedYawScale>>16)&0xFFFFu,lo=inst.packedYawScale&0xFFFFu;
                 float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2;
                 float3x3 baseRot=SC_BaseRot2(inst,yaw);
+                float3 anchorWS=inst.posWS+mul(baseRot,_AnchorOffset.xyz*scale);
                 float2 windXZ=float2(0,0);
-                if(_WindEnabled>=0.5f){float ph=(inst.posWS.x*0.37f+inst.posWS.z*0.21f)*_WindNoiseScale*SC_TWO_PI;windXZ=_WindDir*sin(_GrassTime*_WindFrequency+ph)*_WindStrength;}
+                if(_WindEnabled>=0.5f){float ph=(anchorWS.x*0.37f+anchorWS.z*0.21f)*_WindNoiseScale*SC_TWO_PI;windXZ=_WindDir*sin(_GrassTime*_WindFrequency+ph)*_WindStrength;}
                 float2 bxz=float2(0,0);
-                if(_InteractorsEnabled>=0.5f){for(int i=0;i<_InteractorCount;++i){SC_InteractorGpu ip=_Interactors[i];float2 d=inst.posWS.xz-ip.posWS.xz;float dl=length(d);if(ip.radius<=0||dl>=ip.radius)continue;bxz+=(dl>1e-4f?d/dl:0)*(1-dl/ip.radius)*ip.strength*_BendStrength;}}
-                float3x3 rot;
+                if(_InteractorsEnabled>=0.5f){for(int i=0;i<_InteractorCount;++i){SC_InteractorGpu ip=_Interactors[i];float2 d=anchorWS.xz-ip.posWS.xz;float dl=length(d);if(ip.radius<=0||dl>=ip.radius)continue;bxz+=(dl>1e-4f?d/dl:0)*(1-dl/ip.radius)*ip.strength*_BendStrength;}}
+                float3x3 leanMat=float3x3(1,0,0,0,1,0,0,0,1);
                 if(_WindEnabled>=0.5f||_InteractorsEnabled>=0.5f){
                     float2 lean=windXZ+bxz; float pt=lean.y*SC_DPM,rl=-lean.x*SC_DPM,mg=sqrt(pt*pt+rl*rl);
                     if(mg>SC_MAX_LEAN){float s=SC_MAX_LEAN/mg;pt*=s;rl*=s;}
-                    rot=mul(SC_EulMat(pt,0,rl),baseRot);
-                } else {rot=baseRot;}
-                float3 toff=SC_RotateByQuat(mul(rot,lp*scale),tiltQ); wp=inst.posWS+toff; wn=SC_RotateByQuat(mul(rot,ln),tiltQ);
+                    leanMat=SC_EulMat(pt,0,rl);
+                }
+                float3 baseV=mul(baseRot,lp*scale);
+                if(_WindEnabled<0.5f&&_InteractorsEnabled<0.5f&&_TiltEnabled<0.5f){ wp=inst.posWS+baseV; wn=mul(baseRot,ln); }
+                else {
+                    // Deform pivots about the anchor (see Forward pass TransformInstance for the rationale).
+                    float3 anchorRel=anchorWS-inst.posWS;
+                    wp=inst.posWS+anchorRel+SC_RotateByQuat(mul(leanMat,baseV-anchorRel),tiltQ);
+                    wn=SC_RotateByQuat(mul(leanMat,mul(baseRot,ln)),tiltQ);
+                }
             }
 
             struct SV { float4 positionCS : SV_POSITION; };
@@ -485,6 +510,7 @@ Shader "GrassInteract/ScatterInstanced"
             float _WindEnabled;
             float _InteractorsEnabled;
             float _TiltEnabled;
+            float4 _AnchorOffset;
             float _GrassTime; float2 _WindDir; float _WindStrength; float _WindFrequency;
             float _WindNoiseScale; float _BendStrength; int _InteractorCount;
 
@@ -502,17 +528,22 @@ Shader "GrassInteract/ScatterInstanced"
                 uint hi=(inst.packedYawScale>>16)&0xFFFFu,lo=inst.packedYawScale&0xFFFFu;
                 float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2;
                 float3x3 baseRot=SD_BaseRot3(inst,yaw);
+                float3 anchorWS=inst.posWS+mul(baseRot,_AnchorOffset.xyz*scale);
                 float2 windXZ=float2(0,0);
-                if(_WindEnabled>=0.5f){float ph=(inst.posWS.x*0.37f+inst.posWS.z*0.21f)*_WindNoiseScale*SD_TWO_PI;windXZ=_WindDir*sin(_GrassTime*_WindFrequency+ph)*_WindStrength;}
+                if(_WindEnabled>=0.5f){float ph=(anchorWS.x*0.37f+anchorWS.z*0.21f)*_WindNoiseScale*SD_TWO_PI;windXZ=_WindDir*sin(_GrassTime*_WindFrequency+ph)*_WindStrength;}
                 float2 bxz=float2(0,0);
-                if(_InteractorsEnabled>=0.5f){for(int i=0;i<_InteractorCount;++i){SD_InteractorGpu ip=_Interactors[i];float2 d=inst.posWS.xz-ip.posWS.xz;float dl=length(d);if(ip.radius<=0||dl>=ip.radius)continue;bxz+=(dl>1e-4f?d/dl:0)*(1-dl/ip.radius)*ip.strength*_BendStrength;}}
-                float3x3 rot;
+                if(_InteractorsEnabled>=0.5f){for(int i=0;i<_InteractorCount;++i){SD_InteractorGpu ip=_Interactors[i];float2 d=anchorWS.xz-ip.posWS.xz;float dl=length(d);if(ip.radius<=0||dl>=ip.radius)continue;bxz+=(dl>1e-4f?d/dl:0)*(1-dl/ip.radius)*ip.strength*_BendStrength;}}
+                float3x3 leanMat=float3x3(1,0,0,0,1,0,0,0,1);
                 if(_WindEnabled>=0.5f||_InteractorsEnabled>=0.5f){
                     float2 lean=windXZ+bxz; float pt=lean.y*SD_DPM,rl=-lean.x*SD_DPM,mg=sqrt(pt*pt+rl*rl);
                     if(mg>SD_MAX_LEAN){float s=SD_MAX_LEAN/mg;pt*=s;rl*=s;}
-                    rot=mul(SD_EulMat(pt,0,rl),baseRot);
-                } else {rot=baseRot;}
-                return inst.posWS+SD_RotateByQuat(mul(rot,lp*scale),tiltQ);
+                    leanMat=SD_EulMat(pt,0,rl);
+                }
+                float3 baseV=mul(baseRot,lp*scale);
+                if(_WindEnabled<0.5f&&_InteractorsEnabled<0.5f&&_TiltEnabled<0.5f) return inst.posWS+baseV;
+                // Deform pivots about the anchor (see Forward pass TransformInstance for the rationale).
+                float3 anchorRel=anchorWS-inst.posWS;
+                return inst.posWS+anchorRel+SD_RotateByQuat(mul(leanMat,baseV-anchorRel),tiltQ);
             }
 
             struct DV { float4 positionCS : SV_POSITION; };

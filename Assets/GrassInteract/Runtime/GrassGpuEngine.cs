@@ -301,7 +301,9 @@ namespace GrassInteract
             if (this.bladeBuffer.BladeBuffer != null)
                 Shader.SetGlobalBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
             Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
-            Shader.SetGlobalFloat(ID_ScaleMax2, this.bladeBuffer.ScaleMax2);
+            // _ScaleMax2 is a PER-LAYER scale-decode bound read only by the render VS (NOT the cull compute).
+            // Set it PER-MATERIAL so a sibling scatter layer can't clobber ours via the shared global.
+            this.SetLodFloat(ID_ScaleMax2, this.bladeBuffer.ScaleMax2);
 
             // ── Reusable CommandBuffer ──────────────────────────────────────
             this.cullCmd = new CommandBuffer { name = "GrassGpuEngine.Cull" };
@@ -370,18 +372,23 @@ namespace GrassInteract
 
             // ── 4. Update per-frame shader globals ──────────────────────────
             Vector3 camPos = cullCam.transform.position;
-            Shader.SetGlobalFloat(ID_GrassTime, this.time);
-            Shader.SetGlobalVector(ID_WindDir, new Vector4(this.windDir.x, this.windDir.y, 0f, 0f));
-            Shader.SetGlobalFloat(ID_WindStrength,   this.windStrength);
-            Shader.SetGlobalFloat(ID_WindFrequency,  this.windFrequency);
-            Shader.SetGlobalFloat(ID_WindNoiseScale, this.windNoiseScale);
-            Shader.SetGlobalFloat(ID_WindGustScale,    this.windGustScale);
-            Shader.SetGlobalFloat(ID_WindRippleScale,  this.windRippleScale);
-            Shader.SetGlobalFloat(ID_WindGustSpeed,    this.windGustSpeed);
-            Shader.SetGlobalFloat(ID_WindRippleSpeed,  this.windRippleSpeed);
-            Shader.SetGlobalFloat(ID_WindRippleWeight, this.windRippleWeight);
-            Shader.SetGlobalFloat(ID_BendStrength,   this.bendStrength);
-            Shader.SetGlobalFloat(ID_Flatten,        this.flatten);
+            // PER-MATERIAL wind/bend/flatten — NOT SetGlobal. These are per-layer config; routing them
+            // through global state let a sibling scatter layer (e.g. a wind-enabled instance layer)
+            // overwrite this layer's wind every frame on the deferred indirect draws. Setting them on this
+            // layer's own LOD material clones keeps each layer's deform independent.
+            this.SetLodFloat (ID_GrassTime,        this.time);
+            this.SetLodVector(ID_WindDir,          new Vector4(this.windDir.x, this.windDir.y, 0f, 0f));
+            this.SetLodFloat (ID_WindStrength,     this.windStrength);
+            this.SetLodFloat (ID_WindFrequency,    this.windFrequency);
+            this.SetLodFloat (ID_WindNoiseScale,   this.windNoiseScale);
+            this.SetLodFloat (ID_WindGustScale,    this.windGustScale);
+            this.SetLodFloat (ID_WindRippleScale,  this.windRippleScale);
+            this.SetLodFloat (ID_WindGustSpeed,    this.windGustSpeed);
+            this.SetLodFloat (ID_WindRippleSpeed,  this.windRippleSpeed);
+            this.SetLodFloat (ID_WindRippleWeight, this.windRippleWeight);
+            this.SetLodFloat (ID_BendStrength,     this.bendStrength);
+            this.SetLodFloat (ID_Flatten,          this.flatten);
+            // _CamPosWS is the camera position — genuinely scene-wide, not per-layer — so it stays global.
             Shader.SetGlobalVector(ID_CamPosWS, new Vector4(camPos.x, camPos.y, camPos.z, 0f));
 
             // FIX 3: upload interactors here (Submit) so it is always fresh for the draw.
@@ -398,7 +405,8 @@ namespace GrassInteract
                 Shader.SetGlobalBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
             if (this.interactorBuffer?.Buffer != null)
                 Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
-            Shader.SetGlobalFloat(ID_ScaleMax2, this.bladeBuffer?.ScaleMax2 ?? 1f);
+            // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
+            this.SetLodFloat(ID_ScaleMax2, this.bladeBuffer?.ScaleMax2 ?? 1f);
 
             // ── 5. RenderMeshIndirect ×3 ─────────────────────────────────────
             // RenderParams MUST be built via the Material constructor: the object-initializer form leaves
@@ -420,6 +428,22 @@ namespace GrassInteract
         /// The object-initializer form (<c>new RenderParams { ... }</c>) leaves renderingLayerMask = 0, which
         /// makes URP skip the draw. Mirrors the CPU <see cref="GrassRenderer"/> construction.
         /// </summary>
+        /// <summary>Sets a float on all three LOD material clones (per-material, never global).</summary>
+        private void SetLodFloat(int id, float v)
+        {
+            if (this.lodMat0 != null) this.lodMat0.SetFloat(id, v);
+            if (this.lodMat1 != null) this.lodMat1.SetFloat(id, v);
+            if (this.lodMat2 != null) this.lodMat2.SetFloat(id, v);
+        }
+
+        /// <summary>Sets a vector on all three LOD material clones (per-material, never global).</summary>
+        private void SetLodVector(int id, Vector4 v)
+        {
+            if (this.lodMat0 != null) this.lodMat0.SetVector(id, v);
+            if (this.lodMat1 != null) this.lodMat1.SetVector(id, v);
+            if (this.lodMat2 != null) this.lodMat2.SetVector(id, v);
+        }
+
         private RenderParams MakeRenderParams(Material mat, Camera? drawCamera)
         {
             return new RenderParams(mat)

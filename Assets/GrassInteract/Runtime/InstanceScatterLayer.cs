@@ -29,6 +29,15 @@ namespace GrassInteract
 
         [SerializeField] private ScatterInstanceTiltConfig tilt;
 
+        // ── Instance-only deform anchor (NOT shared with Density) ──────────────
+
+        [Tooltip("Local-space offset of the deform sampling anchor from the instance pivot. " +
+                 "Wind phase, interactor lean, and rigid tilt all measure from this anchor instead of the " +
+                 "pivot. The offset is rotated by the instance's base orientation and multiplied by the " +
+                 "instance's scale, so a taller/wider instance samples proportionally further out. " +
+                 "(0,0,0) = sample at the pivot (legacy behaviour).")]
+        [SerializeField] private Vector3 anchorOffsetLocal = Vector3.zero;
+
         // ── Instance-specific fields ───────────────────────────────────────────
 
         [Tooltip("Sub-asset holding authored per-instance records.")]
@@ -81,6 +90,13 @@ namespace GrassInteract
 
         /// <summary>Rigid whole-instance tilt config — instance-only (Density never reads this).</summary>
         public ScatterInstanceTiltConfig Tilt => this.tilt;
+
+        /// <summary>
+        /// Local-space offset of the deform sampling anchor from the instance pivot. Wind phase,
+        /// interactor lean, and rigid tilt sample from <c>pivot + baseRot * (AnchorOffsetLocal * scale)</c>.
+        /// <c>Vector3.zero</c> = sample at the pivot (legacy behaviour).
+        /// </summary>
+        public Vector3 AnchorOffsetLocal => this.anchorOffsetLocal;
 
         // ── Abstract placement data accessors ──────────────────────────────────
 
