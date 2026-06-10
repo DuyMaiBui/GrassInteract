@@ -18,7 +18,9 @@ namespace GrassInteract.Editor
         // ── Constants ─────────────────────────────────────────────────────────
 
         public const float BAR_HEIGHT    = 26f;
-        private const float HANDLE_WIDTH = 8f;  // hit-test half-width (px)
+        private const float HANDLE_WIDTH  = 8f;   // hit-test half-width (px)
+        /// <summary>Minimum band width (metres) enforced between adjacent handles to prevent inversion.</summary>
+        private const float MIN_BAND_GAP  = 0.01f;
 
         // ── Palette ───────────────────────────────────────────────────────────
 
@@ -192,7 +194,7 @@ namespace GrassInteract.Editor
                 // Switch handle: must stay > previous switch (or 0) and < next switch (or cull)
                 float lo = idx > 0       ? dists[idx - 1] : 0f;
                 float hi = idx < count - 1 ? dists[idx + 1] : dists[count - 1]; // neighbor switch or cull
-                return Mathf.Clamp(dist, lo + 0.01f, hi - 0.01f);
+                return Mathf.Clamp(dist, lo + MIN_BAND_GAP, hi - MIN_BAND_GAP);
             }
         }
 

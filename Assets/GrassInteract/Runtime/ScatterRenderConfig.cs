@@ -2,6 +2,9 @@
 using Sirenix.OdinInspector;
 using UnityEngine;
 using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace GrassInteract
 {
@@ -70,5 +73,25 @@ namespace GrassInteract
                 return dists;
             }
         }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// Returns a copy of <paramref name="cfg"/> with <see cref="RenderCullDistance"/> back-filled when it is zero.
+        /// Idempotent: returns the original value unchanged when <see cref="RenderCullDistance"/> is already positive.
+        /// Migration formula: max(2 * lastSwitchDistance, 500) — preserves the legacy derived far-cull.
+        /// </summary>
+        public static ScatterRenderConfig MigrateCull(ScatterRenderConfig cfg)
+        {
+            if (cfg.RenderCullDistance > 0f)
+                return cfg;
+
+            float[] dists    = cfg.LodMaxDistances; // length == lods.Length - 1
+            // Legacy far cull was max(2 * lastSwitchDistance, 500). <2 LODs → dists empty → 500m floor.
+            float lastSwitch = dists.Length > 0 ? dists[dists.Length - 1] : 0f;
+            float migrated   = Mathf.Max(2f * lastSwitch, 500f);
+
+            return new ScatterRenderConfig(cfg.Material, cfg.ShadowCastingMode, cfg.Lods, migrated);
+        }
+#endif
     }
 }

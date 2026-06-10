@@ -112,7 +112,8 @@ void ChunkCull(uint3 id : SV_DispatchThreadID)
 
     float3 delta = camPosWS - nearest;
     float sqrDist = dot(delta, delta);
-    if (sqrDist > maxCullSqrDistance)
+    // maxCullSqrDistance <= 0 means "no cull" (matches GrassRenderer CPU contract: cull==0 → render all).
+    if (maxCullSqrDistance > 0.0 && sqrDist > maxCullSqrDistance)
         return;
 
     // 3. Frustum reject — positive-vertex (n-vertex) test against each of 6 planes.
@@ -218,7 +219,8 @@ void BladeCull(uint3 groupId   : SV_GroupID,
         float sqrDist = dot(d, d);
 
         // Beyond the overall max cull distance → skip entirely.
-        if (sqrDist > maxCullSqrDistance)
+        // maxCullSqrDistance <= 0 means "no cull" (matches GrassRenderer CPU contract: cull==0 → render all).
+        if (maxCullSqrDistance > 0.0 && sqrDist > maxCullSqrDistance)
             continue;
 
         // Bucket into LOD 0, 1, or 2 by squared distance.
