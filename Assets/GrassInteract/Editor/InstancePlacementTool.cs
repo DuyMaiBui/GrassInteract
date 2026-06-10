@@ -82,6 +82,11 @@ namespace GrassInteract.Editor
             Event e = Event.current;
             int controlId = GUIUtility.GetControlID(FocusType.Passive);
 
+            // Claim the default scene control so clicks reach this tool instead of being consumed by
+            // the Scene view's object-picking (otherwise place/erase clicks just change selection).
+            if (e.type == EventType.Layout)
+                HandleUtility.AddDefaultControl(controlId);
+
             Vector3 camPos = sv.camera != null ? sv.camera.transform.position : Vector3.zero;
             this.DrawInstances(authored, camPos);
 

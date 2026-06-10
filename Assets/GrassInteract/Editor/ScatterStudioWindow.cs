@@ -487,6 +487,7 @@ namespace GrassInteract.Editor
         {
             this.panelView?.ShowLayer(layer);
             this.instancePanel?.BindLayer(layer as InstanceScatterLayer);
+            this.densityPaintPanel?.BindLayer(layer as DensityScatterLayer);
             this.RefreshTabVisibility(layer);
         }
     }

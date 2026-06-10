@@ -1,16 +1,20 @@
 #nullable enable
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace GrassInteract.Editor
 {
     /// <summary>
-    /// Edit-mode render driver: steps + submits every enabled <see cref="ScatterField"/> so the
-    /// Scene view shows WYSIWYG preview without entering Play mode (requirement #2 full-engine render).
+    /// Edit-mode render driver. Submits each enabled <see cref="ScatterField"/>'s already-built
+    /// scatter draws from URP's <see cref="RenderPipelineManager.beginCameraRendering"/> hook, so the
+    /// preview renders in BOTH the Scene view and the Game view — exactly like Play mode — without a
+    /// per-frame repaint loop. A light <see cref="EditorApplication.update"/> pump only advances wind
+    /// time and nudges the Scene + Game views to repaint so the wind animates; it never rebuilds the
+    /// scatter and never repaints unrelated editor windows.
     ///
-    /// Rendering is ALWAYS-ON in edit mode — no selection or tool gate. The only way to pause
-    /// rendering is via the menu kill-switch: <c>Tools/GrassInteract/Disable Edit-Mode Preview</c>.
-    /// The kill-switch is an EditorPref that defaults to rendering ENABLED (kill-switch OFF).
+    /// Rendering is ALWAYS-ON in edit mode — no selection or tool gate. The only way to pause it is the
+    /// menu kill-switch <c>Tools/GrassInteract/Disable Edit-Mode Preview</c> (EditorPref; default ON).
     ///
     /// <see cref="PreviewEnabled"/> and <see cref="PreviewColliders"/> are preserved as readable
     /// properties (other code and the inspector may still access them); they no longer gate rendering.
@@ -26,9 +30,13 @@ namespace GrassInteract.Editor
         private static double lastTime;
         private static bool   hasLast;
 
+        // Fields refreshed once per editor frame in AdvanceAndPump, read per-camera in SubmitForCamera.
+        private static ScatterField[] cachedFields = System.Array.Empty<ScatterField>();
+
         static ScatterFieldEditorTick()
         {
-            EditorApplication.update += Tick;
+            EditorApplication.update += AdvanceAndPump;
+            RenderPipelineManager.beginCameraRendering += SubmitForCamera;
         }
 
         // ─── Public properties (kept for backward-compat; no longer gate rendering) ──────────
@@ -78,30 +86,56 @@ namespace GrassInteract.Editor
 
         // ─── Tick ─────────────────────────────────────────────────────────────────────────────
 
-        private static void Tick()
+        /// <summary>
+        /// Once per editor frame: refresh the field cache, advance wind time (cheap — NOT a rebuild),
+        /// and nudge only the Scene + Game views to repaint so the wind animates. The actual draw
+        /// submission happens per-camera in <see cref="SubmitForCamera"/>.
+        /// </summary>
+        private static void AdvanceAndPump()
         {
-            if (Application.isPlaying)          { hasLast = false; return; } // play loop drives itself
-            if (ScatterFieldEditorTick.KillSwitchActive) { hasLast = false; return; } // user kill-switch
+            if (Application.isPlaying || ScatterFieldEditorTick.KillSwitchActive)
+            {
+                hasLast = false;
+                cachedFields = System.Array.Empty<ScatterField>();
+                return;
+            }
+
+            cachedFields = Object.FindObjectsByType<ScatterField>(FindObjectsSortMode.None);
 
             double now = EditorApplication.timeSinceStartup;
             if (!hasLast) { lastTime = now; hasLast = true; return; } // skip first frame (huge dt)
             float dt = Mathf.Min((float)(now - lastTime), MAX_DT);
             lastTime = now;
 
-            SceneView sv = SceneView.lastActiveSceneView;
-            Camera? cam = sv != null ? sv.camera : null;
-
-            bool drew = false;
-            var fields = Object.FindObjectsByType<ScatterField>(FindObjectsSortMode.None);
-            foreach (var field in fields)
+            bool any = false;
+            foreach (ScatterField field in cachedFields)
             {
                 if (field == null || !field.isActiveAndEnabled) continue;
-                field.StepAll(dt);
-                field.SubmitAll(cam);
-                drew = true;
+                field.StepAll(dt); // advances wind time only — no re-scatter
+                any = true;
             }
+            if (!any) return;
 
-            if (drew) SceneView.RepaintAll();
+            // Pump ONLY the preview views — never RepaintAllViews (which redraws every editor window).
+            SceneView.RepaintAll();                    // Scene view(s)
+            EditorApplication.QueuePlayerLoopUpdate();  // Game view(s) in edit mode
+        }
+
+        /// <summary>
+        /// URP render hook: when a Scene or Game camera renders, submit each field's already-built
+        /// draws scoped to THAT camera. This makes the preview show in the Game view just like the
+        /// Scene view and Play mode, with no manual repaint loop. Submit is draw-only (no rebuild).
+        /// </summary>
+        private static void SubmitForCamera(ScriptableRenderContext context, Camera camera)
+        {
+            if (Application.isPlaying || ScatterFieldEditorTick.KillSwitchActive) return; // play loop submits via ScatterField.LateUpdate
+            if (camera.cameraType != CameraType.Game && camera.cameraType != CameraType.SceneView) return;
+
+            foreach (ScatterField field in cachedFields)
+            {
+                if (field == null || !field.isActiveAndEnabled) continue;
+                field.SubmitAll(camera);
+            }
         }
     }
 }

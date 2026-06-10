@@ -58,6 +58,11 @@ namespace GrassInteract.Editor
             Event e = Event.current;
             int controlId = GUIUtility.GetControlID(FocusType.Passive);
 
+            // Claim the default scene control so mouse clicks reach this tool instead of being
+            // consumed by the Scene view's object-picking (otherwise the brush draws but never paints).
+            if (e.type == EventType.Layout)
+                HandleUtility.AddDefaultControl(controlId);
+
             Vector3 origin = field.ResolveFieldOrigin();
             Vector2 bounds = field.ResolveFieldBoundsXZ(layer);
             LayerMask mask = field.ResolveGroundMask(layer);

@@ -148,7 +148,7 @@ namespace GrassInteract.Editor
             this.root.Add(this.thumbnailImage);
 
             // ── Paint entry button ────────────────────────────────────────────
-            var paintButton = new Button(OnActivatePaintTool) { text = "Paint (activate tool)" };
+            var paintButton = new Button(this.OnActivatePaintTool) { text = "Paint (activate tool)" };
             paintButton.style.marginTop    = 4f;
             paintButton.style.marginBottom = 8f;
             paintButton.style.marginLeft   = 4f;
@@ -188,6 +188,19 @@ namespace GrassInteract.Editor
 
             this.RefreshThumbnail();
             this.RefreshModeButtonStyles();
+        }
+
+        /// <summary>
+        /// Targets a specific density layer (driven by layer-rail selection) so paint activation +
+        /// overlay + thumbnail act on the selected layer rather than the field's first density layer.
+        /// Non-density selections leave the last bound layer in place (the Paint tab is disabled then).
+        /// </summary>
+        internal void BindLayer(DensityScatterLayer? layer)
+        {
+            if (layer == null) return;
+            this.activeLayer = layer;
+            ScatterDensityOverlay.SetActiveLayer(this.activeLayer, this.activeField);
+            this.RefreshThumbnail();
         }
 
         // ── Mode selection ────────────────────────────────────────────────────
@@ -243,11 +256,33 @@ namespace GrassInteract.Editor
 
         // ── Paint tool activation ─────────────────────────────────────────────
 
-        private static void OnActivatePaintTool()
+        private void OnActivatePaintTool()
         {
-            // Requires an active target — the tool is context-targeted at DensityScatterLayer.
-            // ToolManager selects the tool; Unity handles attaching it to the selected object.
-            ToolManager.SetActiveTool<DensityPaintTool>();
+            if (this.activeLayer == null)
+            {
+                Debug.LogWarning("[Scatter Studio] No DensityScatterLayer to paint — " +
+                                 "select or add a density layer first.");
+                return;
+            }
+
+            // DensityPaintTool is a component tool targeting DensityScatterLayer, so ToolManager can
+            // only activate it when that layer is the active selection. Select the layer, then
+            // activate on the next editor tick — activating synchronously (before the tool context
+            // refreshes for the new selection) throws InvalidOperationException.
+            DensityScatterLayer layer = this.activeLayer;
+            Selection.activeObject = layer;
+            EditorApplication.delayCall += () =>
+            {
+                if (Selection.activeObject != layer) return;
+                try
+                {
+                    ToolManager.SetActiveTool<DensityPaintTool>();
+                }
+                catch (System.InvalidOperationException ex)
+                {
+                    Debug.LogWarning($"[Scatter Studio] Could not activate Density Paint tool: {ex.Message}");
+                }
+            };
         }
 
         // ── Undo ──────────────────────────────────────────────────────────────
