@@ -11,7 +11,7 @@ namespace GpuTerrain.Editor
     /// Mirrors the GrassInteract <c>DensityPaintTool</c> UX pattern:
     ///   — AddDefaultControl claims scene clicks from the scene view.
     ///   — Raycasts for world brush point (physics collider first, tile-plane fallback).
-    ///   — MouseDown/Drag/Up stroke lifecycle dispatches compute kernels directly.
+    ///   — MouseDown/Drag/Up stroke lifecycle delegated to <see cref="TerrainBrushStroke"/>.
     ///   — Live writeback throttled to 0.15 s (mirrors DensityPaintTool.READBACK_INTERVAL).
     ///   — World-space decal via <see cref="TerrainBrushPreview"/> tinted by sculpt mode.
     ///
@@ -21,12 +21,6 @@ namespace GpuTerrain.Editor
     [EditorTool("Terrain Sculpt")]
     internal sealed class TerrainSculptTool : EditorTool
     {
-        // ── Constants ─────────────────────────────────────────────────────────
-
-        private const double READBACK_INTERVAL = 0.15;
-
-        // ── Per-activation resources ──────────────────────────────────────────
-
         private TerrainTileAsset?        activeTile;
         private TerrainTileGpuResources? activeGpu;
         private RenderTexture?           heightRT;
@@ -35,23 +29,16 @@ namespace GpuTerrain.Editor
 
         private readonly TerrainSculptUndo       undo      = new TerrainSculptUndo();
         private readonly TerrainSculptRtWriteback writeback = new TerrainSculptRtWriteback();
-
-        // ── Stroke state ──────────────────────────────────────────────────────
-
-        private bool   inStroke;
-        private double lastWritebackTime;
-
-        // ── Toolbar icon ──────────────────────────────────────────────────────
+        private TerrainBrushStroke? stroke;
 
         public override GUIContent toolbarIcon =>
             EditorGUIUtility.IconContent("TerrainInspector.TerrainToolRaise");
-
-        // ── Lifecycle ─────────────────────────────────────────────────────────
 
         public override void OnActivated()
         {
             this.brushCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Assets/GpuTerrain/Shaders/TerrainBrush.compute");
+            this.stroke = new TerrainBrushStroke(this.undo, this.writeback);
             EditorApplication.update += this.OnEditorUpdate;
             this.BindTile(TerrainSculptState.ActiveTile);
         }
@@ -63,9 +50,6 @@ namespace GpuTerrain.Editor
         }
 
         private void OnEditorUpdate() => this.writeback.Tick();
-
-        // ── Main tool GUI ─────────────────────────────────────────────────────
-
         public override void OnToolGUI(EditorWindow window)
         {
             if (window is not SceneView) return;
@@ -75,7 +59,8 @@ namespace GpuTerrain.Editor
                 this.BindTile(TerrainSculptState.ActiveTile);
 
             if (this.activeTile == null || this.brushCompute == null ||
-                this.heightRT == null || this.splatRT == null) return;
+                this.heightRT == null || this.splatRT == null ||
+                this.stroke == null || this.activeGpu == null) return;
 
             Event e         = Event.current;
             int   controlId = GUIUtility.GetControlID(FocusType.Passive);
@@ -99,23 +84,28 @@ namespace GpuTerrain.Editor
             {
                 case EventType.MouseDown when e.button == 0 && !e.alt && hasHit:
                     GUIUtility.hotControl = controlId;
-                    this.BeginStroke();
-                    this.Dispatch(worldPoint);
-                    this.ThrottledWriteback(force: true);
+                    this.stroke.BeginStroke(this.activeTile);
+                    this.stroke.Dispatch(worldPoint, this.activeTile,
+                        this.brushCompute, this.heightRT, this.splatRT);
+                    this.stroke.ThrottledWriteback(true, this.activeTile,
+                        this.activeGpu, this.heightRT, this.splatRT);
                     e.Use();
                     break;
 
-                case EventType.MouseDrag when e.button == 0 && this.inStroke:
+                case EventType.MouseDrag when e.button == 0 && this.stroke.InStroke:
                     if (hasHit)
                     {
-                        this.Dispatch(worldPoint);
-                        this.ThrottledWriteback(force: false);
+                        this.stroke.Dispatch(worldPoint, this.activeTile,
+                            this.brushCompute, this.heightRT, this.splatRT);
+                        this.stroke.ThrottledWriteback(false, this.activeTile,
+                            this.activeGpu, this.heightRT, this.splatRT);
                     }
                     e.Use();
                     break;
 
-                case EventType.MouseUp when e.button == 0 && this.inStroke:
-                    this.EndStroke();
+                case EventType.MouseUp when e.button == 0 && this.stroke.InStroke:
+                    this.stroke.EndStroke(this.activeTile, this.activeGpu,
+                        this.heightRT, this.splatRT);
                     GUIUtility.hotControl = 0;
                     e.Use();
                     break;
@@ -124,13 +114,7 @@ namespace GpuTerrain.Editor
             this.DrawHud();
         }
 
-        // ── World point resolution ─────────────────────────────────────────────
-
-        /// <summary>
-        /// Tries to resolve the brush world position from the ray.
-        /// 1. Physics.Raycast (catches any terrain collider in the scene).
-        /// 2. Intersect the ray with the tile's mid-height XZ plane (fallback).
-        /// </summary>
+        /// <summary>Physics raycast first; falls back to tile mid-height XZ plane.</summary>
         private bool TryGetBrushWorldPoint(Ray ray, out Vector3 worldPoint, out Vector3 normal)
         {
             if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity))
@@ -157,110 +141,6 @@ namespace GpuTerrain.Editor
             normal     = Vector3.up;
             return false;
         }
-
-        // ── Stroke helpers ─────────────────────────────────────────────────────
-
-        private void BeginStroke()
-        {
-            if (this.activeTile != null)
-                this.undo.Push(this.activeTile);
-            this.inStroke          = true;
-            this.lastWritebackTime = 0;
-        }
-
-        private void EndStroke()
-        {
-            this.inStroke = false;
-            // Final writeback, unconditional.
-            if (this.activeTile != null && this.activeGpu != null &&
-                this.heightRT != null && this.splatRT != null)
-            {
-                this.writeback.RequestAsync(
-                    this.activeTile, this.activeGpu, this.heightRT, this.splatRT);
-            }
-        }
-
-        private void ThrottledWriteback(bool force)
-        {
-            double now = EditorApplication.timeSinceStartup;
-            if (!force && now - this.lastWritebackTime < READBACK_INTERVAL) return;
-            this.lastWritebackTime = now;
-
-            if (this.activeTile != null && this.activeGpu != null &&
-                this.heightRT != null && this.splatRT != null)
-            {
-                this.writeback.RequestAsync(
-                    this.activeTile, this.activeGpu, this.heightRT, this.splatRT);
-            }
-        }
-
-        // ── Compute kernel dispatch ────────────────────────────────────────────
-
-        private void Dispatch(Vector3 worldPoint)
-        {
-            if (this.activeTile == null || this.brushCompute == null ||
-                this.heightRT == null || this.splatRT == null) return;
-
-            var worldXZ = new Vector2(worldPoint.x, worldPoint.z);
-            TerrainPaintTargetResolver.WorldBrushToTileUV(
-                worldXZ, TerrainSculptState.BrushSize, this.activeTile.tileCoord,
-                out Vector2 centerUV, out float radiusUV);
-
-            int rtRes  = TerrainSculptConfig.BRUSH_RT_RES;
-            int groups = Mathf.CeilToInt((float)rtRes / TerrainSculptConfig.THREAD_GROUP_SIZE);
-
-            this.brushCompute.SetVector("_BrushCenterUV", centerUV);
-            this.brushCompute.SetFloat("_BrushRadiusUV",  radiusUV);
-            this.brushCompute.SetFloat("_Strength",        TerrainSculptState.BrushStrength);
-            this.brushCompute.SetInt("_RTRes",             rtRes);
-
-            SculptMode mode = TerrainSculptState.EffectiveMode;
-            switch (mode)
-            {
-                case SculptMode.Raise:
-                    DispatchKernel(TerrainSculptConfig.KERNEL_RAISE_LOWER, "_HeightRT",
-                        this.heightRT, "_RaiseSign", 1f, groups);
-                    break;
-                case SculptMode.Lower:
-                    DispatchKernel(TerrainSculptConfig.KERNEL_RAISE_LOWER, "_HeightRT",
-                        this.heightRT, "_RaiseSign", -1f, groups);
-                    break;
-                case SculptMode.Smooth:
-                {
-                    int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_SMOOTH);
-                    this.brushCompute.SetTexture(k, "_HeightRT", this.heightRT);
-                    this.brushCompute.Dispatch(k, groups, groups, 1);
-                    break;
-                }
-                case SculptMode.Flatten:
-                {
-                    int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_FLATTEN);
-                    this.brushCompute.SetTexture(k, "_HeightRT", this.heightRT);
-                    this.brushCompute.SetFloat("_FlattenTarget", TerrainSculptState.FlattenTarget);
-                    this.brushCompute.Dispatch(k, groups, groups, 1);
-                    break;
-                }
-                case SculptMode.Paint:
-                {
-                    int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_SPLAT);
-                    this.brushCompute.SetTexture(k, "_SplatRT", this.splatRT);
-                    this.brushCompute.SetInt("_SplatLayer", TerrainSculptState.SplatLayer);
-                    this.brushCompute.Dispatch(k, groups, groups, 1);
-                    break;
-                }
-            }
-        }
-
-        private void DispatchKernel(string kernelName, string rtProp, RenderTexture rt,
-                                    string floatProp, float floatVal, int groups)
-        {
-            int k = this.brushCompute!.FindKernel(kernelName);
-            this.brushCompute.SetTexture(k, rtProp, rt);
-            this.brushCompute.SetFloat(floatProp, floatVal);
-            this.brushCompute.Dispatch(k, groups, groups, 1);
-        }
-
-        // ── Tile bind / release ────────────────────────────────────────────────
 
         internal void BindTile(TerrainTileAsset? tile)
         {
@@ -302,8 +182,6 @@ namespace GpuTerrain.Editor
             this.activeGpu  = null;
             this.activeTile = null;
         }
-
-        // ── In-scene HUD ───────────────────────────────────────────────────────
 
         private void DrawHud()
         {

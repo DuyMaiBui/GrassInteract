@@ -8,13 +8,13 @@ namespace GpuTerrain.Editor
     /// <summary>
     /// Custom Inspector for <see cref="TerrainTileAsset"/>.
     ///
-    /// Replaces <c>TerrainSculptWindow</c> by embedding the full brush UI directly
-    /// in the Inspector, mirroring how GrassInteract's Scatter Studio drives its
-    /// density paint tool from the Inspector rather than a floating window.
+    /// Embeds the full brush UI directly in the Inspector, mirroring how
+    /// GrassInteract's Scatter Studio drives its density paint tool from the
+    /// Inspector rather than a floating window.
     ///
     /// Sections:
     ///   1. Read-only tile summary (coord, resolutions, height range, validity, byte sizes).
-    ///   2. Full brush UI ported from TerrainSculptWindow.OnGUI (mode, sliders, undo, save).
+    ///   2. Brush UI: mode, sliders, undo, save.
     ///   3. "Activate Sculpt Tool" button → ToolManager.SetActiveTool{TerrainSculptTool}.
     ///
     /// All brush state is stored in <see cref="TerrainSculptState"/> (shared SSOT with
