@@ -446,7 +446,7 @@ Transform:
   m_GameObject: {fileID: 1280981516}
   serializedVersion: 2
   m_LocalRotation: {x: 0.47359425, y: -0, z: -0, w: 0.88074315}
-  m_LocalPosition: {x: -0.44, y: 24.39, z: -15.49}
+  m_LocalPosition: {x: 18.72, y: 24.39, z: -12.44}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -559,6 +559,7 @@ GameObject:
   - component: {fileID: 1830075613}
   - component: {fileID: 1830075612}
   - component: {fileID: 1830075617}
+  - component: {fileID: 1830075618}
   m_Layer: 0
   m_Name: Effector
   m_TagString: Untagged
@@ -593,8 +594,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee5086911a2f6f541972a9c5ba196557, type: 3}
   m_Name: 
   m_EditorClassIdentifier: GrassInteract::GrassInteract.GrassInteractor
-  worldRadius: 2.5
-  strength: 1
 --- !u!23 &1830075614
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -661,7 +660,7 @@ Transform:
   m_GameObject: {fileID: 1830075611}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -4.73, y: 0.3, z: -4.14}
+  m_LocalPosition: {x: -10.23, y: 0.3, z: -0.86}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 1
   m_Children: []
@@ -681,10 +680,22 @@ MonoBehaviour:
   m_EditorClassIdentifier: GrassInteract::GrassInteract.GrassTrailInteractor
   trailDuration: 0.5
   minVertexDistance: 0.25
-  worldRadius: 2
-  maxBendDegrees: 90
   centerZonePercent: 0.4
+--- !u!114 &1830075618
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1830075611}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 405f89c6e5a454848a220535f2920d10, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: GrassInteract::GrassInteract.GrassInteractorData
+  worldRadius: 1.5
   strength: 1
+  maxBendDegrees: 90
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

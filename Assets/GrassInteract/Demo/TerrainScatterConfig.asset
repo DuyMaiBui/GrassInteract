@@ -19,9 +19,10 @@ MonoBehaviour:
     - mesh: {fileID: 4300000, guid: 30c9f5412a6ee444fb709fca694dc445, type: 2}
       maxDistance: 50
     - mesh: {fileID: 4300000, guid: be0e89d45928ea84e8395163acaab451, type: 2}
-      maxDistance: 100
+      maxDistance: 84.02204
     - mesh: {fileID: 4300000, guid: a3511f82ea2acd348b4bb0853c1f1ed0, type: 2}
       maxDistance: 200
+    renderCullDistance: 500
   wind:
     windMode: 1
     windDirection: {x: 1, y: 0.3}
@@ -95,10 +96,11 @@ MonoBehaviour:
     lods:
     - mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
       maxDistance: 500
+    renderCullDistance: 200
   wind:
     windMode: 1
     windDirection: {x: 1, y: 0}
-    windStrength: 0.95
+    windStrength: 0.18
     windFrequency: 1
     windNoiseScale: 0.5
     windGustScale: 0.02
@@ -131,13 +133,13 @@ MonoBehaviour:
   authoredInstances: {fileID: 2688114887699544648}
   overrideScaleRange: 0
   scaleRangeOverride: {x: 1, y: 1}
-  defaultColliderMesh: {fileID: 0}
-  defaultColliderConvex: 0
+  generateColliders: 1
+  defaultColliderMesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  defaultColliderConvex: 1
   defaultColliderMaterial: {fileID: 0}
-  poolColliders: 0
+  poolColliders: 1
   poolCap: 64
   cullColliders: 1
-  cullDistance: 80
   defaultColliderScale: 1
 --- !u!114 &2688114887699544648
 MonoBehaviour:
@@ -151,5 +153,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3c4578a04f027fd40aa5d364db4783d5, type: 3}
   m_Name: RockInstances
   m_EditorClassIdentifier: GrassInteract::GrassInteract.AuthoredInstancesData
-  blob: 036b4107c100000000bd2e72c1000000001032573f0000000036a90a3f0000803f00000000
+  blob: 036b4107c100000000bd2e72c1000000001032573f0000000036a90a3f0000803f0000000093b6a5c00000003f9adb493f00000000690fe3be00000000fc72653f0000803f00000000a5aa35c00000003f34c38bbf000000009345de3e000000004b9e663f0000803f00000000220613c00000003fc2b0564000000000ff47de3e00000000b59d663f0000803f00000000bbdcd5c00000003fedbb80400000000073ed39be00000000aabe7b3f0000803f0000000042ab02c10000003f856902c0000000004e7ad8be00000000fcfd673f0000803f00000000
   objectRefs: []
