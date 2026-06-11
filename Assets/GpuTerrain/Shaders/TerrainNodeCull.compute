@@ -1,0 +1,77 @@
+// TerrainNodeCull.compute
+// Phase 1: Single-pass CDLOD node cull.
+// LOD selection is done on CPU (CdlodQuadtree.Select); GPU only frustum+distance culls
+// the already-selected nodes and appends visible node indices.
+//
+// The instanceCount in the draw args is written by cmd.CopyCounterValue on the CPU side
+// (mirrors GrassGpuEngine.RecordFrameCommands discipline — no WriteArgs kernel needed).
+//
+// Ported from GrassCull.compute ChunkCull kernel:
+//   - Frustum positive-vertex AABB test (GeometryUtility inward-normal convention)
+//   - Nearest-point distance reject
+//   - Empty-sentinel test (min > max)
+
+#pragma kernel NodeCull
+
+// ─── Structs ─────────────────────────────────────────────────────────────────
+// NodeAabb layout: float3 mn + float3 mx = 24 B (matches TerrainNodeBuffer.NodeAabb).
+struct NodeAabb
+{
+    float3 mn;
+    float3 mx;
+};
+
+// ─── NodeCull bindings ────────────────────────────────────────────────────────
+StructuredBuffer<NodeAabb>    nodeAabbs;          // one AABB per candidate node
+uint                          nodeCount;          // total candidate node count
+float4                        frustumPlanes[6];   // GeometryUtility inward-normal convention
+float3                        camPosWS;           // world-space camera position
+float                         maxCullSqrDistance; // beyond this → reject (0 = no distance cull)
+
+AppendStructuredBuffer<uint>  visibleNodes;       // output: surviving node indices
+
+// ─── NodeCull kernel ──────────────────────────────────────────────────────────
+[numthreads(64, 1, 1)]
+void NodeCull(uint3 id : SV_DispatchThreadID)
+{
+    uint nodeId = id.x;
+    if (nodeId >= nodeCount)
+        return;
+
+    NodeAabb aabb = nodeAabbs[nodeId];
+
+    // 1. Empty-sentinel test: min > max (matches ChunkedBladeBuffer sentinel convention).
+    if (aabb.mn.x > aabb.mx.x)
+        return;
+
+    // 2. Distance reject — nearest-point of AABB to camPosWS, squared distance.
+    //    Clamp camPosWS into [mn, mx] per axis → nearest point on or in the box.
+    float3 nearest;
+    nearest.x = clamp(camPosWS.x, aabb.mn.x, aabb.mx.x);
+    nearest.y = clamp(camPosWS.y, aabb.mn.y, aabb.mx.y);
+    nearest.z = clamp(camPosWS.z, aabb.mn.z, aabb.mx.z);
+    float3 delta = camPosWS - nearest;
+    float  sqrDist = dot(delta, delta);
+    // maxCullSqrDistance <= 0 means "no cull" (matches GrassGpuEngine CPU contract).
+    if (maxCullSqrDistance > 0.0 && sqrDist > maxCullSqrDistance)
+        return;
+
+    // 3. Frustum reject — positive-vertex (n-vertex) test against each of 6 planes.
+    //    Convention (GeometryUtility): dot(plane.xyz, p) + plane.w >= 0 → INSIDE.
+    //    If the positive vertex (most in-normal direction) is outside (<0), the whole
+    //    box is outside that plane → cull.
+    [unroll]
+    for (int i = 0; i < 6; i++)
+    {
+        float4 plane = frustumPlanes[i];
+        float3 pVert;
+        pVert.x = (plane.x >= 0.0f) ? aabb.mx.x : aabb.mn.x;
+        pVert.y = (plane.y >= 0.0f) ? aabb.mx.y : aabb.mn.y;
+        pVert.z = (plane.z >= 0.0f) ? aabb.mx.z : aabb.mn.z;
+        if (dot(plane.xyz, pVert) + plane.w < 0.0f)
+            return;
+    }
+
+    // 4. Survived all tests — append this node's index.
+    visibleNodes.Append(nodeId);
+}
