@@ -127,15 +127,24 @@ namespace GpuTerrain
         {
             if (this.heightTex != null)
             {
-                UnityEngine.Object.Destroy(this.heightTex);
+                SafeDestroy(this.heightTex);
                 this.heightTex = null;
             }
             if (this.splatTex != null)
             {
-                UnityEngine.Object.Destroy(this.splatTex);
+                SafeDestroy(this.splatTex);
                 this.splatTex = null;
             }
             this.IsUploaded = false;
+        }
+
+        private static void SafeDestroy(UnityEngine.Object? obj)
+        {
+            if (obj == null) return;
+            if (UnityEngine.Application.isPlaying)
+                UnityEngine.Object.Destroy(obj);
+            else
+                UnityEngine.Object.DestroyImmediate(obj);
         }
 
         // ── Private helpers ───────────────────────────────────────────────────

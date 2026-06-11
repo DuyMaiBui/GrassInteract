@@ -7,6 +7,16 @@ using UnityEngine.Rendering;
 namespace GpuTerrain
 {
     /// <summary>
+    /// Minimal interface for a per-tile terrain engine: submit a frame and dispose GPU resources.
+    /// Used by TerrainTileResidencySet.ResidentTile so tests can inject a no-op engine
+    /// without a real ComputeShader (GpuTerrainEngine constructor requires non-null shaders).
+    /// </summary>
+    public interface ITerrainEngine : IDisposable
+    {
+        void Submit(Camera? targetCamera, Vector3 cameraPos);
+    }
+
+    /// <summary>
     /// GPU-driven CDLOD terrain engine for one tile.
     /// Build → Step → Submit → Dispose.
     ///
@@ -17,7 +27,7 @@ namespace GpuTerrain
     /// - Rebind buffers each Submit (domain-reload guard).
     /// - CopyCounterValue writes instanceCount into IndirectArguments buffer (same pattern as GrassGpuEngine).
     /// </summary>
-    public sealed class GpuTerrainEngine : IDisposable
+    public sealed class GpuTerrainEngine : ITerrainEngine
     {
         // ── Constants ─────────────────────────────────────────────────────────
         // Byte offset of instanceCount in IndirectDrawIndexedArgs (second uint = 4 bytes in).
