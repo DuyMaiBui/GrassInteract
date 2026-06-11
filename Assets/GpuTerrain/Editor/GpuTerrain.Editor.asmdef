@@ -2,7 +2,8 @@
     "name": "GpuTerrain.Editor",
     "rootNamespace": "GpuTerrain.Editor",
     "references": [
-        "GpuTerrain"
+        "GpuTerrain",
+        "GrassInteract"
     ],
     "includePlatforms": [
         "Editor"
