@@ -72,9 +72,9 @@ namespace GrassInteract
         private ChunkedInstanceBuffer? instanceBuffer;
 
         // ── Per-instance colliders (Play-mode only) ───────────────────────────
-        private GameObject?            colliderRoot;
-        private InstanceColliderPool?  colliderPool;
-        private InstanceFrustumCuller? colliderCuller;
+        private GameObject?                       colliderRoot;
+        private InstanceColliderPool?             colliderPool;
+        private InstanceVisibilityColliderDriver? colliderDriver;
 
         // ── Per-LOD material clones ───────────────────────────────────────────
         private Material? lodMat0;
@@ -328,6 +328,11 @@ namespace GrassInteract
                 this.maxSqrDistance, this.lod0MaxSqrDist, this.lod1MaxSqrDist);
             Graphics.ExecuteCommandBuffer(this.cullCmd);
 
+            // Tick the GPU-readback collider driver AFTER the cull command buffer executes
+            // so visibleLod0Buf and Lod0CountBuffer contain the current frame's results.
+            if (this.colliderDriver != null && this.visibleLod0Buf != null && Application.isPlaying)
+                this.colliderDriver.Tick(this.visibleLod0Buf);
+
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
@@ -397,9 +402,10 @@ namespace GrassInteract
             this.tiltSim?.Dispose(); this.tiltSim = null;
             this.tiltEnabled = false;
 
+            this.colliderDriver?.Dispose();
+            this.colliderDriver = null;
             this.colliderPool?.Dispose();
-            this.colliderPool  = null;
-            this.colliderCuller = null; // component lives on colliderRoot — destroyed below
+            this.colliderPool   = null;
             SafeDestroy(this.colliderRoot); this.colliderRoot = null;
 
             SafeDestroy(this.lodMat0); this.lodMat0 = null;
@@ -477,14 +483,35 @@ namespace GrassInteract
                 materials[i]     = colMat;
             }
 
+            // Verify 1:1 prop invariant: scatter.TotalCount must equal records.Length so flatIdx == pool key i.
+            // InstancePlacement emits exactly one instance per authored record, so this always holds for props.
+            if (this.instanceBuffer!.TotalInstances != count)
+            {
+                Debug.LogError(
+                    $"[InstancedPropEngine] 1:1 prop invariant violated: " +
+                    $"instanceBuffer.TotalInstances={this.instanceBuffer.TotalInstances} != records.Length={count}. " +
+                    "Collider culling disabled for this layer.");
+                return;
+            }
+
+            int[]? sortedToAuthored = this.instanceBuffer.SortedToAuthored;
+            if (sortedToAuthored == null)
+            {
+                Debug.LogError(
+                    "[InstancedPropEngine] sortedToAuthored is null after bake. Collider culling disabled.");
+                return;
+            }
+
             if (instLayer.CullColliders)
             {
-                this.colliderCuller = rootT.gameObject.AddComponent<InstanceFrustumCuller>();
-                this.colliderCuller.Init(null /* Camera.main at runtime */, instLayer.CullDistance, this.colliderPool);
-                this.colliderCuller.SetRecords(positions, rotations, scales, meshes, convexFlags, wantsCollider, materials);
+                this.colliderDriver = new InstanceVisibilityColliderDriver(
+                    this.colliderPool,
+                    sortedToAuthored,
+                    positions, rotations, scales, meshes, convexFlags, wantsCollider, materials,
+                    instLayer.PoolCap);
                 Debug.Log(
-                    $"[InstancedPropEngine] Collider runtime: pool cap={instLayer.PoolCap}, " +
-                    $"cullDist={instLayer.CullDistance}m, records={count}.");
+                    $"[InstancedPropEngine] GPU-readback collider driver: pool cap={instLayer.PoolCap}, " +
+                    $"records={count}, sortedToAuthored.Length={sortedToAuthored.Length}.");
             }
             else
             {
@@ -560,6 +587,11 @@ namespace GrassInteract
             cmd.CopyCounterValue(this.visibleLod0Buf, this.argsLod0Buf, ARGS_INSTANCE_COUNT_OFFSET);
             cmd.CopyCounterValue(this.visibleLod1Buf, this.argsLod1Buf, ARGS_INSTANCE_COUNT_OFFSET);
             cmd.CopyCounterValue(this.visibleLod2Buf, this.argsLod2Buf, ARGS_INSTANCE_COUNT_OFFSET);
+
+            // Copy LOD0 counter to the driver's dedicated count buffer so the readback driver
+            // can read the exact LOD0 instance count without touching argsLod0Buf.
+            if (this.colliderDriver?.Lod0CountBuffer != null)
+                cmd.CopyCounterValue(this.visibleLod0Buf, this.colliderDriver.Lod0CountBuffer, 0);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

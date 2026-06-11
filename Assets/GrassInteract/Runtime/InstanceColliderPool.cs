@@ -58,6 +58,12 @@ namespace GrassInteract
         // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>
+        /// Read-only enumerable of the authored-record indices that currently have an active collider.
+        /// Used by <see cref="InstanceVisibilityColliderDriver"/> to diff the desired set.
+        /// </summary>
+        public Dictionary<int, MeshCollider>.KeyCollection ActiveKeys => this.active.Keys;
+
+        /// <summary>
         /// Acquires a pooled <see cref="MeshCollider"/> and positions it for record
         /// <paramref name="recordIdx"/>. Returns null if the pool is at capacity (one warning logged
         /// per pool lifetime).

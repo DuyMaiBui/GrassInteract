@@ -80,6 +80,12 @@ namespace GrassInteract
         private ChunkAabb[]?    chunkAabbs;
         private ChunkRange[]?   chunkRanges;
 
+        // ── Sort-permutation bridge ───────────────────────────────────────────
+        // sortedToAuthored[sortedIdx] = authoredInputIndex.
+        // Captured during the counting-sort scatter pass in Bake.
+        // Null before bake; reset on re-bake/dispose.
+        private int[]? sortedToAuthored;
+
         // ── GPU buffers ───────────────────────────────────────────────────────
         private GraphicsBuffer? instanceBuf;
         private GraphicsBuffer? aabbBuf;
@@ -125,6 +131,15 @@ namespace GrassInteract
 
         /// <summary>CPU-side copy of per-chunk ranges. Null before bake.</summary>
         public ChunkRange[]? ChunkRanges => this.chunkRanges;
+
+        /// <summary>
+        /// Sorted→authored index map: <c>SortedToAuthored[sortedIdx] = authoredInputIndex</c>.
+        /// Captures the counting-sort permutation from <see cref="Bake"/> so a caller can map
+        /// GPU-visible sorted indices back to the authored (pool-keyed) record index.
+        /// Null before bake and reset on dispose.
+        /// Length == <see cref="TotalInstances"/> after a successful bake.
+        /// </summary>
+        public int[]? SortedToAuthored => this.sortedToAuthored;
 
         // ─────────────────────────────────────────────────────────────────────
         // Bake
@@ -235,7 +250,8 @@ namespace GrassInteract
                 };
             }
 
-            int[] writeCursor = new int[totalChunks];
+            int[] writeCursor     = new int[totalChunks];
+            var   sortedToAuthMap = new int[totalInst];   // permutation bridge
             Array.Copy(cellStart, writeCursor, totalChunks);
 
             flatIdx = 0;
@@ -250,6 +266,9 @@ namespace GrassInteract
                 {
                     int       cell = instCell[flatIdx];
                     int       outI = writeCursor[cell]++;
+
+                    // Capture permutation: sorted slot outI was authored at flatIdx.
+                    sortedToAuthMap[outI] = flatIdx;
                     Matrix4x4 m    = matSlab[k];
                     Vector3   pos  = posSlab[k];
                     Vector3   nrm  = nrmSlab[k]; // surface normal (Vector3.up for non-oriented)
@@ -322,9 +341,16 @@ namespace GrassInteract
             }
 
             // ── Step 4: store CPU arrays ──────────────────────────────────────
-            this.instances  = instOut;
-            this.chunkAabbs = aabbOut;
-            this.chunkRanges = rangeOut;
+            // Assert SSOT invariant: every sorted slot must have been written exactly once.
+            if (sortedToAuthMap.Length != totalInst)
+                throw new InvalidOperationException(
+                    $"[ChunkedInstanceBuffer] sortedToAuthored length mismatch: " +
+                    $"got {sortedToAuthMap.Length}, expected {totalInst}.");
+
+            this.instances       = instOut;
+            this.chunkAabbs      = aabbOut;
+            this.chunkRanges     = rangeOut;
+            this.sortedToAuthored = sortedToAuthMap;
 
             // ── Step 5: upload to GPU ─────────────────────────────────────────
             if (totalInst > 0)
@@ -360,9 +386,10 @@ namespace GrassInteract
             if (this.instanceBuf != null) { this.instanceBuf.Release(); this.instanceBuf = null; }
             if (this.aabbBuf     != null) { this.aabbBuf.Release();     this.aabbBuf     = null; }
             if (this.rangeBuf    != null) { this.rangeBuf.Release();    this.rangeBuf    = null; }
-            this.instances   = null;
-            this.chunkAabbs  = null;
-            this.chunkRanges = null;
+            this.instances        = null;
+            this.chunkAabbs       = null;
+            this.chunkRanges      = null;
+            this.sortedToAuthored = null;
         }
 
         // ─────────────────────────────────────────────────────────────────────
