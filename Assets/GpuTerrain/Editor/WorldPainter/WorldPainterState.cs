@@ -18,6 +18,18 @@ namespace GpuTerrain.Editor
         /// <summary>WorldPainter component currently bound for authoring. Set by the Inspector.</summary>
         public static WorldPainter? ActivePainter { get; set; }
 
+        // ── Brush-dirty notification ──────────────────────────────────────────
+
+        /// <summary>
+        /// Raised by the brush dock when the falloff curve changes so the active
+        /// <see cref="WorldPainterSculptTool"/> can re-upload the 256×1 LUT to GPU
+        /// without requiring a tool re-activation.
+        /// </summary>
+        public static event System.Action? BrushFalloffDirty;
+
+        /// <summary>Invoke to notify the active sculpt tool that the falloff curve changed.</summary>
+        public static void RaiseBrushFalloffDirty() => BrushFalloffDirty?.Invoke();
+
         // ── Active layer ──────────────────────────────────────────────────────
 
         /// <summary>
@@ -60,8 +72,9 @@ namespace GpuTerrain.Editor
         /// <summary>Reset everything to defaults (domain-reload equivalent).</summary>
         public static void Reset()
         {
-            ActivePainter   = null;
+            ActivePainter    = null;
             ActiveLayerIndex = -1;
+            BrushFalloffDirty = null;
             ResetLastStroked();
         }
     }

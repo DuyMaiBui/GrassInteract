@@ -38,11 +38,19 @@ namespace GpuTerrain.Editor
             public readonly byte[]     HeightData;
             public readonly byte[]     SplatData;
 
-            public TileSnapshot(Vector2Int coord, byte[] heightData, byte[] splatData)
+            /// <summary>
+            /// Monotonic insertion counter assigned at Push time.
+            /// Lower value = older snapshot; used by <see cref="EvictToMemoryCap"/>
+            /// to find the globally oldest entry across all tile stacks.
+            /// </summary>
+            public readonly long Sequence;
+
+            public TileSnapshot(Vector2Int coord, byte[] heightData, byte[] splatData, long sequence)
             {
                 this.TileCoord  = coord;
                 this.HeightData = heightData ?? throw new ArgumentNullException(nameof(heightData));
                 this.SplatData  = splatData  ?? throw new ArgumentNullException(nameof(splatData));
+                this.Sequence   = sequence;
             }
 
             public long ByteSize => this.HeightData.LongLength + this.SplatData.LongLength;
@@ -53,6 +61,10 @@ namespace GpuTerrain.Editor
         // LinkedList: head = oldest, tail = newest.
         private readonly Dictionary<Vector2Int, LinkedList<TileSnapshot>> stacks =
             new Dictionary<Vector2Int, LinkedList<TileSnapshot>>();
+
+        // Monotonic insertion counter — used by EvictToMemoryCap to find the
+        // globally oldest snapshot across tiles, regardless of tile order in the dict.
+        private long nextSequence;
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -107,7 +119,8 @@ namespace GpuTerrain.Editor
             var snap = new TileSnapshot(
                 tile.tileCoord,
                 CopyBytes(tile.heightData),
-                CopyBytes(tile.splatData));
+                CopyBytes(tile.splatData),
+                this.nextSequence++);
 
             stack.AddLast(snap);
 
@@ -153,26 +166,30 @@ namespace GpuTerrain.Editor
         /// <summary>
         /// Evicts the globally oldest snapshot (across all tiles) until total
         /// memory is under <see cref="MEMORY_CAP_BYTES"/>.
+        /// Uses the <see cref="TileSnapshot.Sequence"/> monotonic counter to
+        /// find the true minimum across all per-tile stacks.
         /// </summary>
         private void EvictToMemoryCap()
         {
             while (this.TotalMemoryBytes > MEMORY_CAP_BYTES)
             {
-                // Find the tile whose head (oldest snapshot) has the earliest insertion order.
-                // Simple approach: pick the first non-empty tile's oldest entry.
-                LinkedListNode<TileSnapshot>? oldest = null;
-                LinkedList<TileSnapshot>?     oldestStack = null;
+                // Walk all tile stacks and find the head with the smallest Sequence.
+                LinkedList<TileSnapshot>? oldestStack = null;
+                long oldestSeq = long.MaxValue;
+
                 foreach (var kv in this.stacks)
                 {
                     if (kv.Value.Count == 0) continue;
-                    if (oldest == null)
+                    long seq = kv.Value.First!.Value.Sequence;
+                    if (seq < oldestSeq)
                     {
-                        oldest = kv.Value.First;
+                        oldestSeq   = seq;
                         oldestStack = kv.Value;
                     }
                 }
-                if (oldest == null) break; // no snapshots left
-                oldestStack!.RemoveFirst();
+
+                if (oldestStack == null) break; // no snapshots left
+                oldestStack.RemoveFirst();
             }
         }
 

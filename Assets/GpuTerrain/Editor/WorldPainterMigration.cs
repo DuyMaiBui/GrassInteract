@@ -120,6 +120,9 @@ namespace GpuTerrain.Editor
                 });
             }
 
+            // Carry tile size + height/splat resolution from source tiles into WorldGridConfig.
+            ApplyWorldGridConfig(painter, tileAssets);
+
             // Map scatter layers.
             var layers = GetLayers(config);
             painter.ScatterLayers.Clear();
@@ -133,6 +136,52 @@ namespace GpuTerrain.Editor
 
             Debug.Log($"[WorldPainterMigration] Done: {tileAssets.Count} tile(s), " +
                       $"{layers.Count} scatter layer(s) migrated onto '{painter.name}'.");
+        }
+
+        // ── WorldGrid config carry-over ───────────────────────────────────────
+
+        /// <summary>
+        /// Reads tile size + height/splat resolution from the first source tile and
+        /// writes them into <see cref="WorldPainter.WorldGridConfig"/>.
+        ///
+        /// If tiles disagree (mixed resolutions), the first tile's values win and a
+        /// warning is logged so the user can decide whether to re-author.
+        /// If no tiles are present, WorldGrid.Default is kept unchanged.
+        /// </summary>
+        private static void ApplyWorldGridConfig(
+            WorldPainter painter,
+            List<TerrainTileAsset> tileAssets)
+        {
+            if (tileAssets.Count == 0) return;
+
+            var first = tileAssets[0];
+            var derived = new WorldGrid
+            {
+                tileSizeM = TerrainWorldGrid.TILE_SIZE_M,
+                heightRes  = first.heightRes,
+                splatRes   = first.splatRes,
+            };
+
+            // Validate consistency across tiles and warn if they diverge.
+            bool allMatch = true;
+            foreach (var t in tileAssets)
+            {
+                if (t.heightRes != derived.heightRes || t.splatRes != derived.splatRes)
+                {
+                    allMatch = false;
+                    break;
+                }
+            }
+
+            if (!allMatch)
+            {
+                Debug.LogWarning(
+                    $"[WorldPainterMigration] Source tiles have mixed resolutions. " +
+                    $"Using first tile ({first.name}): heightRes={derived.heightRes}, " +
+                    $"splatRes={derived.splatRes}. Review WorldPainter.WorldGridConfig manually.");
+            }
+
+            painter.WorldGridConfig = derived;
         }
 
         // ── Scene queries ─────────────────────────────────────────────────────

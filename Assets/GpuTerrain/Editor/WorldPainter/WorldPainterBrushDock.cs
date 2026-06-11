@@ -91,7 +91,8 @@ namespace GpuTerrain.Editor
                 if (EditorGUI.EndChangeCheck())
                 {
                     brush.falloff = newCurve;
-                    // Batch 2: re-upload 256×1 RFloat LUT to compute on change.
+                    // Notify the active sculpt tool to re-upload the 256×1 LUT.
+                    WorldPainterState.RaiseBrushFalloffDirty();
                 }
             });
             container.AddToClassList("wp-curve-container");

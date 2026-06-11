@@ -17,28 +17,32 @@ namespace GpuTerrain.Editor
     /// drag path and stamps every spacing metres.  The falloff LUT is uploaded
     /// once on tool activate and re-uploaded whenever the CurveField changes.
     ///
-    /// Does NOT delete or break the existing GpuTerrainRenderer / TerrainSculptTool path.
+    /// Stroke undo: a single Ctrl+Z reverts one full stroke per Unity Undo group.
+    /// On Ctrl+Z, <see cref="Undo.undoRedoPerformed"/> fires; the handler pops the
+    /// WorldPainterUndo snapshot for every tile touched and re-uploads bytes to GPU.
+    ///
+    /// Stroke code is in <c>WorldPainterSculptTool.Stroke.cs</c> (partial).
     /// </summary>
     [EditorTool("WorldPainter Sculpt")]
-    internal sealed class WorldPainterSculptTool : EditorTool
+    internal sealed partial class WorldPainterSculptTool : EditorTool
     {
         // ── Tool resources ────────────────────────────────────────────────────
 
-        private ComputeShader? brushCompute;
-        private readonly TerrainSculptRtWriteback writeback  = new TerrainSculptRtWriteback();
-        private readonly TileRtCache              rtCache    = new TileRtCache();
-        private readonly WorldPainterStroke       stroke     = new WorldPainterStroke();
-        private readonly BrushFalloffLut          falloffLut = new BrushFalloffLut();
+        internal ComputeShader? brushCompute;
+        internal readonly TerrainSculptRtWriteback writeback  = new TerrainSculptRtWriteback();
+        internal readonly TileRtCache              rtCache    = new TileRtCache();
+        internal readonly WorldPainterStroke       stroke     = new WorldPainterStroke();
+        internal readonly BrushFalloffLut          falloffLut = new BrushFalloffLut();
 
         // ── Per-stroke tracking ───────────────────────────────────────────────
 
-        private readonly HashSet<Vector2Int> undoPushedCoords   = new HashSet<Vector2Int>();
-        private readonly HashSet<Vector2Int> strokeTouchedCoords = new HashSet<Vector2Int>();
-        private readonly List<Vector2Int>    resolveResults      = new List<Vector2Int>(4);
+        internal readonly HashSet<Vector2Int> undoPushedCoords    = new HashSet<Vector2Int>();
+        internal readonly HashSet<Vector2Int> strokeTouchedCoords = new HashSet<Vector2Int>();
+        internal readonly List<Vector2Int>    resolveResults      = new List<Vector2Int>(4);
 
         // ── Undo group ────────────────────────────────────────────────────────
 
-        private int undoGroupId = -1;
+        internal int undoGroupId = -1;
 
         // ── Toolbar icon ──────────────────────────────────────────────────────
 
@@ -56,11 +60,19 @@ namespace GpuTerrain.Editor
             var brush = WorldPainterState.Brush;
             this.falloffLut.Upload(brush.falloff);
 
+            // Subscribe: re-upload LUT when CurveField changes without re-activating.
+            WorldPainterState.BrushFalloffDirty += this.OnBrushFalloffDirty;
+
+            // Subscribe: Ctrl+Z triggers our custom per-tile snapshot revert.
+            Undo.undoRedoPerformed += this.OnUndoRedoPerformed;
+
             EditorApplication.update += this.OnEditorUpdate;
         }
 
         public override void OnWillBeDeactivated()
         {
+            WorldPainterState.BrushFalloffDirty -= this.OnBrushFalloffDirty;
+            Undo.undoRedoPerformed -= this.OnUndoRedoPerformed;
             EditorApplication.update -= this.OnEditorUpdate;
 
             if (this.stroke.InStroke)
@@ -72,6 +84,47 @@ namespace GpuTerrain.Editor
         }
 
         private void OnEditorUpdate() => this.writeback.Tick();
+
+        // ── LUT re-upload (finding #3) ────────────────────────────────────────
+
+        private void OnBrushFalloffDirty()
+        {
+            this.falloffLut.Upload(WorldPainterState.Brush.falloff);
+        }
+
+        // ── Ctrl+Z stroke revert (finding #2) ────────────────────────────────
+
+        /// <summary>
+        /// Called by Unity when any Undo or Redo fires.
+        /// We pop the WorldPainterUndo snapshot for every tile that was touched by the
+        /// last stroke and re-upload bytes to GPU so the visual reverts immediately.
+        /// </summary>
+        private void OnUndoRedoPerformed()
+        {
+            var painter = WorldPainterState.ActivePainter;
+            if (painter == null) return;
+
+            // Pop the latest WorldPainter snapshot for every tile that was last-stroked.
+            foreach (var coord in WorldPainterState.LastStrokedTileSet)
+            {
+                var tile = this.FindTile(painter, coord);
+                if (tile == null) continue;
+
+                var snap = WorldPainterAuthoring.UndoStack.Pop(tile);
+                if (snap == null) continue;
+
+                // Re-upload the restored bytes to GPU.
+                var gpu = this.FindGpu(painter, coord);
+                if (gpu == null) continue;
+
+                if (!this.rtCache.GetOrCreate(coord, gpu, out var heightRT, out var splatRT))
+                    continue;
+
+                // Write restored CPU bytes back to the RT and commit synchronously.
+                this.writeback.ExecuteSync(tile, gpu, heightRT, splatRT);
+                painter.CommitHeight(coord);
+            }
+        }
 
         // ── Scene view GUI ────────────────────────────────────────────────────
 
@@ -122,203 +175,7 @@ namespace GpuTerrain.Editor
             this.DrawHud();
         }
 
-        // ── Mouse handlers ────────────────────────────────────────────────────
-
-        private void HandleMouseDown(WorldPainter painter, Vector3 worldPos, int controlId)
-        {
-            this.undoPushedCoords.Clear();
-            this.strokeTouchedCoords.Clear();
-            this.rtCache.ReleaseAll();
-
-            // Begin Unity Undo group — one Ctrl+Z per stroke (task 9).
-            Undo.IncrementCurrentGroup();
-            this.undoGroupId = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("WorldPainter Sculpt Stroke");
-
-            GUIUtility.hotControl = controlId;
-            this.stroke.Begin(worldPos);
-
-            // Initial stamp at mouse-down position.
-            this.DoStamp(painter, worldPos);
-            this.CommitLastStrokedState();
-        }
-
-        private void HandleMouseDrag(WorldPainter painter, Vector3 worldPos)
-        {
-            var brush = WorldPainterState.Brush;
-
-            // Spacing-stamping: stamps every spacingM metres along path.
-            this.stroke.Advance(
-                worldPos,
-                brush.spacing,
-                brush.flow,
-                (stampPos, flow) => this.DoStamp(painter, stampPos));
-
-            this.CommitLastStrokedState();
-        }
-
-        private void HandleMouseUp(WorldPainter painter)
-        {
-            this.TeardownActiveStroke(painter);
-            this.CommitLastStrokedState();
-
-            // Close Unity Undo group so one Ctrl+Z reverts the whole stroke.
-            if (this.undoGroupId >= 0)
-            {
-                Undo.CollapseUndoOperations(this.undoGroupId);
-                this.undoGroupId = -1;
-            }
-        }
-
-        // ── Teardown ──────────────────────────────────────────────────────────
-
-        private void TeardownActiveStroke(WorldPainter? painter)
-        {
-            this.writeback.CancelPending();
-            UnityEngine.Rendering.AsyncGPUReadback.WaitAllRequests();
-
-            if (painter != null)
-            {
-                foreach (var coord in this.strokeTouchedCoords)
-                {
-                    var tile = this.FindTile(painter, coord);
-                    var gpu  = this.FindGpu(painter, coord);
-                    if (tile != null && gpu != null &&
-                        this.rtCache.TryGet(coord, out var hRT, out var sRT))
-                    {
-                        this.writeback.ExecuteSync(tile, gpu, hRT, sRT);
-                    }
-                }
-            }
-
-            this.stroke.End();
-            this.rtCache.ReleaseAll();
-            this.strokeTouchedCoords.Clear();
-            this.undoPushedCoords.Clear();
-        }
-
-        // ── Per-stamp dispatch ────────────────────────────────────────────────
-
-        private void DoStamp(WorldPainter painter, Vector3 worldPos)
-        {
-            var brush = WorldPainterState.Brush;
-
-            this.resolveResults.Clear();
-            TerrainPaintTargetResolver.Resolve(
-                new Vector2(worldPos.x, worldPos.z),
-                brush.size,
-                residencySet: null,
-                this.resolveResults);
-
-            foreach (var coord in this.resolveResults)
-                this.DispatchOneTile(painter, worldPos, coord);
-        }
-
-        private void DispatchOneTile(WorldPainter painter, Vector3 worldPos, Vector2Int coord)
-        {
-            var tile = this.FindTile(painter, coord);
-            var gpu  = this.FindGpu(painter, coord);
-            if (tile == null || gpu == null) return;
-
-            if (!this.rtCache.GetOrCreate(coord, gpu, out var heightRT, out var splatRT))
-                return;
-
-            bool isFirstTouch = !this.strokeTouchedCoords.Contains(coord);
-            if (isFirstTouch && !this.undoPushedCoords.Contains(coord))
-            {
-                // Push undo snapshot before first edit on this tile.
-                WorldPainterAuthoring.UndoStack.Push(tile);
-                this.undoPushedCoords.Add(coord);
-            }
-
-            this.strokeTouchedCoords.Add(coord);
-
-            // Bind falloff LUT to ALL kernels via shared uniform _FalloffLUT / _UseFalloffLUT.
-            this.BindAndDispatch(worldPos, tile, heightRT, splatRT);
-
-            // Throttled live writeback (for VTF preview).
-            this.writeback.RequestAsync(tile, gpu, heightRT, splatRT);
-        }
-
-        private void BindAndDispatch(
-            Vector3 worldPos,
-            TerrainTileAsset tile,
-            RenderTexture heightRT,
-            RenderTexture splatRT)
-        {
-            if (this.brushCompute == null) return;
-
-            var brush = WorldPainterState.Brush;
-            var worldXZ = new Vector2(worldPos.x, worldPos.z);
-            TerrainPaintTargetResolver.WorldBrushToTileUV(
-                worldXZ, brush.size, tile.tileCoord,
-                out Vector2 centerUV, out float radiusUV);
-
-            int rtRes  = TerrainSculptConfig.BRUSH_RT_RES;
-            int groups = Mathf.CeilToInt((float)rtRes / TerrainSculptConfig.THREAD_GROUP_SIZE);
-
-            this.brushCompute.SetVector("_BrushCenterUV", centerUV);
-            this.brushCompute.SetFloat("_BrushRadiusUV",  radiusUV);
-            this.brushCompute.SetFloat("_Strength",        brush.strength);
-            this.brushCompute.SetInt("_RTRes",             rtRes);
-
-            // Determine kernel (only Raise mode for now; Paint in task 8 sculpt scope).
-            // The active layer type drives the kernel selection.
-            string kernelName = TerrainSculptConfig.KERNEL_RAISE_LOWER;
-            float  raiseSign  = 1f; // Raise default
-
-            int k = this.brushCompute.FindKernel(kernelName);
-            this.falloffLut.BindToCompute(this.brushCompute, k);
-
-            this.brushCompute.SetTexture(k, "_HeightRT", heightRT);
-            this.brushCompute.SetFloat("_RaiseSign", raiseSign);
-            this.brushCompute.Dispatch(k, groups, groups, 1);
-        }
-
-        // ── Helpers ───────────────────────────────────────────────────────────
-
-        private TerrainTileAsset? FindTile(WorldPainter painter, Vector2Int coord)
-        {
-            foreach (var entry in painter.Tiles)
-                if (entry.coord == coord && entry.tileAsset != null)
-                    return entry.tileAsset;
-            return null;
-        }
-
-        private TerrainTileGpuResources? FindGpu(WorldPainter painter, Vector2Int coord)
-            => painter.ResourcesForCoord(coord);
-
-        private bool TryGetBrushWorldPoint(Ray ray, WorldPainter painter, out Vector3 worldPoint)
-        {
-            if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity))
-            {
-                worldPoint = hit.point; return true;
-            }
-            foreach (var entry in painter.Tiles)
-            {
-                if (entry.tileAsset == null) continue;
-                var origin2d = TerrainWorldGrid.TileOriginWorld(entry.coord);
-                float midY   = (entry.tileAsset.minHeight + entry.tileAsset.maxHeight) * 0.5f;
-                var plane    = new Plane(Vector3.up, new Vector3(origin2d.x, midY, origin2d.y));
-                if (plane.Raycast(ray, out float dist) && dist > 0f && dist < 1e6f)
-                {
-                    worldPoint = ray.GetPoint(dist); return true;
-                }
-            }
-            worldPoint = Vector3.zero;
-            return false;
-        }
-
-        private void CommitLastStrokedState()
-        {
-            WorldPainterState.LastStrokedTileSet.Clear();
-            foreach (var c in this.strokeTouchedCoords)
-                WorldPainterState.LastStrokedTileSet.Add(c);
-
-            Vector2Int? primary = null;
-            foreach (var c in this.strokeTouchedCoords) { primary = c; break; }
-            WorldPainterState.LastStrokedCoord = primary;
-        }
+        // ── HUD ───────────────────────────────────────────────────────────────
 
         private void DrawHud()
         {
