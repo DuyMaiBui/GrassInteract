@@ -329,9 +329,13 @@ namespace GrassInteract
             Graphics.ExecuteCommandBuffer(this.cullCmd);
 
             // Tick the GPU-readback collider driver AFTER the cull command buffer executes
-            // so visibleLod0Buf and Lod0CountBuffer contain the current frame's results.
-            if (this.colliderDriver != null && this.visibleLod0Buf != null && Application.isPlaying)
-                this.colliderDriver.Tick(this.visibleLod0Buf);
+            // so all three visibleLodNBufs and their count buffers contain the current frame's results.
+            if (this.colliderDriver != null &&
+                this.visibleLod0Buf != null &&
+                this.visibleLod1Buf != null &&
+                this.visibleLod2Buf != null &&
+                Application.isPlaying)
+                this.colliderDriver.Tick(this.visibleLod0Buf, this.visibleLod1Buf, this.visibleLod2Buf);
 
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
@@ -444,7 +448,8 @@ namespace GrassInteract
             this.colliderPool = this.colliderRoot.AddComponent<InstanceColliderPool>();
             this.colliderPool.Init(instLayer.PoolCap, layerDefaultMesh, instLayer.DefaultColliderConvex,
                 instLayer.DefaultColliderMaterial);
-            this.colliderPool.Prewarm(Mathf.Min(records.Length, instLayer.PoolCap));
+            // Small prewarm — lazy budgeted Acquire fills the rest progressively.
+            this.colliderPool.Prewarm(Mathf.Min(instLayer.MaxCollidersPerFrame, instLayer.PoolCap));
 
             int count           = records.Length;
             var positions       = new Vector3[count];
@@ -513,7 +518,8 @@ namespace GrassInteract
                     this.colliderPool,
                     sortedToAuthored,
                     positions, rotations, scales, meshes, convexFlags, wantsCollider, materials,
-                    instLayer.PoolCap);
+                    instLayer.PoolCap,
+                    instLayer.MaxCollidersPerFrame);
                 Debug.Log(
                     $"[InstancedPropEngine] GPU-readback collider driver: pool cap={instLayer.PoolCap}, " +
                     $"records={count}, sortedToAuthored.Length={sortedToAuthored.Length}.");
@@ -593,10 +599,14 @@ namespace GrassInteract
             cmd.CopyCounterValue(this.visibleLod1Buf, this.argsLod1Buf, ARGS_INSTANCE_COUNT_OFFSET);
             cmd.CopyCounterValue(this.visibleLod2Buf, this.argsLod2Buf, ARGS_INSTANCE_COUNT_OFFSET);
 
-            // Copy LOD0 counter to the driver's dedicated count buffer so the readback driver
-            // can read the exact LOD0 instance count without touching argsLod0Buf.
+            // Copy each LOD counter to the driver's dedicated count buffers so the readback
+            // driver can read exact per-band counts without touching the args buffers.
             if (this.colliderDriver?.Lod0CountBuffer != null)
                 cmd.CopyCounterValue(this.visibleLod0Buf, this.colliderDriver.Lod0CountBuffer, 0);
+            if (this.colliderDriver?.Lod1CountBuffer != null)
+                cmd.CopyCounterValue(this.visibleLod1Buf, this.colliderDriver.Lod1CountBuffer, 0);
+            if (this.colliderDriver?.Lod2CountBuffer != null)
+                cmd.CopyCounterValue(this.visibleLod2Buf, this.colliderDriver.Lod2CountBuffer, 0);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

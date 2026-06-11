@@ -10,16 +10,19 @@ namespace GrassInteract
     // InstanceVisibilityColliderDriver
     //
     // Drives InstanceColliderPool acquire/release from the GPU cull pipeline's
-    // LOD0 visible-index buffer via AsyncGPUReadback.  Replaces the removed
-    // InstanceFrustumCuller: no Camera.main dependency; exact parity with the
-    // visual render.
+    // LOD visible-index buffers via AsyncGPUReadback.  Covers all three LOD
+    // bands so colliders track every rendered instance at any distance.
     //
-    // Lifecycle: construct → Tick(visibleLod0Buf, lod0CountBuf) per frame
-    //            → Dispose when engine disposes.
+    // Two-phase readback per band per tick: Phase A reads a 1-uint count buffer
+    // (written each frame by CopyCounterValue in RecordFrameCommands); Phase B
+    // reads exactly count*4 bytes from the matching visible-index buffer.  All
+    // three band results are UNIONed into desiredActiveSet.  A generation token
+    // guards stale completions that arrive after Dispose.
     //
-    // Index-space: visibleLod0Buf contains chunk-sorted global indices.
-    // sortedToAuthored[globalIdx] maps them to authored (pool-keyed) record
-    // indices.  See ChunkedInstanceBuffer.SortedToAuthored.
+    // Acquire is amortised: every frame Tick() releases all dropped keys
+    // immediately, then acquires up to maxCollidersPerFrame NEW entries from
+    // desiredActiveSet.  This spreads MeshCollider cooking across frames to
+    // avoid a spawn hitch.
     // ──────────────────────────────────────────────────────────────────────────
 
     internal sealed class InstanceVisibilityColliderDriver : IDisposable
@@ -38,34 +41,42 @@ namespace GrassInteract
         private readonly bool[]                wantsCollider;
         private readonly PhysicsMaterial?[]    materials;
         private readonly int                   poolCap;
+        private readonly int                   maxCollidersPerFrame;
+
+        // ── Per-band count buffers (1-uint Raw; owned by this driver) ─────────
+        private GraphicsBuffer? lod0CountBuf;
+        private GraphicsBuffer? lod1CountBuf;
+        private GraphicsBuffer? lod2CountBuf;
 
         // ── Readback state ────────────────────────────────────────────────────
-        // Two-phase AsyncGPUReadback per tick: Phase A reads the 1-uint lod0CountBuf
-        // (written each frame by CopyCounterValue in RecordFrameCommands); Phase B reads
-        // exactly lod0Count uints from visibleLod0Buf.  A generation token guards stale
-        // completions that arrive after Dispose.
-
-        private GraphicsBuffer? lod0CountBuf; // 1-uint Raw buffer; owned by this driver
-
-        private int  generation;   // incremented on Dispose; guards stale callbacks
-        private bool countReadbackInFlight;
-        private bool indexReadbackInFlight;
-        private int  pendingLod0Count; // count received from phase-A, used to size phase-B request
+        private int  generation;        // incremented on Dispose; guards stale callbacks
         private int  frameCounter;
-
         private bool disposed;
         private bool warnedNoAsyncReadback;
+        private bool warnedOverCap;
+
+        // Counts how many band-readback rounds are still in-flight this tick.
+        // A new tick starts only when this reaches 0 (all three bands settled).
+        private int inFlightRounds;
+
+        // Per-band: pending count received from Phase A, used to size Phase B.
+        private int pendingCount0;
+        private int pendingCount1;
+        private int pendingCount2;
+
+        // ── Desired state (UNION of all LOD bands, updated by readbacks) ──────
+        // Updated only by readback callbacks; read every frame by Tick's acquire loop.
+        private readonly HashSet<int> desiredActiveSet = new(256);
 
         // ── Scratch (no per-frame alloc) ──────────────────────────────────────
-        private readonly HashSet<int> desiredActiveSet  = new(256);
-        private readonly List<int>    toRelease         = new(256);
+        private readonly List<int>    toRelease    = new(256);
+        private readonly List<int>    toAcquire    = new(256);
 
         // ── Construction ──────────────────────────────────────────────────────
 
-        /// <param name="pool">The collider pool to drive (kept unchanged).</param>
+        /// <param name="pool">The collider pool to drive.</param>
         /// <param name="sortedToAuthored">
-        ///   Permutation map from ChunkedInstanceBuffer: sortedToAuthored[sortedIdx] = authoredIdx.
-        ///   Length must equal the total baked instance count.
+        ///   Permutation from ChunkedInstanceBuffer: sortedToAuthored[sortedIdx] = authoredIdx.
         /// </param>
         /// <param name="positions">Authored-indexed world positions.</param>
         /// <param name="rotations">Authored-indexed rotations.</param>
@@ -74,7 +85,10 @@ namespace GrassInteract
         /// <param name="convex">Authored-indexed convex flags.</param>
         /// <param name="wantsCollider">Authored-indexed generateCollider flags.</param>
         /// <param name="materials">Authored-indexed physics materials.</param>
-        /// <param name="poolCap">Pool capacity (passed to cap warning logic).</param>
+        /// <param name="poolCap">Pool capacity (used for cap-warning logic).</param>
+        /// <param name="maxCollidersPerFrame">
+        ///   Max NEW colliders acquired per frame — amortises MeshCollider cooking.
+        /// </param>
         [UnityEngine.Scripting.Preserve]
         public InstanceVisibilityColliderDriver(
             InstanceColliderPool  pool,
@@ -86,41 +100,92 @@ namespace GrassInteract
             bool[]                convex,
             bool[]                wantsCollider,
             PhysicsMaterial?[]    materials,
-            int                   poolCap)
+            int                   poolCap,
+            int                   maxCollidersPerFrame = 8)
         {
-            this.pool              = pool              ?? throw new ArgumentNullException(nameof(pool));
-            this.sortedToAuthored  = sortedToAuthored  ?? throw new ArgumentNullException(nameof(sortedToAuthored));
-            this.positions         = positions         ?? throw new ArgumentNullException(nameof(positions));
-            this.rotations         = rotations         ?? throw new ArgumentNullException(nameof(rotations));
-            this.scales            = scales            ?? throw new ArgumentNullException(nameof(scales));
-            this.meshes            = meshes            ?? throw new ArgumentNullException(nameof(meshes));
-            this.convex            = convex            ?? throw new ArgumentNullException(nameof(convex));
-            this.wantsCollider     = wantsCollider     ?? throw new ArgumentNullException(nameof(wantsCollider));
-            this.materials         = materials         ?? throw new ArgumentNullException(nameof(materials));
-            this.poolCap           = Mathf.Max(1, poolCap);
+            this.pool                 = pool             ?? throw new ArgumentNullException(nameof(pool));
+            this.sortedToAuthored     = sortedToAuthored ?? throw new ArgumentNullException(nameof(sortedToAuthored));
+            this.positions            = positions        ?? throw new ArgumentNullException(nameof(positions));
+            this.rotations            = rotations        ?? throw new ArgumentNullException(nameof(rotations));
+            this.scales               = scales           ?? throw new ArgumentNullException(nameof(scales));
+            this.meshes               = meshes           ?? throw new ArgumentNullException(nameof(meshes));
+            this.convex               = convex           ?? throw new ArgumentNullException(nameof(convex));
+            this.wantsCollider        = wantsCollider    ?? throw new ArgumentNullException(nameof(wantsCollider));
+            this.materials            = materials        ?? throw new ArgumentNullException(nameof(materials));
+            this.poolCap              = Mathf.Max(1, poolCap);
+            this.maxCollidersPerFrame = Mathf.Max(1, maxCollidersPerFrame);
 
-            // Allocate the 1-uint count buffer owned by this driver.
+            // Allocate the 1-uint count buffers owned by this driver (one per LOD band).
             this.lod0CountBuf = new GraphicsBuffer(GraphicsBuffer.Target.Raw, 1, sizeof(uint));
+            this.lod1CountBuf = new GraphicsBuffer(GraphicsBuffer.Target.Raw, 1, sizeof(uint));
+            this.lod2CountBuf = new GraphicsBuffer(GraphicsBuffer.Target.Raw, 1, sizeof(uint));
         }
 
-        // ── Count-buffer accessor for RecordFrameCommands ─────────────────────
+        // ── Count-buffer accessors for RecordFrameCommands ────────────────────
 
-        /// <summary>
-        /// The 1-uint Raw buffer into which the engine must write
-        /// <c>CopyCounterValue(visibleLod0Buf, Lod0CountBuffer, 0)</c> each frame.
-        /// </summary>
+        /// <summary>1-uint Raw buffer; engine writes CopyCounterValue(visibleLod0Buf, …) each frame.</summary>
         public GraphicsBuffer? Lod0CountBuffer => this.lod0CountBuf;
 
-        // ── Tick (called from InstancedPropEngine.Submit) ─────────────────────
+        /// <summary>1-uint Raw buffer; engine writes CopyCounterValue(visibleLod1Buf, …) each frame.</summary>
+        public GraphicsBuffer? Lod1CountBuffer => this.lod1CountBuf;
+
+        /// <summary>1-uint Raw buffer; engine writes CopyCounterValue(visibleLod2Buf, …) each frame.</summary>
+        public GraphicsBuffer? Lod2CountBuffer => this.lod2CountBuf;
+
+        // ── Tick (called from InstancedPropEngine.Submit every frame) ─────────
 
         /// <summary>
-        /// Issues a throttled AsyncGPUReadback of the LOD0 visible-index buffer.
-        /// Must be called AFTER <c>Graphics.ExecuteCommandBuffer</c> so the GPU
-        /// cull results are committed.
+        /// Every-frame method:
+        ///   1. Release active colliders no longer in <c>desiredActiveSet</c> (all at once).
+        ///   2. Acquire up to <c>maxCollidersPerFrame</c> new entries from <c>desiredActiveSet</c>.
+        ///   3. Throttled: kick a new 3-band AsyncGPUReadback round every TICK_INTERVAL_FRAMES frames
+        ///      (only when the previous round has fully settled) to refresh <c>desiredActiveSet</c>.
+        ///
+        /// Must be called AFTER <c>Graphics.ExecuteCommandBuffer</c> so GPU cull results are committed.
         /// </summary>
-        public void Tick(GraphicsBuffer visibleLod0Buf)
+        public void Tick(
+            GraphicsBuffer visibleLod0Buf,
+            GraphicsBuffer visibleLod1Buf,
+            GraphicsBuffer visibleLod2Buf)
         {
             if (this.disposed) return;
+
+            // ── A. Every-frame acquire/release from current desiredActiveSet ──
+
+            // Release dropped: keys active but not in desiredSet.
+            this.toRelease.Clear();
+            foreach (int key in this.pool.ActiveKeys)
+            {
+                if (!this.desiredActiveSet.Contains(key))
+                    this.toRelease.Add(key);
+            }
+            foreach (int key in this.toRelease)
+                this.pool.Release(key);
+
+            // Acquire new: desired but not yet active, up to maxCollidersPerFrame.
+            this.toAcquire.Clear();
+            foreach (int authoredIdx in this.desiredActiveSet)
+            {
+                if (!this.pool.IsActive(authoredIdx))
+                    this.toAcquire.Add(authoredIdx);
+            }
+
+            int acquired = 0;
+            foreach (int authoredIdx in this.toAcquire)
+            {
+                if (acquired >= this.maxCollidersPerFrame) break;
+                this.pool.Acquire(
+                    authoredIdx,
+                    this.positions[authoredIdx],
+                    this.rotations[authoredIdx],
+                    this.scales[authoredIdx],
+                    this.meshes[authoredIdx],
+                    this.convex[authoredIdx],
+                    this.materials[authoredIdx]);
+                acquired++;
+            }
+
+            // ── B. Throttled: kick new readback round to refresh desiredActiveSet ──
 
             if (!SystemInfo.supportsAsyncGPUReadback)
             {
@@ -128,85 +193,107 @@ namespace GrassInteract
                 {
                     Debug.LogWarning(
                         "[InstanceVisibilityColliderDriver] AsyncGPUReadback is not supported on this " +
-                        "platform. Per-instance collider culling will be skipped. " +
-                        "Enable colliders without culling to use them on this hardware.");
+                        "platform. Per-instance collider culling will be skipped.");
                     this.warnedNoAsyncReadback = true;
                 }
                 return;
             }
 
-            // Throttle: only kick a new readback every N frames, and only when no readback is in-flight.
             this.frameCounter++;
             if ((this.frameCounter % TICK_INTERVAL_FRAMES) != 0) return;
-            if (this.countReadbackInFlight || this.indexReadbackInFlight) return;
-            if (this.lod0CountBuf == null) return;
+            if (this.inFlightRounds > 0) return; // previous round still in flight
+            if (this.lod0CountBuf == null || this.lod1CountBuf == null || this.lod2CountBuf == null) return;
 
-            // Capture generation snapshot for stale-completion guard.
-            int capturedGeneration = this.generation;
+            // Start a new round: desiredActiveSet is cleared here; each band ORs its results in.
+            this.desiredActiveSet.Clear();
+            this.inFlightRounds = 3; // three bands to settle
 
-            // Phase A: readback the 1-uint count buffer (4 bytes).
-            this.countReadbackInFlight = true;
-            AsyncGPUReadback.Request(this.lod0CountBuf, 4, 0, req =>
+            int capturedGen = this.generation;
+
+            this.KickBandReadback(capturedGen, this.lod0CountBuf, visibleLod0Buf, ref this.pendingCount0);
+            this.KickBandReadback(capturedGen, this.lod1CountBuf, visibleLod1Buf, ref this.pendingCount1);
+            this.KickBandReadback(capturedGen, this.lod2CountBuf, visibleLod2Buf, ref this.pendingCount2);
+        }
+
+        // ── Single-band two-phase readback ────────────────────────────────────
+
+        private void KickBandReadback(
+            int            capturedGen,
+            GraphicsBuffer countBuf,
+            GraphicsBuffer indexBuf,
+            ref int        pendingCountRef)
+        {
+            // Capture the ref value into a local for use inside the closure.
+            // The ref itself cannot be captured by a lambda, so we route via a
+            // band-specific field (pendingCount0/1/2) assigned before the Phase-B
+            // closure fires.  We use a local index alias here for the closure.
+            GraphicsBuffer capturedIndexBuf = indexBuf;
+
+            AsyncGPUReadback.Request(countBuf, 4, 0, countReq =>
             {
-                // Stale-completion guard: if Dispose was called since this request was issued, discard.
-                if (capturedGeneration != this.generation) return;
-                if (req.hasError)
+                if (capturedGen != this.generation)
                 {
-                    this.countReadbackInFlight = false;
+                    // Stale: still counts as settled.
+                    this.inFlightRounds--;
+                    return;
+                }
+                if (countReq.hasError)
+                {
+                    this.inFlightRounds--;
                     return;
                 }
 
-                Unity.Collections.NativeArray<uint> countData =
-                    req.GetData<uint>(0);
+                Unity.Collections.NativeArray<uint> countData = countReq.GetData<uint>(0);
                 uint rawCount = countData.Length > 0 ? countData[0] : 0u;
-                int lod0Count = (int)Mathf.Min((float)rawCount, (float)this.poolCap);
-                this.countReadbackInFlight = false;
+                int bandCount = (int)Mathf.Min((float)rawCount, (float)this.poolCap);
 
-                if (lod0Count <= 0)
+                if (bandCount <= 0)
                 {
-                    // No LOD0 instances visible — release all active colliders.
-                    this.pool.ReleaseAll();
+                    // No instances in this band — band settles with no additions to desiredSet.
+                    this.inFlightRounds--;
                     return;
                 }
 
-                // Phase B: readback exactly lod0Count uints from the index buffer.
-                int byteCount = lod0Count * sizeof(uint);
-                this.pendingLod0Count      = lod0Count;
-                this.indexReadbackInFlight = true;
-                int capturedGenB           = this.generation;
+                // Phase B: read exactly bandCount uints from the index buffer.
+                int    byteCount   = bandCount * sizeof(uint);
+                int    capturedCount = bandCount;
+                int    capturedGen2  = this.generation;
 
-                AsyncGPUReadback.Request(visibleLod0Buf, byteCount, 0, idxReq =>
+                AsyncGPUReadback.Request(capturedIndexBuf, byteCount, 0, idxReq =>
                 {
-                    if (capturedGenB != this.generation) return;
-                    this.indexReadbackInFlight = false;
-                    if (idxReq.hasError) return;
+                    if (capturedGen2 != this.generation)
+                    {
+                        this.inFlightRounds--;
+                        return;
+                    }
+                    if (idxReq.hasError)
+                    {
+                        this.inFlightRounds--;
+                        return;
+                    }
 
-                    Unity.Collections.NativeArray<uint> idxData =
-                        idxReq.GetData<uint>(0);
-                    this.ApplyVisibleSet(idxData, this.pendingLod0Count);
+                    Unity.Collections.NativeArray<uint> idxData = idxReq.GetData<uint>(0);
+                    this.MergeVisibleBand(idxData, capturedCount);
+                    this.inFlightRounds--;
                 });
             });
         }
 
-        // ── Map/diff core (also callable from unit tests without a GPU) ───────
+        // ── Merge a band's visible indices into desiredActiveSet ──────────────
 
         /// <summary>
-        /// Applies a visible-index set to the pool: acquires newly-visible records,
-        /// releases records that are no longer visible.
-        ///
-        /// Exposed as <c>internal</c> so EditMode unit tests can inject a fake
-        /// visible-index list and verify the acquire/release logic without a GPU.
+        /// Maps each GPU global index from a single LOD band into an authored record index
+        /// and adds it to <c>desiredActiveSet</c> (union).  Called from Phase-B readback
+        /// callbacks; thread-safe by Unity's guarantee that readback callbacks fire on the
+        /// main thread.
         /// </summary>
-        internal void ApplyVisibleSet(
+        private void MergeVisibleBand(
             Unity.Collections.NativeArray<uint> visibleIndices,
             int count)
         {
-            this.desiredActiveSet.Clear();
+            int totalSorted = this.sortedToAuthored.Length;
+            int wantsCount  = this.wantsCollider.Length;
 
-            int totalSorted   = this.sortedToAuthored.Length;
-            int wantsCount    = this.wantsCollider.Length;
-
-            // Build desired set: map each GPU global idx → authored record idx.
             for (int i = 0; i < count && i < visibleIndices.Length; ++i)
             {
                 uint globalIdx = visibleIndices[i];
@@ -216,10 +303,106 @@ namespace GrassInteract
                 if (authoredIdx < 0 || authoredIdx >= wantsCount) continue;
                 if (!this.wantsCollider[authoredIdx]) continue;
 
-                this.desiredActiveSet.Add(authoredIdx);
+                if (this.desiredActiveSet.Count < this.poolCap)
+                {
+                    this.desiredActiveSet.Add(authoredIdx);
+                }
+                else if (!this.desiredActiveSet.Contains(authoredIdx))
+                {
+                    // Desired set already at cap: warn once and stop adding.
+                    if (!this.warnedOverCap)
+                    {
+                        Debug.LogWarning(
+                            $"[InstanceVisibilityColliderDriver] Desired collider count exceeds pool cap " +
+                            $"({this.poolCap}). Excess instances will not get colliders. " +
+                            "Raise PoolCap to remove this limit.");
+                        this.warnedOverCap = true;
+                    }
+                }
+            }
+        }
+
+        // ── Test entry points (GPU-free) ──────────────────────────────────────
+
+        /// <summary>
+        /// Directly refreshes <c>desiredActiveSet</c> from a plain uint array
+        /// (one band) and immediately runs one acquire/release pass.
+        /// Used by EditMode unit tests to bypass AsyncGPUReadback.
+        /// </summary>
+        internal void ApplyVisibleSetFromArray(uint[] visibleIndices, int count)
+        {
+            int safeCount = Mathf.Clamp(count, 0, visibleIndices.Length);
+
+            // Rebuild desired set from this single band.
+            this.desiredActiveSet.Clear();
+
+            if (safeCount > 0)
+            {
+                var temp = new Unity.Collections.NativeArray<uint>(
+                    safeCount, Unity.Collections.Allocator.Temp,
+                    Unity.Collections.NativeArrayOptions.UninitializedMemory);
+                for (int i = 0; i < safeCount; ++i)
+                    temp[i] = visibleIndices[i];
+                try
+                {
+                    this.MergeVisibleBand(temp, safeCount);
+                }
+                finally
+                {
+                    temp.Dispose();
+                }
             }
 
-            // Acquire newly-visible.
+            // Apply immediately (no per-frame budget in test path — acquire all at once).
+            this.ApplyDesiredSetNow();
+        }
+
+        /// <summary>
+        /// Merges multiple bands into <c>desiredActiveSet</c> then applies immediately.
+        /// Used by EditMode unit tests for the 3-band union scenario.
+        /// </summary>
+        internal void ApplyThreeBandsFromArrays(
+            uint[] band0, int count0,
+            uint[] band1, int count1,
+            uint[] band2, int count2)
+        {
+            this.desiredActiveSet.Clear();
+            this.MergeFromArray(band0, count0);
+            this.MergeFromArray(band1, count1);
+            this.MergeFromArray(band2, count2);
+            this.ApplyDesiredSetNow();
+        }
+
+        private void MergeFromArray(uint[] arr, int count)
+        {
+            int safeCount = Mathf.Clamp(count, 0, arr.Length);
+            if (safeCount == 0) return;
+            var temp = new Unity.Collections.NativeArray<uint>(
+                safeCount, Unity.Collections.Allocator.Temp,
+                Unity.Collections.NativeArrayOptions.UninitializedMemory);
+            for (int i = 0; i < safeCount; ++i)
+                temp[i] = arr[i];
+            try   { this.MergeVisibleBand(temp, safeCount); }
+            finally { temp.Dispose(); }
+        }
+
+        /// <summary>
+        /// Applies desiredActiveSet to the pool immediately (no per-frame budget).
+        /// Used by test paths where we want to see the full result in one call.
+        /// </summary>
+        private void ApplyDesiredSetNow()
+        {
+            // Release dropped.
+            this.toRelease.Clear();
+            foreach (int key in this.pool.ActiveKeys)
+            {
+                if (!this.desiredActiveSet.Contains(key))
+                    this.toRelease.Add(key);
+            }
+            foreach (int key in this.toRelease)
+                this.pool.Release(key);
+
+            // Acquire all desired (no per-frame cap in test path).
             foreach (int authoredIdx in this.desiredActiveSet)
             {
                 this.pool.Acquire(
@@ -231,9 +414,28 @@ namespace GrassInteract
                     this.convex[authoredIdx],
                     this.materials[authoredIdx]);
             }
+        }
 
-            // Release records no longer visible.
-            // Collect to avoid mutating pool.active while iterating (pool exposes Release by key).
+        // ── Test helpers (internal, not called from runtime paths) ───────────
+
+        /// <summary>
+        /// Sets desiredActiveSet directly from a uint array without going through GPU.
+        /// Used by unit tests to prime the desired state before calling TickAcquireRelease.
+        /// </summary>
+        internal void SetDesiredSetForTest(uint[] visibleIndices, int count)
+        {
+            this.desiredActiveSet.Clear();
+            this.MergeFromArray(visibleIndices, count);
+        }
+
+        /// <summary>
+        /// Runs exactly one acquire/release pass using the current desiredActiveSet
+        /// and the configured maxCollidersPerFrame budget.
+        /// Used by unit tests to step the budgeted acquire logic frame-by-frame.
+        /// </summary>
+        internal void TickAcquireRelease()
+        {
+            // Release dropped.
             this.toRelease.Clear();
             foreach (int key in this.pool.ActiveKeys)
             {
@@ -242,39 +444,28 @@ namespace GrassInteract
             }
             foreach (int key in this.toRelease)
                 this.pool.Release(key);
-        }
 
-        /// <summary>
-        /// Overload accepting a plain array of uint — convenience for unit tests.
-        /// Allocates a temporary NativeArray (Allocator.Temp) and copies, then disposes.
-        /// </summary>
-        internal void ApplyVisibleSetFromArray(uint[] visibleIndices, int count)
-        {
-            int safeCount = Mathf.Clamp(count, 0, visibleIndices.Length);
-            if (safeCount == 0)
+            // Acquire new up to budget.
+            this.toAcquire.Clear();
+            foreach (int authoredIdx in this.desiredActiveSet)
             {
-                // Empty visible set: release all and return.
-                this.desiredActiveSet.Clear();
-                this.toRelease.Clear();
-                foreach (int key in this.pool.ActiveKeys)
-                    this.toRelease.Add(key);
-                foreach (int key in this.toRelease)
-                    this.pool.Release(key);
-                return;
+                if (!this.pool.IsActive(authoredIdx))
+                    this.toAcquire.Add(authoredIdx);
             }
 
-            var temp = new Unity.Collections.NativeArray<uint>(
-                safeCount, Unity.Collections.Allocator.Temp,
-                Unity.Collections.NativeArrayOptions.UninitializedMemory);
-            for (int i = 0; i < safeCount; ++i)
-                temp[i] = visibleIndices[i];
-            try
+            int acquired = 0;
+            foreach (int authoredIdx in this.toAcquire)
             {
-                this.ApplyVisibleSet(temp, safeCount);
-            }
-            finally
-            {
-                temp.Dispose();
+                if (acquired >= this.maxCollidersPerFrame) break;
+                this.pool.Acquire(
+                    authoredIdx,
+                    this.positions[authoredIdx],
+                    this.rotations[authoredIdx],
+                    this.scales[authoredIdx],
+                    this.meshes[authoredIdx],
+                    this.convex[authoredIdx],
+                    this.materials[authoredIdx]);
+                acquired++;
             }
         }
 
@@ -286,17 +477,17 @@ namespace GrassInteract
             this.disposed = true;
 
             // Increment generation so any in-flight callbacks discard their results
-            // when they fire after the drain below.
+            // when they fire during or after the drain below.
             this.generation++;
 
-            // Drain all in-flight native GPU transfers before releasing buffers.
-            // Without this, visibleLod0Buf (owned by the engine) and lod0CountBuf
-            // (owned by this driver) can be Release()d while the DMA is still reading
-            // them — undefined behaviour at the native layer.
+            // Drain ALL in-flight native GPU transfers before releasing any buffer.
+            // This covers lod0/1/2 CountBufs (owned here) and the three visibleLodNBufs
+            // (owned by the engine, released after this Dispose returns).
             AsyncGPUReadback.WaitAllRequests();
 
-            this.lod0CountBuf?.Release();
-            this.lod0CountBuf = null;
+            this.lod0CountBuf?.Release(); this.lod0CountBuf = null;
+            this.lod1CountBuf?.Release(); this.lod1CountBuf = null;
+            this.lod2CountBuf?.Release(); this.lod2CountBuf = null;
 
             // Release all active colliders.
             this.pool.ReleaseAll();

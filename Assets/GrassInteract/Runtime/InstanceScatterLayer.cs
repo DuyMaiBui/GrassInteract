@@ -58,6 +58,9 @@ namespace GrassInteract
                  "Mesh = per-record override if set, else DefaultColliderMesh.")]
         [SerializeField] private bool generateColliders = false;
 
+        [Tooltip("Max NEW colliders created per frame — amortizes MeshCollider cooking to avoid a spawn hitch. Lower = smoother but slower to fill in.")]
+        [SerializeField] private int maxCollidersPerFrame = 8;
+
         [Tooltip("Fallback collider mesh when a record's colliderOverride is null.")]
         [SerializeField] private Mesh? defaultColliderMesh;
 
@@ -137,6 +140,9 @@ namespace GrassInteract
 
         /// <summary>Generate a pooled, visibility-culled collider for every instance at runtime.</summary>
         public bool GenerateColliders => this.generateColliders;
+
+        /// <summary>Max NEW colliders created per frame to amortise MeshCollider cooking.</summary>
+        public int MaxCollidersPerFrame => Mathf.Max(1, this.maxCollidersPerFrame);
 
         /// <summary>Use the GPU LOD0 visibility buffer to cull colliders.</summary>
         public bool CullColliders => this.cullColliders;

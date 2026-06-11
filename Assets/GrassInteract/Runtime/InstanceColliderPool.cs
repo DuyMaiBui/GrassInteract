@@ -63,6 +63,9 @@ namespace GrassInteract
         /// </summary>
         public Dictionary<int, MeshCollider>.KeyCollection ActiveKeys => this.active.Keys;
 
+        /// <summary>Returns true when record <paramref name="key"/> currently has an active collider.</summary>
+        public bool IsActive(int key) => this.active.ContainsKey(key);
+
         /// <summary>
         /// Acquires a pooled <see cref="MeshCollider"/> and positions it for record
         /// <paramref name="recordIdx"/>. Returns null if the pool is at capacity (one warning logged

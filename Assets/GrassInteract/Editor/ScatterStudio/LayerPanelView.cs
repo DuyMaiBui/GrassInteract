@@ -93,7 +93,7 @@ namespace GrassInteract.Editor
                 this.AddFoldoutCard("Anchor", "anchorOffsetLocal");
                 this.AddFoldoutCard("Instance", "authoredInstances",
                     "overrideScaleRange", "scaleRangeOverride");
-                this.AddFoldoutCard("Collider", "generateColliders",
+                this.AddFoldoutCard("Collider", "generateColliders", "maxCollidersPerFrame",
                     "defaultColliderMesh", "defaultColliderConvex",
                     "defaultColliderMaterial", "defaultColliderScale",
                     "poolColliders", "poolCap", "cullColliders");
