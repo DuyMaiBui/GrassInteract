@@ -375,6 +375,65 @@ namespace GrassInteract.Tests
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // Test 11 (regression): double-buffer invariant.
+        // Verifies that colliders acquired from a fully-settled round are NOT
+        // released during the async gap of the next round (i.e. after
+        // BeginRoundForTest() clears pendingSet but before any band settles).
+        //
+        // Without the fix (single desiredActiveSet cleared at round start):
+        //   BeginRoundForTest() would clear desiredActiveSet → TickAcquireRelease
+        //   would release everything → test would fail at the mid-round assertion.
+        //
+        // With the fix (double-buffer):
+        //   BeginRoundForTest() clears only pendingSet. desiredActiveSet keeps the
+        //   prior settled state → TickAcquireRelease sees the full prior set → no
+        //   release occurs → test passes. Once all bands settle via SettleBandForTest
+        //   the commit fires and the updated set is visible.
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Test]
+        public void DoubleBuffer_NoReleaseAllDuringAsyncGap()
+        {
+            var (go, pool) = MakePool(cap: 10);
+            try
+            {
+                int[] map    = { 0, 1, 2, 3, 4, 5 };
+                var   driver = MakeDriver(pool, map);
+
+                // Settle round 1: all 6 visible → all 6 acquired.
+                driver.ApplyVisibleSetFromArray(new uint[] { 0u, 1u, 2u, 3u, 4u, 5u }, 6);
+                Assert.AreEqual(6, pool.ActiveKeys.Count, "after round 1: all 6 active");
+
+                // Begin round 2 (simulates the async gap: pendingSet cleared, inFlightRounds=3,
+                // but desiredActiveSet still holds the round-1 result).
+                driver.BeginRoundForTest();
+
+                // Mid-round Tick section-A: desiredActiveSet is unchanged → no releases.
+                driver.TickAcquireRelease();
+                Assert.AreEqual(6, pool.ActiveKeys.Count,
+                    "mid-round: desiredActiveSet still holds prior round → no release-all");
+
+                // Settle all 3 bands of round 2: only {0,1} visible now.
+                driver.SettleBandForTest(new uint[] { 0u, 1u }, 2); // band0: 2 entries
+                driver.SettleBandForTest(new uint[] { },         0); // band1: empty
+                driver.SettleBandForTest(new uint[] { },         0); // band2: empty
+                // inFlightRounds reached 0 → commit: desiredActiveSet = {0,1}
+
+                // One more Tick section-A: should now release 4 and keep 2.
+                driver.TickAcquireRelease();
+                Assert.AreEqual(2, pool.ActiveKeys.Count,
+                    "post-round-2 commit: only 2 records in new desired set");
+                Assert.IsTrue (Contains(pool.ActiveKeys, 0), "authored 0 still active");
+                Assert.IsTrue (Contains(pool.ActiveKeys, 1), "authored 1 still active");
+                Assert.IsFalse(Contains(pool.ActiveKeys, 2), "authored 2 released after commit");
+                Assert.IsFalse(Contains(pool.ActiveKeys, 5), "authored 5 released after commit");
+
+                driver.Dispose();
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Helper: safe Contains for KeyCollection without LINQ.
         // ─────────────────────────────────────────────────────────────────────
 

@@ -16,13 +16,18 @@ namespace GrassInteract
     // Two-phase readback per band per tick: Phase A reads a 1-uint count buffer
     // (written each frame by CopyCounterValue in RecordFrameCommands); Phase B
     // reads exactly count*4 bytes from the matching visible-index buffer.  All
-    // three band results are UNIONed into desiredActiveSet.  A generation token
-    // guards stale completions that arrive after Dispose.
+    // three band results are UNIONed into pendingSet.  Once all three bands
+    // settle, pendingSet is atomically committed to desiredActiveSet via
+    // OnBandSettled().  A generation token guards stale completions after Dispose.
+    //
+    // Double-buffer invariant: desiredActiveSet is ONLY mutated by the atomic
+    // commit in OnBandSettled().  Tick's section-A (release/acquire) reads
+    // desiredActiveSet every frame without risk of observing a partially-filled
+    // set — it always sees the last fully-settled round.
     //
     // Acquire is amortised: every frame Tick() releases all dropped keys
     // immediately, then acquires up to maxCollidersPerFrame NEW entries from
-    // desiredActiveSet.  This spreads MeshCollider cooking across frames to
-    // avoid a spawn hitch.
+    // desiredActiveSet.  This spreads MeshCollider cooking across frames.
     // ──────────────────────────────────────────────────────────────────────────
 
     internal sealed class InstanceVisibilityColliderDriver : IDisposable
@@ -55,22 +60,26 @@ namespace GrassInteract
         private bool warnedNoAsyncReadback;
         private bool warnedOverCap;
 
-        // Counts how many band-readback rounds are still in-flight this tick.
-        // A new tick starts only when this reaches 0 (all three bands settled).
+        // Counts how many band callbacks are still outstanding for the current round.
+        // A new round starts only when this reaches 0 (all three bands settled).
         private int inFlightRounds;
 
-        // Per-band: pending count received from Phase A, used to size Phase B.
-        private int pendingCount0;
-        private int pendingCount1;
-        private int pendingCount2;
+        // ── Double-buffered desired state ─────────────────────────────────────
+        //
+        // pendingSet    : written ONLY by MergeVisibleBand during an in-flight round.
+        //                 Cleared at round-start. Never read by Tick section-A.
+        //
+        // desiredActiveSet : ONLY mutated by the atomic commit in OnBandSettled()
+        //                    when inFlightRounds reaches 0. Read every frame by
+        //                    Tick section-A (release/acquire loop).  Always holds
+        //                    the last complete round — never partially-filled.
 
-        // ── Desired state (UNION of all LOD bands, updated by readbacks) ──────
-        // Updated only by readback callbacks; read every frame by Tick's acquire loop.
+        private readonly HashSet<int> pendingSet      = new(256);
         private readonly HashSet<int> desiredActiveSet = new(256);
 
         // ── Scratch (no per-frame alloc) ──────────────────────────────────────
-        private readonly List<int>    toRelease    = new(256);
-        private readonly List<int>    toAcquire    = new(256);
+        private readonly List<int> toRelease = new(256);
+        private readonly List<int> toAcquire = new(256);
 
         // ── Construction ──────────────────────────────────────────────────────
 
@@ -136,10 +145,12 @@ namespace GrassInteract
 
         /// <summary>
         /// Every-frame method:
-        ///   1. Release active colliders no longer in <c>desiredActiveSet</c> (all at once).
-        ///   2. Acquire up to <c>maxCollidersPerFrame</c> new entries from <c>desiredActiveSet</c>.
-        ///   3. Throttled: kick a new 3-band AsyncGPUReadback round every TICK_INTERVAL_FRAMES frames
-        ///      (only when the previous round has fully settled) to refresh <c>desiredActiveSet</c>.
+        ///   A. Release active colliders no longer in <c>desiredActiveSet</c> (all at once).
+        ///      Acquire up to <c>maxCollidersPerFrame</c> new entries from <c>desiredActiveSet</c>.
+        ///      desiredActiveSet is the last FULLY SETTLED round — never partially-filled.
+        ///   B. Throttled: kick a new 3-band AsyncGPUReadback round every TICK_INTERVAL_FRAMES
+        ///      frames (only when the previous round has fully settled).  Results land in
+        ///      pendingSet and are atomically committed to desiredActiveSet by OnBandSettled().
         ///
         /// Must be called AFTER <c>Graphics.ExecuteCommandBuffer</c> so GPU cull results are committed.
         /// </summary>
@@ -151,8 +162,11 @@ namespace GrassInteract
             if (this.disposed) return;
 
             // ── A. Every-frame acquire/release from current desiredActiveSet ──
+            // desiredActiveSet is always the last complete round — reading it here is safe
+            // even when a new round is in flight, because the in-flight round writes only
+            // pendingSet and commits atomically to desiredActiveSet in OnBandSettled().
 
-            // Release dropped: keys active but not in desiredSet.
+            // Release dropped: keys active but not in desiredActiveSet.
             this.toRelease.Clear();
             foreach (int key in this.pool.ActiveKeys)
             {
@@ -201,18 +215,19 @@ namespace GrassInteract
 
             this.frameCounter++;
             if ((this.frameCounter % TICK_INTERVAL_FRAMES) != 0) return;
-            if (this.inFlightRounds > 0) return; // previous round still in flight
+            if (this.inFlightRounds > 0) return; // previous round still settling
             if (this.lod0CountBuf == null || this.lod1CountBuf == null || this.lod2CountBuf == null) return;
 
-            // Start a new round: desiredActiveSet is cleared here; each band ORs its results in.
-            this.desiredActiveSet.Clear();
-            this.inFlightRounds = 3; // three bands to settle
+            // Start a new round: clear pendingSet (NOT desiredActiveSet).
+            // desiredActiveSet keeps the previous settled state until all bands land.
+            this.pendingSet.Clear();
+            this.inFlightRounds = 3; // three bands; each decrements via OnBandSettled()
 
             int capturedGen = this.generation;
 
-            this.KickBandReadback(capturedGen, this.lod0CountBuf, visibleLod0Buf, ref this.pendingCount0);
-            this.KickBandReadback(capturedGen, this.lod1CountBuf, visibleLod1Buf, ref this.pendingCount1);
-            this.KickBandReadback(capturedGen, this.lod2CountBuf, visibleLod2Buf, ref this.pendingCount2);
+            this.KickBandReadback(capturedGen, this.lod0CountBuf, visibleLod0Buf);
+            this.KickBandReadback(capturedGen, this.lod1CountBuf, visibleLod1Buf);
+            this.KickBandReadback(capturedGen, this.lod2CountBuf, visibleLod2Buf);
         }
 
         // ── Single-band two-phase readback ────────────────────────────────────
@@ -220,72 +235,60 @@ namespace GrassInteract
         private void KickBandReadback(
             int            capturedGen,
             GraphicsBuffer countBuf,
-            GraphicsBuffer indexBuf,
-            ref int        pendingCountRef)
+            GraphicsBuffer indexBuf)
         {
-            // Capture the ref value into a local for use inside the closure.
-            // The ref itself cannot be captured by a lambda, so we route via a
-            // band-specific field (pendingCount0/1/2) assigned before the Phase-B
-            // closure fires.  We use a local index alias here for the closure.
             GraphicsBuffer capturedIndexBuf = indexBuf;
 
             AsyncGPUReadback.Request(countBuf, 4, 0, countReq =>
             {
-                if (capturedGen != this.generation)
-                {
-                    // Stale: still counts as settled.
-                    this.inFlightRounds--;
-                    return;
-                }
-                if (countReq.hasError)
-                {
-                    this.inFlightRounds--;
-                    return;
-                }
+                if (capturedGen != this.generation) { this.OnBandSettled(); return; }
+                if (countReq.hasError)              { this.OnBandSettled(); return; }
 
                 Unity.Collections.NativeArray<uint> countData = countReq.GetData<uint>(0);
-                uint rawCount = countData.Length > 0 ? countData[0] : 0u;
-                int bandCount = (int)Mathf.Min((float)rawCount, (float)this.poolCap);
+                uint rawCount  = countData.Length > 0 ? countData[0] : 0u;
+                int  bandCount = (int)Mathf.Min((float)rawCount, (float)this.poolCap);
 
-                if (bandCount <= 0)
+                if (bandCount <= 0) { this.OnBandSettled(); return; }
+
+                int capturedCount = bandCount;
+                int capturedGen2  = this.generation;
+
+                AsyncGPUReadback.Request(capturedIndexBuf, bandCount * sizeof(uint), 0, idxReq =>
                 {
-                    // No instances in this band — band settles with no additions to desiredSet.
-                    this.inFlightRounds--;
-                    return;
-                }
-
-                // Phase B: read exactly bandCount uints from the index buffer.
-                int    byteCount   = bandCount * sizeof(uint);
-                int    capturedCount = bandCount;
-                int    capturedGen2  = this.generation;
-
-                AsyncGPUReadback.Request(capturedIndexBuf, byteCount, 0, idxReq =>
-                {
-                    if (capturedGen2 != this.generation)
-                    {
-                        this.inFlightRounds--;
-                        return;
-                    }
-                    if (idxReq.hasError)
-                    {
-                        this.inFlightRounds--;
-                        return;
-                    }
+                    if (capturedGen2 != this.generation) { this.OnBandSettled(); return; }
+                    if (idxReq.hasError)                 { this.OnBandSettled(); return; }
 
                     Unity.Collections.NativeArray<uint> idxData = idxReq.GetData<uint>(0);
                     this.MergeVisibleBand(idxData, capturedCount);
-                    this.inFlightRounds--;
+                    this.OnBandSettled();
                 });
             });
         }
 
-        // ── Merge a band's visible indices into desiredActiveSet ──────────────
+        // ── Settle hook — called at every band-callback exit path ─────────────
 
         /// <summary>
-        /// Maps each GPU global index from a single LOD band into an authored record index
-        /// and adds it to <c>desiredActiveSet</c> (union).  Called from Phase-B readback
-        /// callbacks; thread-safe by Unity's guarantee that readback callbacks fire on the
-        /// main thread.
+        /// Decrements <c>inFlightRounds</c>. When it reaches 0 (all three bands for
+        /// this round have settled), atomically commits <c>pendingSet</c> into
+        /// <c>desiredActiveSet</c>.  This is the ONLY place desiredActiveSet is mutated.
+        /// </summary>
+        private void OnBandSettled()
+        {
+            this.inFlightRounds--;
+            if (this.inFlightRounds > 0) return;
+
+            // All three bands settled — commit the new desired state atomically.
+            this.desiredActiveSet.Clear();
+            this.desiredActiveSet.UnionWith(this.pendingSet); // alloc-free
+        }
+
+        // ── Merge a band's visible indices into pendingSet ────────────────────
+
+        /// <summary>
+        /// Maps each GPU global index from a single LOD band into an authored record
+        /// index and adds it to <c>pendingSet</c> (union-in-progress for this round).
+        /// Called only from Phase-B readback callbacks; Unity guarantees callbacks fire
+        /// on the main thread.
         /// </summary>
         private void MergeVisibleBand(
             Unity.Collections.NativeArray<uint> visibleIndices,
@@ -303,13 +306,12 @@ namespace GrassInteract
                 if (authoredIdx < 0 || authoredIdx >= wantsCount) continue;
                 if (!this.wantsCollider[authoredIdx]) continue;
 
-                if (this.desiredActiveSet.Count < this.poolCap)
+                if (this.pendingSet.Count < this.poolCap)
                 {
-                    this.desiredActiveSet.Add(authoredIdx);
+                    this.pendingSet.Add(authoredIdx);
                 }
-                else if (!this.desiredActiveSet.Contains(authoredIdx))
+                else if (!this.pendingSet.Contains(authoredIdx))
                 {
-                    // Desired set already at cap: warn once and stop adding.
                     if (!this.warnedOverCap)
                     {
                         Debug.LogWarning(
@@ -322,43 +324,24 @@ namespace GrassInteract
             }
         }
 
-        // ── Test entry points (GPU-free) ──────────────────────────────────────
+        // ── Test entry points (GPU-free, internal) ────────────────────────────
 
         /// <summary>
-        /// Directly refreshes <c>desiredActiveSet</c> from a plain uint array
-        /// (one band) and immediately runs one acquire/release pass.
+        /// Replaces desiredActiveSet with a single-band visible set and immediately
+        /// applies acquire/release.  Simulates a fully-settled round from one band.
         /// Used by EditMode unit tests to bypass AsyncGPUReadback.
         /// </summary>
         internal void ApplyVisibleSetFromArray(uint[] visibleIndices, int count)
         {
             int safeCount = Mathf.Clamp(count, 0, visibleIndices.Length);
-
-            // Rebuild desired set from this single band.
-            this.desiredActiveSet.Clear();
-
-            if (safeCount > 0)
-            {
-                var temp = new Unity.Collections.NativeArray<uint>(
-                    safeCount, Unity.Collections.Allocator.Temp,
-                    Unity.Collections.NativeArrayOptions.UninitializedMemory);
-                for (int i = 0; i < safeCount; ++i)
-                    temp[i] = visibleIndices[i];
-                try
-                {
-                    this.MergeVisibleBand(temp, safeCount);
-                }
-                finally
-                {
-                    temp.Dispose();
-                }
-            }
-
-            // Apply immediately (no per-frame budget in test path — acquire all at once).
+            this.pendingSet.Clear();
+            this.MergeFromArray(visibleIndices, safeCount);
+            this.CommitPendingForTest();
             this.ApplyDesiredSetNow();
         }
 
         /// <summary>
-        /// Merges multiple bands into <c>desiredActiveSet</c> then applies immediately.
+        /// Merges three bands into pendingSet, commits to desiredActiveSet, then applies.
         /// Used by EditMode unit tests for the 3-band union scenario.
         /// </summary>
         internal void ApplyThreeBandsFromArrays(
@@ -366,71 +349,50 @@ namespace GrassInteract
             uint[] band1, int count1,
             uint[] band2, int count2)
         {
-            this.desiredActiveSet.Clear();
+            this.pendingSet.Clear();
             this.MergeFromArray(band0, count0);
             this.MergeFromArray(band1, count1);
             this.MergeFromArray(band2, count2);
+            this.CommitPendingForTest();
             this.ApplyDesiredSetNow();
         }
 
-        private void MergeFromArray(uint[] arr, int count)
-        {
-            int safeCount = Mathf.Clamp(count, 0, arr.Length);
-            if (safeCount == 0) return;
-            var temp = new Unity.Collections.NativeArray<uint>(
-                safeCount, Unity.Collections.Allocator.Temp,
-                Unity.Collections.NativeArrayOptions.UninitializedMemory);
-            for (int i = 0; i < safeCount; ++i)
-                temp[i] = arr[i];
-            try   { this.MergeVisibleBand(temp, safeCount); }
-            finally { temp.Dispose(); }
-        }
-
         /// <summary>
-        /// Applies desiredActiveSet to the pool immediately (no per-frame budget).
-        /// Used by test paths where we want to see the full result in one call.
-        /// </summary>
-        private void ApplyDesiredSetNow()
-        {
-            // Release dropped.
-            this.toRelease.Clear();
-            foreach (int key in this.pool.ActiveKeys)
-            {
-                if (!this.desiredActiveSet.Contains(key))
-                    this.toRelease.Add(key);
-            }
-            foreach (int key in this.toRelease)
-                this.pool.Release(key);
-
-            // Acquire all desired (no per-frame cap in test path).
-            foreach (int authoredIdx in this.desiredActiveSet)
-            {
-                this.pool.Acquire(
-                    authoredIdx,
-                    this.positions[authoredIdx],
-                    this.rotations[authoredIdx],
-                    this.scales[authoredIdx],
-                    this.meshes[authoredIdx],
-                    this.convex[authoredIdx],
-                    this.materials[authoredIdx]);
-            }
-        }
-
-        // ── Test helpers (internal, not called from runtime paths) ───────────
-
-        /// <summary>
-        /// Sets desiredActiveSet directly from a uint array without going through GPU.
-        /// Used by unit tests to prime the desired state before calling TickAcquireRelease.
+        /// Primes desiredActiveSet from a uint array without applying acquire/release.
+        /// Used by unit tests to set the desired state before calling TickAcquireRelease.
         /// </summary>
         internal void SetDesiredSetForTest(uint[] visibleIndices, int count)
         {
-            this.desiredActiveSet.Clear();
-            this.MergeFromArray(visibleIndices, count);
+            this.pendingSet.Clear();
+            this.MergeFromArray(visibleIndices, Mathf.Clamp(count, 0, visibleIndices.Length));
+            this.CommitPendingForTest();
         }
 
         /// <summary>
-        /// Runs exactly one acquire/release pass using the current desiredActiveSet
-        /// and the configured maxCollidersPerFrame budget.
+        /// Simulates starting a new async round: clears pendingSet and sets inFlightRounds=3.
+        /// desiredActiveSet is left unchanged (holds the previous settled state).
+        /// Used by regression tests to verify section-A reads the prior settled set
+        /// during the async gap.
+        /// </summary>
+        internal void BeginRoundForTest()
+        {
+            this.pendingSet.Clear();
+            this.inFlightRounds = 3;
+        }
+
+        /// <summary>
+        /// Simulates one band settling with the given visible indices.
+        /// Merges into pendingSet and calls OnBandSettled(); when all 3 bands have
+        /// settled the commit fires automatically.
+        /// </summary>
+        internal void SettleBandForTest(uint[] band, int count)
+        {
+            this.MergeFromArray(band, Mathf.Clamp(count, 0, band.Length));
+            this.OnBandSettled();
+        }
+
+        /// <summary>
+        /// Runs one acquire/release pass against desiredActiveSet with the configured budget.
         /// Used by unit tests to step the budgeted acquire logic frame-by-frame.
         /// </summary>
         internal void TickAcquireRelease()
@@ -466,6 +428,55 @@ namespace GrassInteract
                     this.convex[authoredIdx],
                     this.materials[authoredIdx]);
                 acquired++;
+            }
+        }
+
+        // ── Private helpers ───────────────────────────────────────────────────
+
+        private void MergeFromArray(uint[] arr, int count)
+        {
+            if (count <= 0) return;
+            var temp = new Unity.Collections.NativeArray<uint>(
+                count, Unity.Collections.Allocator.Temp,
+                Unity.Collections.NativeArrayOptions.UninitializedMemory);
+            for (int i = 0; i < count; ++i)
+                temp[i] = arr[i];
+            try   { this.MergeVisibleBand(temp, count); }
+            finally { temp.Dispose(); }
+        }
+
+        /// <summary>Atomically commits pendingSet → desiredActiveSet (test path).</summary>
+        private void CommitPendingForTest()
+        {
+            this.desiredActiveSet.Clear();
+            this.desiredActiveSet.UnionWith(this.pendingSet);
+        }
+
+        /// <summary>
+        /// Releases dropped keys and acquires all desired entries without budget cap.
+        /// Used by test paths that want the full settled state in one synchronous call.
+        /// </summary>
+        private void ApplyDesiredSetNow()
+        {
+            this.toRelease.Clear();
+            foreach (int key in this.pool.ActiveKeys)
+            {
+                if (!this.desiredActiveSet.Contains(key))
+                    this.toRelease.Add(key);
+            }
+            foreach (int key in this.toRelease)
+                this.pool.Release(key);
+
+            foreach (int authoredIdx in this.desiredActiveSet)
+            {
+                this.pool.Acquire(
+                    authoredIdx,
+                    this.positions[authoredIdx],
+                    this.rotations[authoredIdx],
+                    this.scales[authoredIdx],
+                    this.meshes[authoredIdx],
+                    this.convex[authoredIdx],
+                    this.materials[authoredIdx]);
             }
         }
 
