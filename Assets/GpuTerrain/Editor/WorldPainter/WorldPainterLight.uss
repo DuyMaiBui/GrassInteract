@@ -1,0 +1,92 @@
+/*
+ * WorldPainterLight.uss — Light-skin palette overrides.
+ * Exact Scatter Studio light-skin token mirror (design §4.6).
+ *
+ * All rules are scoped under .light, which is added to the root VisualElement
+ * by WorldPainterInspector when EditorGUIUtility.isProSkin == false.
+ *
+ * Load order: WorldPainter.uss (layout + shared theme + .pro rules) is loaded first.
+ * This sheet is loaded second (light skin only) so .light rules override shared defaults.
+ *
+ * Do NOT add structural (flex/size) rules here — those live in WorldPainter.uss.
+ */
+
+/* ── Root ──────────────────────────────────────────────────────────────────── */
+.light.world-painter-root,
+.light .world-painter-root {
+    background-color: rgb(196, 196, 196);
+}
+
+/* ── Filter chips ─────────────────────────────────────────────────────────── */
+.light .wp-chip {
+    background-color: rgb(210, 210, 210);
+    color: rgb(40, 40, 40);
+    border-color: rgb(170, 170, 170);
+}
+
+.light .wp-chip:hover {
+    background-color: rgb(222, 222, 222);
+    color: rgb(20, 20, 20);
+}
+
+.light .wp-chip--active {
+    background-color: rgba(35, 95, 175, 0.2);
+    color: rgb(35, 95, 175);
+    border-color: rgb(35, 95, 175);
+}
+
+/* ── Stack header ─────────────────────────────────────────────────────────── */
+.light .wp-stack-header {
+    border-bottom-color: rgb(170, 170, 170);
+}
+
+.light .wp-stack-title {
+    color: rgb(25, 25, 25);
+}
+
+.light .wp-add-btn {
+    background-color: rgb(210, 210, 210);
+    color: rgb(40, 40, 40);
+    border-color: rgb(170, 170, 170);
+}
+
+.light .wp-add-btn:hover {
+    background-color: rgb(222, 222, 222);
+}
+
+/* ── Layer rows ───────────────────────────────────────────────────────────── */
+.light .wp-layer-row:hover {
+    background-color: rgba(0, 0, 0, 0.07);
+}
+
+.light .wp-layer-row--selected {
+    background-color: rgba(63, 127, 210, 0.28);
+}
+
+.light .wp-layer-row--selected:hover {
+    background-color: rgba(63, 127, 210, 0.38);
+}
+
+.light .wp-layer-name {
+    color: rgb(30, 30, 30);
+}
+
+/* ── Brush dock ───────────────────────────────────────────────────────────── */
+.light .wp-brush-dock {
+    background-color: rgb(204, 204, 204);
+    border-top-color: rgb(170, 170, 170);
+}
+
+.light .wp-section-title {
+    color: rgb(25, 25, 25);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.light .wp-card {
+    background-color: rgb(210, 210, 210);
+    border-color: rgb(175, 175, 175);
+}
+
+.light .wp-card:hover {
+    border-color: rgb(145, 145, 145);
+}

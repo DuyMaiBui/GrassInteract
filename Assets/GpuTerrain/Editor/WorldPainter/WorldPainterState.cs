@@ -1,0 +1,105 @@
+#nullable enable
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace GpuTerrain.Editor
+{
+    /// <summary>
+    /// Shared static authoring state for WorldPainter.
+    /// Ports the <see cref="TerrainSculptState"/> pattern so the Inspector
+    /// (<see cref="WorldPainterInspector"/>) and future EditorTool read from one SSOT.
+    ///
+    /// Not persisted — defaults reset on domain reload (acceptable for editor tools).
+    /// </summary>
+    public static class WorldPainterState
+    {
+        // ── Active painter ────────────────────────────────────────────────────
+
+        /// <summary>WorldPainter component currently bound for authoring. Set by the Inspector.</summary>
+        public static WorldPainter? ActivePainter { get; set; }
+
+        // ── Active layer ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Index into the layer stack of the currently selected (active) layer.
+        /// -1 = no layer selected. The layer stack view reads/writes this.
+        /// </summary>
+        public static int ActiveLayerIndex { get; set; } = -1;
+
+        // ── Brush settings (SSOT) ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Shared brush settings for all layer types (size/strength/falloff/spacing/flow).
+        /// The brush dock binds to this instance; stroke dispatch reads from it.
+        /// </summary>
+        public static BrushSettings Brush { get; } = BrushSettings.Default;
+
+        // ── Stroke tracking ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Full set of tile coords touched by the last completed stroke.
+        /// Replaced at the start of each new stroke; never null but may be empty.
+        /// </summary>
+        public static readonly HashSet<Vector2Int> LastStrokedTileSet = new();
+
+        /// <summary>Coord of the last tile that received a stroke this session.</summary>
+        public static Vector2Int? LastStrokedCoord { get; set; }
+
+        // ── Reset helpers ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Clear stroke tracking state atomically.
+        /// Call whenever <see cref="ActivePainter"/> changes.
+        /// </summary>
+        public static void ResetLastStroked()
+        {
+            LastStrokedCoord = null;
+            LastStrokedTileSet.Clear();
+        }
+
+        /// <summary>Reset everything to defaults (domain-reload equivalent).</summary>
+        public static void Reset()
+        {
+            ActivePainter   = null;
+            ActiveLayerIndex = -1;
+            ResetLastStroked();
+        }
+    }
+
+    // ── BrushSettings ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Unified brush parameters shared across all layer types.
+    /// Design §5.1 SSOT — one vocabulary, one set of controls.
+    /// </summary>
+    [System.Serializable]
+    public sealed class BrushSettings
+    {
+        private const float DEFAULT_SIZE_M    = 12f;
+        private const float DEFAULT_STRENGTH  = 0.4f;
+        private const float DEFAULT_SPACING_M = 2f;
+        private const float DEFAULT_FLOW      = 0.8f;
+
+        [Tooltip("Brush radius in world-space metres.")]
+        [UnityEngine.Range(0.5f, 256f)]
+        public float size = DEFAULT_SIZE_M;
+
+        [Tooltip("Brush strength / opacity [0..1].")]
+        [UnityEngine.Range(0f, 1f)]
+        public float strength = DEFAULT_STRENGTH;
+
+        [Tooltip("Falloff curve: X=normalized distance from centre [0..1], Y=weight [0..1].")]
+        public AnimationCurve falloff = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+
+        [Tooltip("Spacing between stamps along the drag path, in metres.")]
+        [UnityEngine.Range(0.1f, 64f)]
+        public float spacing = DEFAULT_SPACING_M;
+
+        [Tooltip("Flow: accumulated deposit per stamp [0..1].")]
+        [UnityEngine.Range(0f, 1f)]
+        public float flow = DEFAULT_FLOW;
+
+        /// <summary>Returns a <see cref="BrushSettings"/> instance initialised to smart defaults.</summary>
+        public static BrushSettings Default => new BrushSettings();
+    }
+}

@@ -1,0 +1,219 @@
+/*
+ * WorldPainter.uss — Pro (dark) skin.
+ * Exact Scatter Studio token mirror (design §4.6).
+ *
+ * Load order: this sheet is loaded first by WorldPainterInspector.
+ * WorldPainterLight.uss is loaded second (light skin only) and overrides .light-scoped rules.
+ *
+ * Skin class is added to the root VisualElement:
+ *   .pro   — EditorGUIUtility.isProSkin == true
+ *   .light — EditorGUIUtility.isProSkin == false
+ */
+
+/* ── Root ──────────────────────────────────────────────────────────────────── */
+.world-painter-root {
+    flex-direction: column;
+    flex-grow: 1;
+    font-size: 12px;
+}
+
+/* Pro root background */
+.pro.world-painter-root,
+.pro .world-painter-root {
+    background-color: rgb(45, 45, 45);
+}
+
+/* ── Filter chip bar ─────────────────────────────────────────────────────── */
+.wp-filter-bar {
+    flex-direction: row;
+    flex-shrink: 0;
+    padding: 4px 4px 2px 4px;
+    flex-wrap: wrap;
+}
+
+.wp-chip {
+    border-radius: 8px;
+    font-size: 12px;
+    padding: 2px 8px;
+    margin: 2px;
+    border-width: 1px;
+    height: 22px;
+    transition-property: background-color, border-color;
+    transition-duration: 0.1s;
+}
+
+.pro .wp-chip {
+    background-color: rgb(62, 62, 62);
+    color: rgb(180, 180, 180);
+    border-color: rgb(40, 40, 40);
+}
+
+.pro .wp-chip:hover {
+    background-color: rgb(75, 75, 75);
+    color: rgb(210, 210, 210);
+}
+
+.pro .wp-chip--active {
+    background-color: rgba(77, 153, 255, 0.25);
+    color: rgb(77, 153, 255);
+    border-color: rgb(77, 153, 255);
+}
+
+/* ── Stack root ──────────────────────────────────────────────────────────── */
+.wp-stack-root {
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+/* Stack header */
+.wp-stack-header {
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 6px;
+    border-bottom-width: 1px;
+}
+
+.pro .wp-stack-header {
+    border-bottom-color: rgb(30, 30, 30);
+}
+
+.wp-stack-title {
+    flex-grow: 1;
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.pro .wp-stack-title {
+    color: rgb(210, 210, 210);
+}
+
+.wp-add-btn {
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 12px;
+}
+
+.pro .wp-add-btn {
+    background-color: rgb(62, 62, 62);
+    color: rgb(200, 200, 200);
+    border-color: rgb(40, 40, 40);
+}
+
+.pro .wp-add-btn:hover {
+    background-color: rgb(75, 75, 75);
+}
+
+/* Stack list */
+.wp-stack-list {
+    flex-direction: column;
+}
+
+/* ── Layer row ───────────────────────────────────────────────────────────── */
+.wp-layer-row {
+    flex-direction: row;
+    align-items: center;
+    height: 28px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    margin: 1px 3px;
+    cursor: link;
+    transition-property: background-color;
+    transition-duration: 0.1s;
+}
+
+.pro .wp-layer-row:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.pro .wp-layer-row--selected {
+    background-color: rgba(63, 127, 210, 0.35);
+    transition-duration: 0.08s;
+}
+
+.pro .wp-layer-row--selected:hover {
+    background-color: rgba(63, 127, 210, 0.45);
+}
+
+/* Eye/lock toggles */
+.wp-eye-toggle,
+.wp-lock-toggle {
+    flex-shrink: 0;
+    width: 16px;
+    margin-right: 3px;
+}
+
+/* Type icon chip */
+.wp-type-chip {
+    flex-shrink: 0;
+    font-size: 12px;
+    margin-right: 4px;
+    width: 18px;
+}
+
+/* Layer name */
+.wp-layer-name {
+    flex-grow: 1;
+    flex-shrink: 1;
+    font-size: 12px;
+    overflow: hidden;
+    -unity-text-overflow-position: end;
+    text-overflow: ellipsis;
+}
+
+.pro .wp-layer-name {
+    color: rgb(210, 210, 210);
+}
+
+/* ── Brush dock ──────────────────────────────────────────────────────────── */
+.wp-brush-dock {
+    flex-direction: column;
+    flex-shrink: 0;
+    padding: 4px 6px 6px 6px;
+    border-top-width: 1px;
+    margin-top: 4px;
+}
+
+.pro .wp-brush-dock {
+    background-color: rgb(50, 50, 50);
+    border-top-color: rgb(30, 30, 30);
+}
+
+.wp-section-title {
+    font-size: 12px;
+    -unity-font-style: bold;
+    margin-bottom: 4px;
+}
+
+.pro .wp-section-title {
+    color: rgb(210, 210, 210);
+}
+
+/* Brush field rows */
+.wp-field-row {
+    flex-direction: column;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.wp-brush-slider {
+    flex-grow: 1;
+}
+
+/* Foldout card (shared with Scatter Studio) */
+.wp-card {
+    border-radius: 5px;
+    border-width: 1px;
+    margin-bottom: 5px;
+    padding: 4px 6px 6px 6px;
+    transition-property: border-color;
+    transition-duration: 0.12s;
+}
+
+.pro .wp-card {
+    background-color: rgb(55, 55, 55);
+    border-color: rgb(36, 36, 36);
+}
+
+.pro .wp-card:hover {
+    border-color: rgb(80, 80, 80);
+}
