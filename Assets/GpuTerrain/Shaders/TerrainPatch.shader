@@ -5,7 +5,15 @@ Shader "GpuTerrain/TerrainPatch"
         _MinHeight ("Min Height", Float) = 0
         _MaxHeight ("Max Height", Float) = 512
         [NoScaleOffset] _HeightTex ("Height Texture", 2D) = "black" {}
-        _BaseColor ("Base Color", Color) = (0.4, 0.55, 0.3, 1)
+
+        // ── Phase 2: splat shading properties ───────────────────────────────
+        [NoScaleOffset] _SplatTex ("Splat Weights (RGBA)", 2D) = "red" {}
+        _LayerAlbedoArray ("Layer Albedo Array", 2DArray) = "" {}
+        _LayerTiling ("Layer Tiling", Float) = 8
+        _NormalEpsilon ("Normal Epsilon", Float) = 0.00195
+
+        // Fallback base color used when no LayerAlbedoArray is bound.
+        _BaseColor ("Base Color (Fallback)", Color) = (0.4, 0.55, 0.3, 1)
     }
 
     SubShader
@@ -25,12 +33,18 @@ Shader "GpuTerrain/TerrainPatch"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 4.5          // requires structured buffers
-            // Toggle: define to use pre-baked vertex Y (TEXCOORD1) instead of VTF.
-            // #pragma multi_compile_local __ TERRAIN_VTF_FALLBACK
+            #pragma target 4.5          // structured buffers + texture arrays
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+
+            // ── TerrainVtf (height decode + morph helpers, SSOT) ────────────
+            #include "TerrainVtf.hlsl"
+
+            // ── Phase 2: splat + normal helpers ─────────────────────────────
+            // TerrainVtf.hlsl included above → DecodeHeight / SampleHeightVTF available.
+            #include "TerrainNormals.hlsl"
+            #include "TerrainSplat.hlsl"
 
             // ── Node buffer ──────────────────────────────────────────────────
             // RenderNode layout must match CdlodNode.STRIDE = 32 B EXACTLY.
@@ -48,42 +62,7 @@ Shader "GpuTerrain/TerrainPatch"
             StructuredBuffer<RenderNode> _NodeBuffer;         // all submitted nodes
 
             // ── Per-material uniforms ────────────────────────────────────────
-            float   _MinHeight;
-            float   _MaxHeight;
             float4  _BaseColor;
-
-            Texture2D<float> _HeightTex;
-            SAMPLER(sampler_HeightTex);
-
-            // ── TerrainVtf helpers (inlined — no file include needed) ─────────
-
-            float DecodeHeight(float raw)
-            {
-                return _MinHeight + raw * (_MaxHeight - _MinHeight);
-            }
-
-            float SampleHeightVTF(float2 uv)
-            {
-                float raw = _HeightTex.SampleLevel(sampler_HeightTex, uv, 0).r;
-                return DecodeHeight(raw);
-            }
-
-            float2 MorphVertex(float2 vertexXZ, float morphBlend)
-            {
-                // vertexXZ is node-local UV [0,1] with step = 1/PATCH_RES.
-                // Scale to integer-step space so even indices (0,2,4...) are unchanged,
-                // odd indices snap to the preceding even step (crack-free coarser grid).
-                const float patchRes = 16.0; // must match TerrainPatchMesh.PATCH_RES
-                float2 vi       = vertexXZ * patchRes;
-                float2 fracPart = frac(vi * 0.5) * 2.0; // 0 at even int, 1 at odd int
-                return vertexXZ - (fracPart / patchRes) * morphBlend;
-            }
-
-            float CalcMorphBlend(float sqrDist, float morphStart, float morphEnd)
-            {
-                if (morphEnd <= morphStart) return 0.0;
-                return saturate((sqrDist - morphStart) / (morphEnd - morphStart));
-            }
 
             // ── Vertex input ─────────────────────────────────────────────────
             struct Attributes
@@ -96,7 +75,7 @@ Shader "GpuTerrain/TerrainPatch"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                float3 normalWS   : TEXCOORD0;
+                float3 positionWS : TEXCOORD0;
                 float2 tileUV     : TEXCOORD1;
             };
 
@@ -117,10 +96,10 @@ Shader "GpuTerrain/TerrainPatch"
                     node.worldOffset.x + vtxXZ.x * node.scale,
                     0.0,
                     node.worldOffset.z + vtxXZ.y * node.scale);
-                float3 camPos   = _WorldSpaceCameraPos;
-                float3 delta    = vtxWorldXZ - camPos;
-                float sqrDist   = dot(delta, delta);
-                float morphBlend = CalcMorphBlend(sqrDist, node.morphStart, node.morphEnd);
+                float3 camPos    = _WorldSpaceCameraPos;
+                float3 delta     = vtxWorldXZ - camPos;
+                float  sqrDist   = dot(delta, delta);
+                float  morphBlend = CalcMorphBlend(sqrDist, node.morphStart, node.morphEnd);
 
                 float2 morphedXZ = MorphVertex(vtxXZ, morphBlend);
 
@@ -128,51 +107,60 @@ Shader "GpuTerrain/TerrainPatch"
                 float worldX = node.worldOffset.x + morphedXZ.x * node.scale;
                 float worldZ = node.worldOffset.z + morphedXZ.y * node.scale;
 
-                // 5. Tile UV for height sample
-                // Tile UV = (worldXZ - tileOrigin) / tileSize
-                // node.worldOffset is tile-relative in Phase 1 (single tile at origin).
-                // For Phase 3 multi-tile: tileOrigin would come from a tile array.
+                // 5. Tile UV for height/splat sample
                 float tileU = worldX / 256.0; // TILE_SIZE_M = 256
                 float tileV = worldZ / 256.0;
                 float2 tileUV = float2(tileU, tileV);
 
-                // 6. Sample height via VTF
+                // 6. Sample height via VTF (TerrainVtf.hlsl)
                 float worldY = SampleHeightVTF(tileUV);
 
                 float3 posWS = float3(worldX, worldY, worldZ);
                 OUT.positionCS = TransformWorldToHClip(posWS);
-
-                // 7. Simple upward normal (Phase 2 replaces with heightmap gradient)
-                OUT.normalWS   = float3(0, 1, 0);
+                OUT.positionWS = posWS;
                 OUT.tileUV     = tileUV;
 
                 return OUT;
             }
 
-            // ── Fragment shader ──────────────────────────────────────────────
+            // ── Fragment shader (Phase 2 shading body) ───────────────────────
             float4 frag(Varyings IN) : SV_Target
             {
-                // Simple Lambert lit (Phase 2 replaces with full splat blend)
+                // ── Normal: derived from heightmap central-difference ─────────
+                // TerrainNormals.hlsl: DeriveNormalWS uses SampleHeightVTF + _NormalEpsilon.
+                float3 normalWS = DeriveNormalWS(IN.tileUV);
+
+                // ── Albedo: splat-blended texture array ───────────────────────
+                // TerrainSplat.hlsl: SplatBlend samples _SplatTex (RGBA weights)
+                // then blends _LayerAlbedoArray slices.
+                // SSOT channel→layer: R=0(ground) G=1(grass) B=2(rock) A=3(path).
+                float4 albedo = SplatBlend(IN.tileUV);
+
+                // ── URP Lit output ────────────────────────────────────────────
                 InputData inputData;
                 ZERO_INITIALIZE(InputData, inputData);
-                inputData.normalWS        = normalize(IN.normalWS);
-                inputData.positionWS      = float3(0, 0, 0);
-                inputData.viewDirectionWS = float3(0, 0, 1);
-                inputData.shadowCoord     = float4(0, 0, 0, 0);
-                inputData.fogCoord        = 0;
+                inputData.normalWS        = normalWS;
+                inputData.positionWS      = IN.positionWS;
+                inputData.viewDirectionWS = normalize(_WorldSpaceCameraPos - IN.positionWS);
+                inputData.shadowCoord     = TransformWorldToShadowCoord(IN.positionWS);
+                inputData.fogCoord        = ComputeFogFactor(
+                    TransformWorldToHClip(IN.positionWS).z);
                 inputData.vertexLighting  = float3(0, 0, 0);
-                inputData.bakedGI         = float3(0, 0, 0);
+                inputData.bakedGI         = SampleSH(normalWS);
+                inputData.normalizedScreenSpaceUV = float2(0, 0);
 
                 SurfaceData surfaceData;
                 ZERO_INITIALIZE(SurfaceData, surfaceData);
-                surfaceData.albedo     = _BaseColor.rgb;
+                surfaceData.albedo     = albedo.rgb;
                 surfaceData.alpha      = 1.0;
                 surfaceData.smoothness = 0.1;
                 surfaceData.metallic   = 0.0;
                 surfaceData.normalTS   = float3(0, 0, 1);
                 surfaceData.occlusion  = 1.0;
 
-                return UniversalFragmentPBR(inputData, surfaceData);
+                float4 color = UniversalFragmentPBR(inputData, surfaceData);
+                color.rgb = MixFog(color.rgb, inputData.fogCoord);
+                return color;
             }
 
             ENDHLSL
