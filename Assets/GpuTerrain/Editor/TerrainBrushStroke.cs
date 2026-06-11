@@ -59,6 +59,22 @@ namespace GpuTerrain.Editor
             this.lastWritebackTime = 0;
         }
 
+        /// <summary>
+        /// Begin a stroke without pushing an undo snapshot (caller already pushed per-tile).
+        /// Used by P2 multi-tile path where undo snapshots are pushed before dispatch.
+        /// </summary>
+        internal void BeginStroke(System.Collections.Generic.IReadOnlyList<Vector2Int> _)
+        {
+            this.InStroke          = true;
+            this.lastWritebackTime = 0;
+        }
+
+        /// <summary>
+        /// Mark stroke as ended without triggering writeback (P2 multi-tile path calls
+        /// writeback per-tile before calling this).
+        /// </summary>
+        internal void EndInStroke() => this.InStroke = false;
+
         internal void EndStroke(
             TerrainTileAsset tile,
             TerrainTileGpuResources gpu,

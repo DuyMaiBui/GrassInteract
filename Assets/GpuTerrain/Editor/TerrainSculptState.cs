@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace GpuTerrain.Editor
@@ -20,11 +21,28 @@ namespace GpuTerrain.Editor
 
         /// <summary>
         /// Coord of the last tile that received a brush stroke this session.
-        /// Used by Undo/Save in the renderer inspector to target the right tile.
-        /// Cleared when ActiveRenderer changes so stale coord from a previous renderer
-        /// does not gate the Save/Undo buttons on a newly selected renderer.
+        /// Convenience alias to the primary coord in <see cref="LastStrokedTileSet"/>.
+        /// Cleared when ActiveRenderer changes.
         /// </summary>
         public static Vector2Int? LastStrokedCoord { get; set; }
+
+        /// <summary>
+        /// Full set of tile coords touched by the last completed stroke.
+        /// Used by the inspector Undo button to pop every affected tile atomically.
+        /// Replaced at the start of each new stroke; never null but may be empty.
+        /// </summary>
+        public static readonly HashSet<Vector2Int> LastStrokedTileSet = new HashSet<Vector2Int>();
+
+        /// <summary>
+        /// Clear both <see cref="LastStrokedCoord"/> and <see cref="LastStrokedTileSet"/>
+        /// atomically. Call whenever <see cref="ActiveRenderer"/> changes so stale coords from
+        /// the previous renderer cannot drive Undo/Save on the new renderer.
+        /// </summary>
+        public static void ResetLastStroked()
+        {
+            LastStrokedCoord = null;
+            LastStrokedTileSet.Clear();
+        }
 
         // ── Shared undo stack (SSOT) ──────────────────────────────────────────
 

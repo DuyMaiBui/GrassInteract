@@ -116,20 +116,23 @@ namespace GpuTerrain.Editor
 
         private void DrawUndoSaveRow(GpuTerrainRenderer renderer)
         {
+            var tileSet   = TerrainSculptState.LastStrokedTileSet;
             var lastCoord = TerrainSculptState.LastStrokedCoord;
 
             EditorGUILayout.BeginHorizontal();
 
-            // Undo button — enabled only if there is a snapshot for the last coord.
-            bool canUndo = lastCoord.HasValue &&
-                           TerrainSculptState.Undo.CanUndo(lastCoord.Value);
+            // Undo: enabled if ANY tile in the last stroked set has a snapshot.
+            bool canUndo = false;
+            foreach (var c in tileSet)
+                if (TerrainSculptState.Undo.CanUndo(c)) { canUndo = true; break; }
+
             using (new EditorGUI.DisabledScope(!canUndo))
             {
-                if (GUILayout.Button("Undo Last Stroke") && lastCoord.HasValue)
-                    this.PerformUndo(renderer, lastCoord.Value);
+                if (GUILayout.Button("Undo Last Stroke") && canUndo)
+                    this.PerformUndo(renderer);
             }
 
-            // Save button — enabled only when last coord resolves to a real tile asset.
+            // Save: enabled when primary coord resolves to a real tile asset.
             bool canSave = lastCoord.HasValue &&
                            FindTileForCoord(renderer, lastCoord.Value) != null;
             using (new EditorGUI.DisabledScope(!canSave))

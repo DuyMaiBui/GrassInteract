@@ -32,9 +32,11 @@ namespace GpuTerrain.Editor
             this.lodProp   = this.serializedObject.FindProperty("lodRangesM");
 
             var renderer = (GpuTerrainRenderer)this.target;
-            // M2: clear stale LastStrokedCoord when the inspected renderer changes.
+            // H1: clear BOTH LastStrokedCoord AND LastStrokedTileSet atomically when the
+            // inspected renderer changes — stale coords from the previous renderer must not
+            // drive Undo/Save on the new one (would clobber wrong terrain if coords collide).
             if (TerrainSculptState.ActiveRenderer != renderer)
-                TerrainSculptState.LastStrokedCoord = null;
+                TerrainSculptState.ResetLastStroked();
             TerrainSculptState.ActiveRenderer = renderer;
             EditorApplication.update += this.writeback.Tick;
         }
@@ -123,16 +125,20 @@ namespace GpuTerrain.Editor
 
         // ── Undo / Save (backing logic) ───────────────────────────────────────
 
-        private void PerformUndo(GpuTerrainRenderer renderer, Vector2Int coord)
+        private void PerformUndo(GpuTerrainRenderer renderer)
         {
-            var tile = FindTileForCoord(renderer, coord);
-            if (tile == null) return;
-            var snap = TerrainSculptState.Undo.Pop(tile);
-            if (snap == null) return;
-            var gpu = renderer.ResourcesForCoord(coord);
-            gpu?.Upload(tile);
-            renderer.CommitHeight(coord);
-            EditorUtility.SetDirty(tile);
+            // P2: pop every tile touched by the last stroke atomically (multi-tile undo).
+            foreach (var coord in TerrainSculptState.LastStrokedTileSet)
+            {
+                var tile = FindTileForCoord(renderer, coord);
+                if (tile == null) continue;
+                var snap = TerrainSculptState.Undo.Pop(tile);
+                if (snap == null) continue;
+                var gpu = renderer.ResourcesForCoord(coord);
+                gpu?.Upload(tile);
+                renderer.CommitHeight(coord);
+                EditorUtility.SetDirty(tile);
+            }
         }
 
         private void ForceSave(GpuTerrainRenderer renderer, Vector2Int coord)
