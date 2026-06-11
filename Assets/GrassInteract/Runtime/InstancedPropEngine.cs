@@ -382,6 +382,12 @@ namespace GrassInteract
 
         public void Dispose()
         {
+            // Drain GPU readbacks FIRST — before releasing any GraphicsBuffer that a
+            // readback may still be reading (visibleLod0Buf, Lod0CountBuffer).
+            // colliderDriver.Dispose() calls AsyncGPUReadback.WaitAllRequests() internally.
+            this.colliderDriver?.Dispose();
+            this.colliderDriver = null;
+
             this.cullCmd?.Dispose(); this.cullCmd = null;
 
             this.visibleChunksBuf?.Release(); this.visibleChunksBuf = null;
@@ -402,8 +408,6 @@ namespace GrassInteract
             this.tiltSim?.Dispose(); this.tiltSim = null;
             this.tiltEnabled = false;
 
-            this.colliderDriver?.Dispose();
-            this.colliderDriver = null;
             this.colliderPool?.Dispose();
             this.colliderPool   = null;
             SafeDestroy(this.colliderRoot); this.colliderRoot = null;

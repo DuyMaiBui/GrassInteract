@@ -251,7 +251,10 @@ namespace GrassInteract
             }
 
             int[] writeCursor     = new int[totalChunks];
-            var   sortedToAuthMap = new int[totalInst];   // permutation bridge
+            // Initialize every slot to -1: any slot not written during the scatter pass
+            // will remain -1, making the post-scatter assertion below load-bearing.
+            var   sortedToAuthMap = new int[totalInst];
+            for (int i = 0; i < totalInst; ++i) sortedToAuthMap[i] = -1;
             Array.Copy(cellStart, writeCursor, totalChunks);
 
             flatIdx = 0;
@@ -341,11 +344,17 @@ namespace GrassInteract
             }
 
             // ── Step 4: store CPU arrays ──────────────────────────────────────
-            // Assert SSOT invariant: every sorted slot must have been written exactly once.
-            if (sortedToAuthMap.Length != totalInst)
-                throw new InvalidOperationException(
-                    $"[ChunkedInstanceBuffer] sortedToAuthored length mismatch: " +
-                    $"got {sortedToAuthMap.Length}, expected {totalInst}.");
+            // Assert SSOT invariant: every sorted slot was written exactly once by the
+            // counting-sort scatter pass above.  Any -1 means the counting-sort math is
+            // broken (a slot was skipped), which would silently corrupt collider mapping.
+            for (int i = 0; i < totalInst; ++i)
+            {
+                if (sortedToAuthMap[i] == -1)
+                    throw new InvalidOperationException(
+                        $"[ChunkedInstanceBuffer] sortedToAuthored[{i}] was never written — " +
+                        $"counting-sort invariant violated (totalInst={totalInst}). " +
+                        "This is a bug in the Bake scatter pass.");
+            }
 
             this.instances       = instOut;
             this.chunkAabbs      = aabbOut;

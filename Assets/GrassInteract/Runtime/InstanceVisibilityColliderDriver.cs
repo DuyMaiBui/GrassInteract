@@ -40,37 +40,10 @@ namespace GrassInteract
         private readonly int                   poolCap;
 
         // ── Readback state ────────────────────────────────────────────────────
-        // countBuf: a 1-uint Raw GraphicsBuffer written by CopyCounterValue from
-        // visibleLod0Buf.  Read back alongside the index buffer so a single
-        // AsyncGPUReadback.Request covers both in one round-trip.
-        //
-        // Actually two separate requests are simpler here: one for the count
-        // (4 B) and one for the indices (lod0Count * 4 B, determined AFTER the
-        // count arrives).  We use a two-phase design:
-        //   Phase A: readback the 1-uint count buffer (always 4 B, cheap).
-        //   Phase B: readback the index buffer for exactly lod0Count uints.
-        // Both are throttled by TICK_INTERVAL_FRAMES and the in-flight guard.
-        //
-        // Alternatively, read the full index buffer capacity and trust the count
-        // field inside argsLod0Buf.  We chose to read argsLod0Buf[1] (instance
-        // count, byte offset ARGS_INSTANCE_COUNT_OFFSET=4) — that is the count
-        // written by CopyCounterValue, so it is correct after the GPU barrier
-        // inside ExecuteCommandBuffer.  One combined readback: request
-        // argsLod0Buf 8 bytes from offset 0 → indices[0]=indexCountPerInstance
-        // (not needed), indices[1]=instanceCount.  Simple and single-trip.
-        //
-        // FINAL DESIGN: a dedicated lod0CountBuf (1 uint, Raw) passed in from
-        // the engine; the engine calls CopyCounterValue(visibleLod0Buf,
-        // lod0CountBuf, 0) in RecordFrameCommands.  We readback ONLY the count
-        // first; on completion we issue a second readback of the exact byte range
-        // of visibleLod0Buf.  This keeps the index readback minimal and avoids
-        // reading padding.  The count readback is 4 B; the index readback is up
-        // to lod0Count * 4 B (bounded by poolCap).
-        //
-        // Stale-completion guard: an integer generation is incremented on each
-        // Dispose.  Each readback callback captures the generation at the time it
-        // was issued; if the captured value != current generation the callback
-        // is discarded.
+        // Two-phase AsyncGPUReadback per tick: Phase A reads the 1-uint lod0CountBuf
+        // (written each frame by CopyCounterValue in RecordFrameCommands); Phase B reads
+        // exactly lod0Count uints from visibleLod0Buf.  A generation token guards stale
+        // completions that arrive after Dispose.
 
         private GraphicsBuffer? lod0CountBuf; // 1-uint Raw buffer; owned by this driver
 
@@ -312,8 +285,15 @@ namespace GrassInteract
             if (this.disposed) return;
             this.disposed = true;
 
-            // Increment generation so any in-flight callbacks discard their results.
+            // Increment generation so any in-flight callbacks discard their results
+            // when they fire after the drain below.
             this.generation++;
+
+            // Drain all in-flight native GPU transfers before releasing buffers.
+            // Without this, visibleLod0Buf (owned by the engine) and lod0CountBuf
+            // (owned by this driver) can be Release()d while the DMA is still reading
+            // them — undefined behaviour at the native layer.
+            AsyncGPUReadback.WaitAllRequests();
 
             this.lod0CountBuf?.Release();
             this.lod0CountBuf = null;
