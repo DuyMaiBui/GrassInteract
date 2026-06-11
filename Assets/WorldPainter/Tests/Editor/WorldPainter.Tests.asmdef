@@ -1,6 +1,6 @@
 {
-    "name": "GpuTerrain.EditorTests",
-    "rootNamespace": "GpuTerrain.Tests",
+    "name": "WorldPainter.Tests",
+    "rootNamespace": "WorldPainter.Tests",
     "references": [
         "WorldPainter",
         "WorldPainter.Editor",

@@ -7,5 +7,3 @@ using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("WorldPainter.Editor")]
 [assembly: InternalsVisibleTo("WorldPainter.Tests")]
-[assembly: InternalsVisibleTo("GpuTerrain.EditorTests")]
-[assembly: InternalsVisibleTo("GrassInteract.EditorTests")]

@@ -5,6 +5,4 @@
 // and merge into WorldPainter.Tests in P5 — all three are granted (extra grants are harmless).
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("GpuTerrain.EditorTests")]
-[assembly: InternalsVisibleTo("GrassInteract.EditorTests")]
 [assembly: InternalsVisibleTo("WorldPainter.Tests")]
