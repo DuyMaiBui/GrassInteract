@@ -285,3 +285,274 @@
 .pro .wp-card:hover {
     border-color: rgb(80, 80, 80);
 }
+
+/* ── P6 Animations ──────────────────────────────────────────────────────── */
+
+/* Expand / collapse 120ms ease */
+.wp-expand-collapse {
+    transition-property: height, opacity, max-height;
+    transition-duration: 0.12s;
+    transition-timing-function: ease;
+    overflow: hidden;
+}
+
+.wp-expand-collapse--collapsed {
+    max-height: 0;
+    opacity: 0;
+}
+
+.wp-expand-collapse--expanded {
+    max-height: 400px;
+    opacity: 1;
+}
+
+/* Tab underline slide */
+.wp-tab-bar {
+    flex-direction: row;
+    padding: 0 4px;
+    border-bottom-width: 2px;
+}
+
+.pro .wp-tab-bar {
+    border-bottom-color: rgb(30, 30, 30);
+}
+
+.wp-tab {
+    padding: 4px 10px;
+    border-bottom-width: 2px;
+    border-bottom-color: transparent;
+    transition-property: border-bottom-color, color;
+    transition-duration: 0.12s;
+    cursor: link;
+}
+
+.wp-tab--active {
+    border-bottom-color: rgb(77, 153, 255);
+}
+
+.pro .wp-tab {
+    color: rgb(160, 160, 160);
+}
+
+.pro .wp-tab--active {
+    color: rgb(77, 153, 255);
+}
+
+/* Hover card elevation */
+.pro .wp-card:hover {
+    border-color: rgb(80, 80, 80);
+    translate: 0 -1px;
+    transition-property: border-color, translate;
+    transition-duration: 0.12s;
+}
+
+/* ── Live readout strip ──────────────────────────────────────────────────── */
+
+.wp-readout-strip {
+    flex-direction: row;
+    padding: 3px 6px;
+    border-top-width: 1px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.pro .wp-readout-strip {
+    background-color: rgb(42, 42, 42);
+    border-top-color: rgb(30, 30, 30);
+}
+
+.wp-readout-cell {
+    flex-direction: column;
+    padding: 2px 8px 2px 0;
+    min-width: 80px;
+}
+
+.wp-readout-label {
+    font-size: 10px;
+    -unity-font-style: normal;
+}
+
+.wp-readout-value {
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.pro .wp-readout-label {
+    color: rgb(120, 120, 120);
+}
+
+.pro .wp-readout-value {
+    color: rgb(200, 200, 200);
+}
+
+/* ── Mini-map ─────────────────────────────────────────────────────────────── */
+
+.wp-mini-map {
+    width: 120px;
+    height: 60px;
+    flex-shrink: 0;
+    border-radius: 3px;
+    border-width: 1px;
+    margin: 4px;
+    overflow: hidden;
+}
+
+.pro .wp-mini-map {
+    background-color: rgb(30, 30, 30);
+    border-color: rgb(50, 50, 50);
+}
+
+/* ── Perf badge ───────────────────────────────────────────────────────────── */
+
+.wp-perf-badge {
+    flex-direction: row;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border-width: 1px;
+    margin: 2px;
+    flex-wrap: wrap;
+}
+
+.pro .wp-perf-badge {
+    background-color: rgb(38, 38, 38);
+    border-color: rgb(50, 50, 50);
+}
+
+.wp-perf-item {
+    flex-direction: row;
+    margin-right: 8px;
+    align-items: center;
+}
+
+.wp-perf-key {
+    font-size: 10px;
+    margin-right: 3px;
+}
+
+.wp-perf-val {
+    font-size: 10px;
+    -unity-font-style: bold;
+}
+
+.pro .wp-perf-key {
+    color: rgb(110, 110, 110);
+}
+
+.pro .wp-perf-val {
+    color: rgb(180, 200, 180);
+}
+
+/* ── Coach marks ─────────────────────────────────────────────────────────── */
+
+.wp-coach-mark {
+    flex-direction: row;
+    align-items: flex-start;
+    border-radius: 4px;
+    border-width: 1px;
+    padding: 6px 8px;
+    margin: 4px;
+}
+
+.pro .wp-coach-mark {
+    background-color: rgba(77, 153, 255, 0.08);
+    border-color: rgba(77, 153, 255, 0.35);
+}
+
+.wp-coach-mark-icon {
+    font-size: 14px;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.wp-coach-mark-text {
+    font-size: 11px;
+    white-space: normal;
+}
+
+.pro .wp-coach-mark-text {
+    color: rgb(180, 180, 180);
+}
+
+/* ── Brush stamp grid ────────────────────────────────────────────────────── */
+
+.wp-stamp-grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 4px;
+}
+
+.wp-stamp-cell {
+    width: 72px;
+    height: 92px;
+    border-radius: 3px;
+    border-width: 1px;
+    margin: 2px;
+    align-items: center;
+    justify-content: center;
+    cursor: link;
+    transition-property: border-color, background-color;
+    transition-duration: 0.1s;
+    overflow: hidden;
+}
+
+.pro .wp-stamp-cell {
+    background-color: rgb(55, 55, 55);
+    border-color: rgb(40, 40, 40);
+}
+
+.pro .wp-stamp-cell:hover {
+    background-color: rgb(65, 65, 65);
+    border-color: rgb(70, 70, 70);
+}
+
+.wp-stamp-cell--selected {
+    border-width: 2px;
+    border-color: rgb(50, 120, 230);
+}
+
+.pro .wp-stamp-cell--selected {
+    background-color: rgba(50, 120, 230, 0.15);
+}
+
+/* Preset slot bar */
+.wp-preset-bar {
+    flex-direction: row;
+    padding: 2px 4px;
+    border-top-width: 1px;
+}
+
+.pro .wp-preset-bar {
+    border-top-color: rgb(35, 35, 35);
+}
+
+.wp-preset-slot {
+    flex: 1;
+    height: 22px;
+    border-radius: 2px;
+    border-width: 1px;
+    margin: 1px 2px;
+    font-size: 10px;
+    align-items: center;
+    justify-content: center;
+    cursor: link;
+    transition-property: background-color;
+    transition-duration: 0.1s;
+}
+
+.pro .wp-preset-slot {
+    background-color: rgb(55, 55, 55);
+    border-color: rgb(40, 40, 40);
+    color: rgb(160, 160, 160);
+}
+
+.pro .wp-preset-slot:hover {
+    background-color: rgb(68, 68, 68);
+}
+
+.wp-preset-slot--occupied {
+    border-color: rgb(77, 153, 255);
+}
+
+.pro .wp-preset-slot--occupied {
+    color: rgb(140, 180, 255);
+}
