@@ -3,7 +3,7 @@
 **Created:** 2026-06-11 11:59
 **Engine:** Unity 6000.3.13f1, URP 17.3.0, mobile (iOS/Android) primary target
 **Source of truth:** `plans/reports/gpu-terrain-cdlod-brainstorm-2026-06-11.md` (all design decisions LOCKED)
-**Status:** ready for `/t1k:cook` — start with the Phase 0 + Phase 1 vertical slice
+**Status:** ✅ ALL 6 PHASES IMPLEMENTED (2026-06-11) on branch `plan/gpu-terrain-cdlod` — 209 EditMode tests pass; final adversarial review done (B1 blocker + M1/M2 majors fixed). **Pending MANUAL gates:** (1) on-device perf/draw-call milestone smoke; (2) live ≥2-tile Play-Mode visual verification (B1 was a render-only bug invisible to unit tests). Not pushed.
 
 ---
 
