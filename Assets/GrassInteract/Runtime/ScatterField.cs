@@ -75,6 +75,18 @@ namespace GrassInteract
         /// <summary>Name of the most recently selected tier across all built layers. Empty before first build.</summary>
         public string ActiveTierName { get; private set; } = string.Empty;
 
+        /// <summary>
+        /// Generic injection seam for a custom surface sampler.
+        /// When set, this sampler takes priority over the built-in <c>boundTerrain</c> branch
+        /// and the <see cref="RaycastSurfaceSampler"/> fallback inside <see cref="BuildContext"/>.
+        ///
+        /// Assign before calling <see cref="Rebuild"/> (or after, then call Rebuild again).
+        /// Lives in GrassInteract — no GpuTerrain / Heightmap token here (library-decoupling compliant).
+        /// Example consumer: <c>GpuTerrainScatterGround</c> in GpuTerrain sets this to
+        /// <c>HeightmapSurfaceSampler</c> so scatter grounds on the custom heightmap terrain.
+        /// </summary>
+        public ISurfaceSampler? ExternalSampler { get; set; }
+
         /// <summary>The assigned TerrainScatterConfig asset. Null = no config (Required).</summary>
         public TerrainScatterConfig? Config => this.config;
 
@@ -179,7 +191,14 @@ namespace GrassInteract
             };
 
             // Sampler + origin (field-level, shared by all layers).
-            if (this.boundTerrain != null && this.boundTerrain.terrainData != null)
+            // Priority: ExternalSampler (generic injection seam) → boundTerrain → RaycastSurfaceSampler.
+            if (this.ExternalSampler != null)
+            {
+                // Generic seam: caller (e.g. GpuTerrainScatterGround) injected a sampler.
+                ctx.Sampler = this.ExternalSampler;
+                ctx.Origin  = this.transform.position;
+            }
+            else if (this.boundTerrain != null && this.boundTerrain.terrainData != null)
             {
                 ctx.Sampler = new TerrainSurfaceSampler(this.boundTerrain);
                 Vector3 terrainSize = this.boundTerrain.terrainData.size;

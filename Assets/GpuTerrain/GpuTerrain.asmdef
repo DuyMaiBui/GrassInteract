@@ -1,7 +1,9 @@
 {
     "name": "GpuTerrain",
     "rootNamespace": "GpuTerrain",
-    "references": [],
+    "references": [
+        "GrassInteract"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

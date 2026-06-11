@@ -4,6 +4,7 @@
     "references": [
         "GpuTerrain",
         "GpuTerrain.Editor",
+        "GrassInteract",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "Unity.Collections"
