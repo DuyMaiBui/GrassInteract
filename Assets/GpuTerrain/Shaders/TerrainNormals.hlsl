@@ -18,9 +18,8 @@
 // ── Normal epsilon (1/heightRes) — set from TerrainShadingConfig.DEFAULT_NORMAL_EPSILON ──
 float _NormalEpsilon;
 
-// ── Tile size in world units (TILE_SIZE_M = 256, used to convert UV gradient to world) ──
-// Hardcoded here to match Phase 1 constant; Phase 3 will promote to a uniform.
-static const float TILE_SIZE_M = 256.0;
+// ── Tile size in world units — driven by the per-material uniform _TileSizeM.
+// Declared in TerrainVtf.hlsl (included before this file) so no redeclaration needed.
 
 // ─── Derive world-space surface normal from height neighbours ─────────────────
 // tileUV : [0,1] tile-local UV.
@@ -42,8 +41,8 @@ float3 DeriveNormalWS(float2 tileUV)
     float hPZ = SampleHeightVTF(tileUV + float2( 0.0,  eps));
     float hNZ = SampleHeightVTF(tileUV + float2( 0.0, -eps));
 
-    // World-space UV step size (epsilon * TILE_SIZE_M in metres).
-    float worldStep = eps * TILE_SIZE_M;
+    // World-space UV step size (epsilon * _TileSizeM in metres).
+    float worldStep = eps * _TileSizeM;
     float invStep2  = 1.0 / (2.0 * worldStep);
 
     float dhdx = (hPX - hNX) * invStep2;

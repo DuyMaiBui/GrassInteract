@@ -39,6 +39,10 @@ namespace GpuTerrain
         private static readonly int ID_MinHeight          = Shader.PropertyToID("_MinHeight");
         private static readonly int ID_MaxHeight          = Shader.PropertyToID("_MaxHeight");
         private static readonly int ID_HeightTex          = Shader.PropertyToID("_HeightTex");
+        // B1 fix: tile-local UV uniforms so non-(0,0) tiles sample the correct texel region.
+        // Also resolves MINOR-2: TILE_SIZE_M is no longer a hardcoded literal in the shader.
+        private static readonly int ID_TileOriginWS       = Shader.PropertyToID("_TileOriginWS");
+        private static readonly int ID_TileSizeM          = Shader.PropertyToID("_TileSizeM");
 
         // ── Injected ──────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -80,6 +84,14 @@ namespace GpuTerrain
             this.sourceMaterial = patchMaterial ?? throw new ArgumentNullException(nameof(patchMaterial));
             this.kernelNodeCull = computeShader.FindKernel("NodeCull");
         }
+
+        // ── Test accessors ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// World-space XZ min-corner of the built tile. Zero-vector when not built.
+        /// Internal — used only by EditMode regression tests (B1 fix verification).
+        /// </summary>
+        internal Vector2 TileOriginWS { get; private set; }
 
         // ── Build ─────────────────────────────────────────────────────────────
 
@@ -147,6 +159,13 @@ namespace GpuTerrain
             this.patchMaterial.SetFloat(ID_MaxHeight, tile.maxHeight);
             if (gpuRes.HeightTexture != null)
                 this.patchMaterial.SetTexture(ID_HeightTex, gpuRes.HeightTexture);
+
+            // B1 fix + MINOR-2: bind tile-local UV uniforms.
+            // origin is already computed above; pass it as a Vector4 for SetVector
+            // (shader reads it as float2 — x,y components used; zw ignored).
+            this.patchMaterial.SetVector(ID_TileOriginWS, new Vector4(origin.x, origin.y, 0f, 0f));
+            this.patchMaterial.SetFloat(ID_TileSizeM, TerrainWorldGrid.TILE_SIZE_M);
+            this.TileOriginWS = origin;
 
             this.cullCmd = new CommandBuffer { name = "GpuTerrainEngine.Cull" };
             this.isBuilt = true;

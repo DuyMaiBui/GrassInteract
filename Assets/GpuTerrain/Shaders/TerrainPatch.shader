@@ -107,10 +107,11 @@ Shader "GpuTerrain/TerrainPatch"
                 float worldX = node.worldOffset.x + morphedXZ.x * node.scale;
                 float worldZ = node.worldOffset.z + morphedXZ.y * node.scale;
 
-                // 5. Tile UV for height/splat sample
-                float tileU = worldX / 256.0; // TILE_SIZE_M = 256
-                float tileV = worldZ / 256.0;
-                float2 tileUV = float2(tileU, tileV);
+                // 5. Tile-LOCAL UV for height/splat sample (B1 fix).
+                // Subtract the tile's world-space min corner so non-(0,0) tiles map
+                // to [0,1] correctly. _TileOriginWS and _TileSizeM are bound per-material
+                // in GpuTerrainEngine.Build from TerrainWorldGrid.TileOriginWorld / TILE_SIZE_M.
+                float2 tileUV = (float2(worldX, worldZ) - _TileOriginWS) / _TileSizeM;
 
                 // 6. Sample height via VTF (TerrainVtf.hlsl)
                 float worldY = SampleHeightVTF(tileUV);
@@ -197,6 +198,8 @@ Shader "GpuTerrain/TerrainPatch"
             float _MaxHeight;
             Texture2D<float> _HeightTex;
             SAMPLER(sampler_HeightTex);
+            float2 _TileOriginWS;   // tile world-space min corner (B1 fix)
+            float  _TileSizeM;      // tile side length in metres (B1 fix + MINOR-2)
 
             struct Attributes { float3 positionOS : POSITION; float2 uv : TEXCOORD0; uint instanceID : SV_InstanceID; };
             struct Varyings   { float4 positionCS : SV_POSITION; };
@@ -210,7 +213,8 @@ Shader "GpuTerrain/TerrainPatch"
                 RenderNode node = _NodeBuffer[nodeIdx];
                 float worldX = node.worldOffset.x + IN.uv.x * node.scale;
                 float worldZ = node.worldOffset.z + IN.uv.y * node.scale;
-                float raw    = _HeightTex.SampleLevel(sampler_HeightTex, float2(worldX / 256.0, worldZ / 256.0), 0).r;
+                // Tile-local UV (B1 fix — subtract tile origin so non-(0,0) tiles are correct).
+                float raw    = _HeightTex.SampleLevel(sampler_HeightTex, (float2(worldX, worldZ) - _TileOriginWS) / _TileSizeM, 0).r;
                 float worldY = DecodeHeight(raw);
                 float3 posWS = float3(worldX, worldY, worldZ);
                 OUT.positionCS = TransformWorldToHClip(posWS);

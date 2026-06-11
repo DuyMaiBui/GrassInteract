@@ -98,8 +98,10 @@ namespace GpuTerrain
         private void Tick(Camera cam, Vector3 camPos)
         {
             // 1. Drain async loader → main-thread GPU uploads (capped per frame).
-            int uploadBudget = TerrainStreamingConfig.MAX_UPLOADS_PER_FRAME;
-            this.loader.DrainMainThreadQueue(); // callbacks self-limit via generation tokens
+            // M2 fix: pass the budget into DrainMainThreadQueue so uploads are capped at
+            // the DRAIN site (not just at enqueue time). Previously all queued callbacks ran
+            // in one frame, defeating the per-frame budget and reintroducing hitch risk.
+            this.loader.DrainMainThreadQueue(TerrainStreamingConfig.MAX_UPLOADS_PER_FRAME);
 
             // 2. Compute desired ring.
             HashSet<Vector2Int> desired = TerrainResidencyRing.ComputeDesired(camPos);
@@ -121,7 +123,7 @@ namespace GpuTerrain
             int queued = 0;
             foreach (Vector2Int coord in this.scratchLoad)
             {
-                if (queued >= uploadBudget)
+                if (queued >= TerrainStreamingConfig.MAX_UPLOADS_PER_FRAME)
                     break;
                 if (this.residencySet.Count >= TerrainStreamingConfig.MAX_RESIDENT_TILES)
                     break;

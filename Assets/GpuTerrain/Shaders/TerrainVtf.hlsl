@@ -18,6 +18,14 @@ float   _MaxHeight;         // TerrainTileAsset.maxHeight
 Texture2D<float>    _HeightTex;     // R16 / RHalf height texture
 SamplerState sampler_HeightTex;     // declared separately (Unity sampler convention)
 
+// ─── Tile-local UV uniforms (B1 fix + MINOR-2) ───────────────────────────────
+// _TileOriginWS : world-space XZ min-corner of this tile (from TerrainWorldGrid.TileOriginWorld).
+// _TileSizeM    : side length in metres (from TerrainWorldGrid.TILE_SIZE_M).
+// Tile-local UV = (worldXZ - _TileOriginWS) / _TileSizeM.
+// For tile (0,0) this equals worldXZ/TILE_SIZE_M, but non-(0,0) tiles differ.
+float2  _TileOriginWS;      // bound per-material in GpuTerrainEngine.Build
+float   _TileSizeM;         // bound per-material in GpuTerrainEngine.Build
+
 // ─── Height decode (SSOT — mirrors TerrainHeightFormat.DecodeHeight EXACTLY) ─
 // raw is the normalised [0,1] value read from the R16/RHalf texture sample.
 float DecodeHeight(float raw)

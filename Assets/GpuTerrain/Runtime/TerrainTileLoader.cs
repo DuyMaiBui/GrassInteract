@@ -120,12 +120,22 @@ namespace GpuTerrain
         }
 
         /// <summary>
-        /// Drain pending main-thread callbacks. Call once per player-loop tick before
-        /// the GPU upload phase. Validates generation tokens before invoking callbacks.
+        /// Drain pending main-thread callbacks up to <paramref name="maxUploads"/> per call.
+        /// Returns the number of callbacks that were accepted (generation matched).
+        ///
+        /// M1 fix: inFlight is cleared on BOTH the accepted and the stale (rejected) paths so
+        /// a coord cancelled-then-re-enqueued between Enqueue and drain is not stuck waiting
+        /// for a phantom inFlight entry.
+        ///
+        /// M2 fix: maxUploads caps how many accepted callbacks run this call so the
+        /// per-frame GPU-upload budget is enforced at the drain site, not only at enqueue time.
+        /// Stale callbacks (generation mismatch) are always discarded for free; they do not
+        /// count against the budget.
         /// </summary>
-        public void DrainMainThreadQueue()
+        public int DrainMainThreadQueue(int maxUploads = int.MaxValue)
         {
-            while (true)
+            int accepted = 0;
+            while (accepted < maxUploads)
             {
                 PendingCallback? pending;
                 lock (this.pendingLock)
@@ -139,11 +149,18 @@ namespace GpuTerrain
                 if (!this.generations.TryGetValue(pending.Coord, out int currentGen))
                     currentGen = 0;
                 if (pending.Generation != currentGen)
-                    continue; // stale — tile was cancelled after enqueue
+                {
+                    // M1 fix: clear inFlight for stale callbacks so a re-enqueued coord
+                    // is not blocked by a phantom in-flight entry.
+                    this.inFlight.Remove(pending.Coord);
+                    continue; // stale — discard without counting against budget
+                }
 
                 this.inFlight.Remove(pending.Coord);
                 pending.Callback(pending.Coord, pending.Asset, pending.Generation);
+                accepted++;
             }
+            return accepted;
         }
 
         // ── Test entry point ──────────────────────────────────────────────────
