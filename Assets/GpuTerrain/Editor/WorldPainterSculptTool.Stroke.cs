@@ -21,11 +21,18 @@ namespace GpuTerrain.Editor
             this.undoPushedCoords.Clear();
             this.strokeTouchedCoords.Clear();
             this.rtCache.ReleaseAll();
+            TerrainPaintTargetResolver.PinnedCoords.Clear();
 
             // Begin Unity Undo group — one Ctrl+Z per stroke.
             Undo.IncrementCurrentGroup();
             this.undoGroupId = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("WorldPainter Sculpt Stroke");
+
+            // Use biome-specific group name when painting a biome layer (task 6).
+            LayerType startType = WorldPainterState.ActiveLayerType(painter, out _);
+            string groupName = startType == LayerType.Biome
+                ? "WorldPainter Biome Stroke"
+                : "WorldPainter Sculpt Stroke";
+            Undo.SetCurrentGroupName(groupName);
 
             GUIUtility.hotControl = controlId;
             this.stroke.Begin(worldPos);
@@ -90,10 +97,14 @@ namespace GpuTerrain.Editor
 
             this.ReleaseDensityRT();
 
+            // Release biome composite stamp density RTs.
+            this.biomeStamp?.ReleaseDensityRTs();
+
             this.stroke.End();
             this.rtCache.ReleaseAll();
             this.strokeTouchedCoords.Clear();
             this.undoPushedCoords.Clear();
+            TerrainPaintTargetResolver.PinnedCoords.Clear();
         }
 
         // ── Per-stamp dispatch ────────────────────────────────────────────────
@@ -131,6 +142,15 @@ namespace GpuTerrain.Editor
             }
 
             this.strokeTouchedCoords.Add(coord);
+
+            // Pin touched tiles against stream-out for biome stroke duration (P5 task 5).
+            var activePainter = WorldPainterState.ActivePainter;
+            if (activePainter != null)
+            {
+                LayerType lt = WorldPainterState.ActiveLayerType(activePainter, out _);
+                if (lt == LayerType.Biome)
+                    TerrainPaintTargetResolver.PinnedCoords.Add(coord);
+            }
 
             this.BindAndDispatch(worldPos, tile, heightRT, splatRT);
 
@@ -211,6 +231,28 @@ namespace GpuTerrain.Editor
                             worldPos,
                             brush.size * 0.5f,
                             deleteMode: isDelete,
+                            surfaceSampler: null);
+                    }
+                }
+            }
+            else if (activeType == LayerType.Biome && painter != null && this.biomeStamp != null)
+            {
+                int biomeIdx = WorldPainterState.ActiveBiomeLayerIndex(painter);
+                if (biomeIdx >= 0 && biomeIdx < painter.Biomes.Count)
+                {
+                    var preset = painter.Biomes[biomeIdx];
+                    if (preset != null)
+                    {
+                        this.biomeStamp.Stamp(
+                            preset,
+                            this.biomeMuteMask,
+                            worldPos,
+                            tile,
+                            heightRT,
+                            splatRT,
+                            this.brushCompute!,
+                            brush.size,
+                            brush.strength,
                             surfaceSampler: null);
                     }
                 }

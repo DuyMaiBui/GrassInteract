@@ -21,6 +21,7 @@ namespace GpuTerrain.Editor
             Splat,
             Grass,
             Props,
+            Biome,
         }
 
         // ── State ─────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ namespace GpuTerrain.Editor
             (Filter.Splat,  "🎨 Splat"),
             (Filter.Grass,  "🌿 Grass"),
             (Filter.Props,  "🌳 Props"),
+            (Filter.Biome,  "🌎 Biome"),
         };
 
         // ── Build ─────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@ namespace GpuTerrain.Editor
                 Filter.Splat  => layerType == LayerType.Splat,
                 Filter.Grass  => layerType == LayerType.Grass,
                 Filter.Props  => layerType == LayerType.Props,
+                Filter.Biome  => layerType == LayerType.Biome,
                 _             => true,
             };
         }

@@ -46,6 +46,14 @@ namespace GpuTerrain.Editor
 
         internal readonly WorldPainterPropStampEmitter propEmitter = new WorldPainterPropStampEmitter();
 
+        // ── Biome composite stamp (P5 task 2) ─────────────────────────────────
+
+        internal WorldPainterBiomeStamp? biomeStamp;
+
+        // ── Biome channel mute mask (P5 task 4) ───────────────────────────────
+
+        internal BiomeChannelMask biomeMuteMask = BiomeChannelMask.None;
+
         // ── Per-stroke tracking ───────────────────────────────────────────────
 
         internal readonly HashSet<Vector2Int> undoPushedCoords    = new HashSet<Vector2Int>();
@@ -67,6 +75,10 @@ namespace GpuTerrain.Editor
         {
             this.brushCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Assets/GpuTerrain/Shaders/TerrainBrush.compute");
+
+            // Initialise biome composite stamp (P5).
+            this.biomeStamp = new WorldPainterBiomeStamp(
+                this.propEmitter, this.densityEncoder, this.falloffLut);
 
             // Upload initial falloff LUT from current brush settings.
             var brush = WorldPainterState.Brush;

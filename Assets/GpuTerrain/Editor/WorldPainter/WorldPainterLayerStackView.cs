@@ -7,7 +7,7 @@ using GrassInteract;
 namespace GpuTerrain.Editor
 {
     /// <summary>Layer type discriminant for WorldPainter stack rows.</summary>
-    public enum LayerType { Height, Splat, Grass, Props }
+    public enum LayerType { Height, Splat, Grass, Props, Biome }
 
     /// <summary>
     /// Photoshop-style layer stack for <see cref="WorldPainter"/>. Height row is synthetic;
@@ -27,6 +27,7 @@ namespace GpuTerrain.Editor
 
         private SerializedProperty splatLayersProp = null!;
         private SerializedProperty scatterLayersProp = null!;
+        private SerializedProperty biomesProp = null!;
 
         // ── UI ────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ namespace GpuTerrain.Editor
 
             this.splatLayersProp   = so.FindProperty("splatLayers")!;
             this.scatterLayersProp = so.FindProperty("scatterLayers")!;
+            this.biomesProp        = so.FindProperty("biomes")!;
 
             chips.FilterChanged += _ => this.RefreshStack();
         }
@@ -146,6 +148,32 @@ namespace GpuTerrain.Editor
                     this.BuildSerializedRow(displayIndex++, type, layerName,
                         onRemove: () => this.RemoveScatterLayer(captured),
                         albedoPreview: lodThumb));
+            }
+
+            // Biome rows — bound to biomes list (mode-color violet).
+            if (this.biomesProp != null)
+            {
+                for (int i = 0; i < this.biomesProp.arraySize; i++)
+                {
+                    if (!this.chips.Passes(LayerType.Biome)) continue;
+                    var elem     = this.biomesProp.GetArrayElementAtIndex(i);
+                    var preset   = elem.objectReferenceValue as BiomePreset;
+                    string rn    = preset != null ? preset.name : $"Biome {i}";
+                    int captured = i;
+
+                    Texture2D? thumb = preset != null ? AssetPreview.GetMiniThumbnail(preset) : null;
+
+                    var row = this.BuildSerializedRow(
+                        displayIndex++, LayerType.Biome, rn,
+                        onRemove: () => this.RemoveBiomeLayer(captured),
+                        albedoPreview: thumb);
+
+                    // Violet tint for biome rows.
+                    row.style.borderLeftColor = new StyleColor(new Color(0.6f, 0.2f, 0.9f, 0.9f));
+                    row.style.borderLeftWidth = new StyleFloat(3f);
+
+                    this.stackContainer.Add(row);
+                }
             }
         }
 

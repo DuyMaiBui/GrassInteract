@@ -23,7 +23,7 @@ namespace GpuTerrain.Editor
             menu.AddItem(new GUIContent("Splat layer"), false, () => this.AddSplatLayer());
             menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayer());
             menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayer());
-            menu.AddDisabledItem(new GUIContent("Biome (P5)"));
+            menu.AddItem(new GUIContent("Biome preset"), false, () => this.AddBiomeRow());
             menu.ShowAsContext();
         }
 
@@ -185,6 +185,21 @@ namespace GpuTerrain.Editor
             this.RefreshStack();
         }
 
+        private void RemoveBiomeLayer(int index)
+        {
+            if (this.biomesProp == null) return;
+            if (index < 0 || index >= this.biomesProp.arraySize) return;
+
+            Undo.RecordObject(this.painter, "Remove Biome Preset");
+            this.biomesProp.GetArrayElementAtIndex(index).objectReferenceValue = null;
+            this.biomesProp.DeleteArrayElementAtIndex(index);
+            this.serializedObject.ApplyModifiedProperties();
+
+            WorldPainterState.ActiveLayerIndex =
+                Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
+            this.RefreshStack();
+        }
+
         // ── Row helpers (called from WorldPainterLayerStackView.cs) ───────────
 
         private void SelectLayer(int index)
@@ -226,7 +241,16 @@ namespace GpuTerrain.Editor
             LayerType.Splat  => "🎨",
             LayerType.Grass  => "🌿",
             LayerType.Props  => "🌳",
+            LayerType.Biome  => "🌎",
             _                => "?",
         };
+
+        private void AddBiomeRow()
+        {
+            // Biome layers are added via the BiomePaletteView (+) button.
+            // From the layer stack "+" menu we just select the palette tab if available.
+            // Fallback: no-op since the BiomePaletteView handles its own add flow.
+            Debug.Log("[WorldPainter] Use the Biomes palette panel to add a biome preset.");
+        }
     }
 }

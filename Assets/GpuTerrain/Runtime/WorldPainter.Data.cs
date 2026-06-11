@@ -127,10 +127,17 @@ namespace GpuTerrain
         /// <summary>Grass/prop scatter layer asset references (LODs + density maps + records).</summary>
         public List<ScatterLayer> ScatterLayers => this.scatterLayers;
 
-        // ── Deferred to P5 / P6 ──────────────────────────────────────────────
+        // ── Biome presets (Tier-C refs) — P5 ─────────────────────────────────
 
-        // biomes       : List<BiomePreset ref>   — deferred to P5
+        [Header("Biome Presets")]
+        [SerializeField] private List<BiomePreset> biomes = new();
+
+        /// <summary>Biome preset references. Tier-A WorldPainter → Tier-C BiomePreset refs.</summary>
+        public List<BiomePreset> Biomes => this.biomes;
+
+        // ── Deferred to P6 ────────────────────────────────────────────────────
+
         // brushPresets : List<BrushPreset ref>   — deferred to P6
-        // BiomePreset and BrushPreset types do NOT exist yet; do not create them here.
+        // BrushPreset type does NOT exist yet; do not create it here.
     }
 }

@@ -41,8 +41,7 @@ namespace GpuTerrain.Editor
 
         /// <summary>
         /// Returns the <see cref="LayerType"/> and splat channel index for the currently
-        /// active layer.  The stack layout is: index 0 = Height (synthetic), indices 1..K
-        /// = Splat rows (mapped to channel 0..K-1).
+        /// active layer.  Stack layout: 0=Height, 1..K=Splat, then Scatter, then Biome rows.
         /// </summary>
         /// <param name="painter">The active WorldPainter (needed for splatLayers.Count).</param>
         /// <param name="splatChannel">
@@ -72,7 +71,27 @@ namespace GpuTerrain.Editor
                 return ln.Contains("prop") ? LayerType.Props : LayerType.Grass;
             }
 
+            // Biome rows follow scatter rows.
+            int biomeOffset = idx - splatCount - painter.ScatterLayers.Count - 1;
+            if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
+                return LayerType.Biome;
+
             return LayerType.Height;
+        }
+
+        /// <summary>
+        /// Returns the 0-based index into <see cref="WorldPainter.Biomes"/> for the
+        /// currently active layer, or -1 when the active layer is not a Biome layer.
+        /// </summary>
+        public static int ActiveBiomeLayerIndex(WorldPainter painter)
+        {
+            int idx          = ActiveLayerIndex;
+            int splatCount   = painter.SplatLayers.Count;
+            int scatterCount = painter.ScatterLayers.Count;
+            int biomeOffset  = idx - splatCount - scatterCount - 1;
+            if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
+                return biomeOffset;
+            return -1;
         }
 
         /// <summary>
@@ -96,6 +115,14 @@ namespace GpuTerrain.Editor
         /// The brush dock binds to this instance; stroke dispatch reads from it.
         /// </summary>
         public static BrushSettings Brush { get; } = BrushSettings.Default;
+
+        // ── Active biome (P5) ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Index of the currently selected biome in <see cref="WorldPainter.Biomes"/>.
+        /// -1 = no biome selected.
+        /// </summary>
+        public static int ActiveBiomeIndex { get; set; } = -1;
 
         // ── Stroke tracking ───────────────────────────────────────────────────
 
@@ -125,6 +152,7 @@ namespace GpuTerrain.Editor
         {
             ActivePainter    = null;
             ActiveLayerIndex = -1;
+            ActiveBiomeIndex = -1;
             BrushFalloffDirty = null;
             ResetLastStroked();
         }
