@@ -63,8 +63,30 @@ namespace GpuTerrain.Editor
                 return LayerType.Splat;
             }
 
-            // Future: Grass/Props rows would follow. Default to Height for safety.
+            // Scatter (Grass/Props) rows follow splat rows.
+            int scatterOffset = idx - splatCount - 1;
+            if (scatterOffset >= 0 && scatterOffset < painter.ScatterLayers.Count)
+            {
+                var layer = painter.ScatterLayers[scatterOffset];
+                string ln = layer != null ? layer.name.ToLowerInvariant() : string.Empty;
+                return ln.Contains("prop") ? LayerType.Props : LayerType.Grass;
+            }
+
             return LayerType.Height;
+        }
+
+        /// <summary>
+        /// Returns the 0-based index into <see cref="WorldPainter.ScatterLayers"/> for the
+        /// currently active layer, or -1 when the active layer is not a scatter layer.
+        /// </summary>
+        public static int ActiveScatterIndex(WorldPainter painter)
+        {
+            int idx = ActiveLayerIndex;
+            int splatCount = painter.SplatLayers.Count;
+            int scatterOffset = idx - splatCount - 1;
+            if (scatterOffset >= 0 && scatterOffset < painter.ScatterLayers.Count)
+                return scatterOffset;
+            return -1;
         }
 
         // ── Brush settings (SSOT) ─────────────────────────────────────────────

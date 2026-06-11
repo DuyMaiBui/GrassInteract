@@ -28,6 +28,13 @@ namespace GpuTerrain.Editor
         private WorldPainterLayerStackView? layerStack;
         private WorldPainterBrushDock? brushDock;
 
+        // ── Grass sub-views ───────────────────────────────────────────────────
+
+        private WorldPainterPreviewCache?    previewCache;
+        private WorldPainterLodPreviewPanel? lodPreviewPanel;
+        private WorldPainterLodBandRuler?    lodBandRuler;
+        private WorldPainterScatterLayerCard? scatterCard;
+
         // ── CreateInspectorGUI ────────────────────────────────────────────────
 
         public override VisualElement CreateInspectorGUI()
@@ -61,6 +68,34 @@ namespace GpuTerrain.Editor
                 this.filterChips);
             root.Add(this.layerStack.Build());
 
+            // Grass sub-views (created once; shown when a Grass layer is active).
+            this.previewCache   = new WorldPainterPreviewCache();
+            this.lodPreviewPanel = new WorldPainterLodPreviewPanel();
+            this.lodBandRuler   = new WorldPainterLodBandRuler(this.previewCache);
+            this.scatterCard    = new WorldPainterScatterLayerCard(
+                this.lodPreviewPanel, this.lodBandRuler, this.previewCache);
+
+            // Scatter layer card area — refreshed when active layer index changes.
+            var cardArea = new VisualElement();
+            cardArea.AddToClassList("wp-splat-card");
+            root.Add(cardArea);
+
+            root.schedule.Execute(() =>
+            {
+                LayerType layerType = WorldPainterState.ActiveLayerType(painter, out _);
+                cardArea.Clear();
+
+                if (layerType == LayerType.Grass)
+                {
+                    int si = WorldPainterState.ActiveScatterIndex(painter);
+                    if (si >= 0 && this.scatterCard != null)
+                    {
+                        var card = this.scatterCard.Build(painter, si);
+                        if (card != null) cardArea.Add(card);
+                    }
+                }
+            }).Every(200);
+
             // Brush dock (constant — never moves between layer selections)
             this.brushDock = new WorldPainterBrushDock();
             root.Add(this.brushDock.Build());
@@ -78,6 +113,9 @@ namespace GpuTerrain.Editor
                 WorldPainterAuthoring.ActivePainter = null;
                 WorldPainterState.ResetLastStroked();
             }
+
+            this.lodPreviewPanel?.Cleanup();
+            this.previewCache?.Cleanup();
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

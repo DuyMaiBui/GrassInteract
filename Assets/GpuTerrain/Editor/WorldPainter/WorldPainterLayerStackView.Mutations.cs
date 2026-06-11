@@ -21,7 +21,7 @@ namespace GpuTerrain.Editor
         {
             var menu = new GenericMenu();
             menu.AddItem(new GUIContent("Splat layer"), false, () => this.AddSplatLayer());
-            menu.AddDisabledItem(new GUIContent("Grass layer (P3)"));
+            menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayer());
             menu.AddDisabledItem(new GUIContent("Props layer (P4)"));
             menu.AddDisabledItem(new GUIContent("Biome (P5)"));
             menu.ShowAsContext();
@@ -98,6 +98,35 @@ namespace GpuTerrain.Editor
 
             WorldPainterState.ActiveLayerIndex =
                 Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
+            this.RefreshStack();
+        }
+
+        private void AddGrassLayer()
+        {
+            // Create a new DensityScatterLayer sub-asset on the WorldPainter's scene object.
+            // Smart defaults: targetInstances = 50000, slopeRange = [0, 45].
+            var layer = ScriptableObject.CreateInstance<GrassInteract.DensityScatterLayer>();
+            layer.name = $"Grass {this.scatterLayersProp.arraySize}";
+
+            // Persist as an asset next to the scene (or in-memory for unsaved scenes).
+            string scenePath = this.painter.gameObject.scene.path;
+            if (!string.IsNullOrEmpty(scenePath))
+            {
+                string dir    = System.IO.Path.GetDirectoryName(scenePath)!;
+                string assetP = System.IO.Path.Combine(dir, $"{layer.name}.asset")
+                                     .Replace('\\', '/');
+                UnityEditor.AssetDatabase.CreateAsset(layer, assetP);
+                UnityEditor.AssetDatabase.SaveAssets();
+            }
+
+            Undo.RecordObject(this.painter, "Add Grass Layer");
+
+            int newIdx = this.scatterLayersProp.arraySize;
+            this.scatterLayersProp.InsertArrayElementAtIndex(newIdx);
+            this.scatterLayersProp.GetArrayElementAtIndex(newIdx).objectReferenceValue = layer;
+            this.serializedObject.ApplyModifiedProperties();
+
+            WorldPainterState.ActiveLayerIndex = 1 + this.painter.SplatLayers.Count + newIdx;
             this.RefreshStack();
         }
 

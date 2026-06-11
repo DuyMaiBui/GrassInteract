@@ -2,6 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GrassInteract;
 
 namespace GpuTerrain.Editor
 {
@@ -20,6 +21,7 @@ namespace GpuTerrain.Editor
         private readonly SerializedObject serializedObject;
         private readonly WorldPainter painter;
         private readonly WorldPainterFilterChips chips;
+        private readonly WorldPainterPreviewCache previewCache = new();
 
         // ── Cached SerializedProperty refs ────────────────────────────────────
 
@@ -120,17 +122,30 @@ namespace GpuTerrain.Editor
             for (int i = 0; i < this.scatterLayersProp.arraySize; i++)
             {
                 var elem = this.scatterLayersProp.GetArrayElementAtIndex(i);
-                string layerName = elem.objectReferenceValue != null
-                    ? elem.objectReferenceValue.name : $"Scatter {i}";
+                ScatterLayer? scatterLayer = elem.objectReferenceValue as ScatterLayer;
+                string layerName = scatterLayer != null ? scatterLayer.name : $"Scatter {i}";
 
                 LayerType type = layerName.ToLowerInvariant().Contains("prop")
                     ? LayerType.Props : LayerType.Grass;
 
                 if (!this.chips.Passes(type)) continue;
+
+                // LOD0 cached 24px thumbnail for collapsed grass row.
+                Texture2D? lodThumb = null;
+                if (type == LayerType.Grass && scatterLayer != null)
+                {
+                    Mesh[] lodMeshes = scatterLayer.Render.LodMeshes;
+                    Mesh? lod0 = lodMeshes.Length > 0 ? lodMeshes[0] : null;
+                    if (lod0 != null)
+                        lodThumb = this.previewCache.GetOrRender(
+                            scatterLayer.GetInstanceID(), lod0, scatterLayer.Render.Material, 24);
+                }
+
                 int captured = i;
                 this.stackContainer.Add(
                     this.BuildSerializedRow(displayIndex++, type, layerName,
-                        onRemove: () => this.RemoveScatterLayer(captured)));
+                        onRemove: () => this.RemoveScatterLayer(captured),
+                        albedoPreview: lodThumb));
             }
         }
 
@@ -172,8 +187,8 @@ namespace GpuTerrain.Editor
             typeChip.AddToClassList("wp-type-chip");
             row.Add(typeChip);
 
-            // Albedo swatch chip for Splat rows.
-            if (type == LayerType.Splat)
+            // Albedo/LOD0 swatch chip for Splat and Grass rows.
+            if (type == LayerType.Splat || type == LayerType.Grass)
             {
                 var swatch = new VisualElement();
                 swatch.AddToClassList("wp-splat-swatch");
