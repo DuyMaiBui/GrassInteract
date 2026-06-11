@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -18,23 +19,42 @@ namespace GpuTerrain.Editor
     /// saved asset decodes back to the same value that was displayed — no preview/save drift.
     ///
     /// Async path: call <see cref="RequestAsync"/> at stroke END (mouse-up).
+    /// Multiple tiles are queued by tile key; <see cref="Tick"/> drains ALL entries so
+    /// every tile touched by a cross-tile stroke persists independently.
+    ///
     /// Synchronous path: call <see cref="ExecuteSync"/> for tests or forced saves.
     /// NEVER call per-drag-sample to avoid editor stalls.
     /// </summary>
     public sealed class TerrainSculptRtWriteback : IDisposable
     {
-        private bool pendingRequest;
-        private TerrainTileAsset? pendingTile;
-        private TerrainTileGpuResources? pendingGpu;
-        private RenderTexture? pendingHeightRT;
-        private RenderTexture? pendingSplatRT;
+        // ── Async pending queue (keyed by tile — coalesces repeated drag requests) ──
+
+        private sealed class PendingReadback
+        {
+            public TerrainTileAsset       Tile;
+            public TerrainTileGpuResources Gpu;
+            public RenderTexture          HeightRT;
+            public RenderTexture          SplatRT;
+
+            public PendingReadback(TerrainTileAsset tile, TerrainTileGpuResources gpu,
+                RenderTexture heightRT, RenderTexture splatRT)
+            {
+                this.Tile     = tile;
+                this.Gpu      = gpu;
+                this.HeightRT = heightRT;
+                this.SplatRT  = splatRT;
+            }
+        }
+
+        private readonly Dictionary<TerrainTileAsset, PendingReadback> pendingMap =
+            new Dictionary<TerrainTileAsset, PendingReadback>();
 
         // ── Async public API ──────────────────────────────────────────────────
 
         /// <summary>
         /// Queue an async GPU→CPU readback for a tile.
-        /// Triggered once per stroke END (mouse-up), never per sample.
-        /// Call <see cref="Tick"/> each editor update to pump the queue.
+        /// Repeated calls for the same tile coalesce to the latest RTs (throttled drag).
+        /// Call <see cref="Tick"/> each editor update to drain the queue.
         /// </summary>
         public void RequestAsync(
             TerrainTileAsset tile,
@@ -42,59 +62,77 @@ namespace GpuTerrain.Editor
             RenderTexture heightRT,
             RenderTexture splatRT)
         {
-            this.pendingTile    = tile    ?? throw new ArgumentNullException(nameof(tile));
-            this.pendingGpu     = gpu     ?? throw new ArgumentNullException(nameof(gpu));
-            this.pendingHeightRT = heightRT ?? throw new ArgumentNullException(nameof(heightRT));
-            this.pendingSplatRT  = splatRT  ?? throw new ArgumentNullException(nameof(splatRT));
-            this.pendingRequest  = true;
+            if (tile == null)    throw new ArgumentNullException(nameof(tile));
+            if (gpu == null)     throw new ArgumentNullException(nameof(gpu));
+            if (heightRT == null) throw new ArgumentNullException(nameof(heightRT));
+            if (splatRT == null)  throw new ArgumentNullException(nameof(splatRT));
+
+            // Upsert — latest RTs win (coalesces repeated drag requests for the same tile).
+            this.pendingMap[tile] = new PendingReadback(tile, gpu, heightRT, splatRT);
         }
 
         /// <summary>
         /// Pump pending async requests. Call from EditorApplication.update or editor window OnGUI.
+        /// Drains ALL queued tiles so every tile in a cross-tile stroke persists independently.
         /// </summary>
         public void Tick()
         {
-            if (!this.pendingRequest) return;
-            if (this.pendingTile == null || this.pendingGpu == null ||
-                this.pendingHeightRT == null || this.pendingSplatRT == null)
-            {
-                this.pendingRequest = false;
-                return;
-            }
+            if (this.pendingMap.Count == 0) return;
 
-            // Use AsyncGPUReadback for height RT.
-            AsyncGPUReadback.Request(this.pendingHeightRT, 0, request =>
+            // Snapshot + clear first so new RequestAsync calls during callbacks queue correctly.
+            var snapshot = new PendingReadback[this.pendingMap.Count];
+            this.pendingMap.Values.CopyTo(snapshot, 0);
+            this.pendingMap.Clear();
+
+            foreach (var entry in snapshot)
+                this.IssueTileReadback(entry);
+        }
+
+        // ── Per-tile async readback chain ─────────────────────────────────────
+
+        private void IssueTileReadback(PendingReadback entry)
+        {
+            // Capture ALL fields as locals — closures must not reference instance fields
+            // or the entry object (which may be reused/overwritten by a concurrent request).
+            var tile     = entry.Tile;
+            var gpu      = entry.Gpu;
+            var heightRT = entry.HeightRT;
+            var splatRT  = entry.SplatRT;
+
+            // Unity-null guard: destroyed objects compare == null via operator overload.
+            if (tile == null || gpu == null || heightRT == null || splatRT == null) return;
+
+            AsyncGPUReadback.Request(heightRT, 0, request =>
             {
                 if (request.hasError)
                 {
-                    Debug.LogError("[TerrainSculptRtWriteback] AsyncGPUReadback error on height RT.");
+                    Debug.LogError("[TerrainSculptRtWriteback] AsyncGPUReadback error on height RT " +
+                        $"for tile {tile.tileCoord}.");
                     return;
                 }
-                if (this.pendingTile == null || this.pendingSplatRT == null ||
-                    this.pendingGpu == null) return;
+                // Guard again inside callback — domain reload or scene change may have
+                // destroyed the tile/gpu between request dispatch and callback.
+                if (tile == null || gpu == null || splatRT == null) return;
 
                 var heightRaw = request.GetData<float>();
-                this.WriteHeightToAsset(this.pendingTile, heightRaw);
+                this.WriteHeightToAsset(tile, heightRaw);
 
-                // Chain splat readback.
-                AsyncGPUReadback.Request(this.pendingSplatRT, 0, splatRequest =>
+                // Chain splat readback with its own captured locals.
+                AsyncGPUReadback.Request(splatRT, 0, splatRequest =>
                 {
                     if (splatRequest.hasError)
                     {
-                        Debug.LogError("[TerrainSculptRtWriteback] AsyncGPUReadback error on splat RT.");
+                        Debug.LogError("[TerrainSculptRtWriteback] AsyncGPUReadback error on splat RT " +
+                            $"for tile {tile.tileCoord}.");
                         return;
                     }
-                    if (this.pendingTile == null || this.pendingGpu == null) return;
+                    if (tile == null || gpu == null) return;
 
                     var splatRaw = splatRequest.GetData<Color>();
-                    this.WriteSplatToAsset(this.pendingTile, splatRaw);
-
-                    this.FinalizeWriteback(this.pendingTile, this.pendingGpu);
-                    this.pendingRequest = false;
+                    this.WriteSplatToAsset(tile, splatRaw);
+                    this.FinalizeWriteback(tile, gpu);
                 });
             });
-
-            this.pendingRequest = false; // cleared immediately; callbacks fire later
         }
 
         // ── Synchronous path (for tests and forced saves) ──────────────────────
@@ -183,13 +221,16 @@ namespace GpuTerrain.Editor
 
         // ── Dispose ───────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Discard all queued async readbacks without finalizing them.
+        /// Call before mouse-up ExecuteSync so stale throttled-drag entries
+        /// (queued while RTs were alive) don't fire after RTs are destroyed.
+        /// </summary>
+        public void CancelPending() => this.pendingMap.Clear();
+
         public void Dispose()
         {
-            this.pendingRequest  = false;
-            this.pendingTile     = null;
-            this.pendingGpu      = null;
-            this.pendingHeightRT = null;
-            this.pendingSplatRT  = null;
+            this.pendingMap.Clear();
         }
 
         // ── Private helpers ───────────────────────────────────────────────────

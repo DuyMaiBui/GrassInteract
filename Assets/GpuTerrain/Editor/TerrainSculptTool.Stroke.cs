@@ -15,6 +15,10 @@ namespace GpuTerrain.Editor
     ///
     /// M1 fix: OnWillBeDeactivated calls TeardownActiveStroke before releasing RTs so
     /// engines never hold a dangling RT as _HeightTex.
+    ///
+    /// Use-after-free fix: TeardownActiveStroke uses ExecuteSync (not RequestAsync) for the
+    /// final mouse-up flush so all touched tiles are read back while their RTs are still
+    /// alive, then CancelPending drops any stale async drag entries before ReleaseAll.
     /// </summary>
     internal sealed partial class TerrainSculptTool
     {
@@ -77,14 +81,33 @@ namespace GpuTerrain.Editor
 
         /// <summary>
         /// Shared teardown used by both HandleMouseUp and OnWillBeDeactivated.
-        /// Finalises writeback and rebinds committed Texture2D on every touched tile
-        /// so no engine is left holding a dangling RT as _HeightTex.
+        ///
+        /// Uses ExecuteSync (not RequestAsync) for the final flush so the readback happens
+        /// while the RTs are still alive. RequestAsync only stores RT references — the
+        /// actual AsyncGPUReadback fires on the next Tick(), by which point ReleaseAll()
+        /// would have already destroyed those RTs (use-after-free). ExecuteSync reads pixels
+        /// immediately; ≤4 tiles on mouse-up is negligible cost.
+        ///
+        /// Order: CancelPending + WaitAllRequests (drain all in-flight async while RTs alive) →
+        /// ExecuteSync per tile (authoritative final state) → EndSculptPreview (rebind Texture2D)
+        /// → EndInStroke → ReleaseAll (destroy RTs) → clear sets.
+        ///
         /// Renderer may be null when called from OnWillBeDeactivated if it was destroyed.
         /// </summary>
         internal void TeardownActiveStroke(GpuTerrainRenderer? renderer)
         {
+            // Step 1 — drain in-flight async work WHILE RTs are still alive:
+            //   CancelPending: drop queued-but-not-yet-issued drag entries from pendingMap.
+            //   WaitAllRequests: let already-issued in-flight async readbacks complete now
+            //     (they write older drag data into the tile asset — that's fine, step 2 overwrites).
+            //   This prevents late callbacks hitting destroyed RTs → no spurious error log.
+            this.writeback.CancelPending();
+            UnityEngine.Rendering.AsyncGPUReadback.WaitAllRequests();
+
             if (renderer != null)
             {
+                // Step 2 — ExecuteSync: authoritative final state, runs AFTER async drained
+                //   so the fresh sync result is never clobbered by a stale async callback.
                 foreach (var coord in this.strokeTouchedCoords)
                 {
                     var tile = FindTileForCoord(renderer, coord);
@@ -92,13 +115,17 @@ namespace GpuTerrain.Editor
                     if (tile != null && gpu != null &&
                         this.rtCache.TryGet(coord, out var heightRT, out var splatRT))
                     {
-                        this.writeback.RequestAsync(tile, gpu, heightRT, splatRT);
+                        this.writeback.ExecuteSync(tile, gpu, heightRT, splatRT);
                     }
-                    // Rebind committed Texture2D — safe because Upload reuses same object (T3 fix).
-                    renderer.EndSculptPreview(coord);
                 }
+
+                // Step 3 — rebind committed Texture2D on each engine (safe: Upload reuses
+                //   same Texture2D object when res/format match — T3 stale-rebind fix).
+                foreach (var coord in this.strokeTouchedCoords)
+                    renderer.EndSculptPreview(coord);
             }
 
+            // Step 4 — release RTs; no async outstanding at this point.
             this.stroke!.EndInStroke();
             this.rtCache.ReleaseAll();
             this.strokeTouchedCoords.Clear();
