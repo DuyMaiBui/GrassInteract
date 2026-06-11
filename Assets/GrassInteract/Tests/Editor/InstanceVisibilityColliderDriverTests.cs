@@ -238,6 +238,36 @@ namespace GrassInteract.Tests
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // Test 7: GenerateColliders=true semantics — all records with a mesh
+        // produce wantsCollider=true and are acquired when visible.
+        // Simulates the layer-level toggle: a driver built with wantsCollider
+        // uniformly true (as BuildColliderRuntime sets when GenerateColliders is
+        // on) should acquire every visible sorted index.
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Test]
+        public void GenerateColliders_AllRecordsAcquiredWhenVisible()
+        {
+            var (go, pool) = MakePool(cap: 10);
+            try
+            {
+                // Simulate GenerateColliders=true: all 6 records want a collider.
+                bool[] allWant = { true, true, true, true, true, true };
+                int[]  map     = { 0, 1, 2, 3, 4, 5 };
+                var    driver  = MakeDriver(pool, map, wantsOverride: allWant);
+
+                // All 6 sorted indices visible.
+                driver.ApplyVisibleSetFromArray(new uint[] { 0u, 1u, 2u, 3u, 4u, 5u }, 6);
+
+                Assert.AreEqual(6, pool.ActiveKeys.Count,
+                    "all 6 records acquired when GenerateColliders=true and all are visible");
+
+                driver.Dispose();
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Helper: safe Contains for KeyCollection without LINQ.
         // ─────────────────────────────────────────────────────────────────────
 

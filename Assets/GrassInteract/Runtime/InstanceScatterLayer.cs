@@ -53,6 +53,11 @@ namespace GrassInteract
 
         // ── Layer-default collider config ─────────────────────────────────────
 
+        [Tooltip("Generate a pooled, visibility-culled collider for EVERY instance at runtime — " +
+                 "no per-instance authoring needed. " +
+                 "Mesh = per-record override if set, else DefaultColliderMesh.")]
+        [SerializeField] private bool generateColliders = false;
+
         [Tooltip("Fallback collider mesh when a record's colliderOverride is null.")]
         [SerializeField] private Mesh? defaultColliderMesh;
 
@@ -70,12 +75,8 @@ namespace GrassInteract
         [Tooltip("Maximum number of collider GameObjects held in the pool at once.")]
         [SerializeField] private int poolCap = 256;
 
-        [Tooltip("Disable colliders for instances beyond cullDistance from the camera.")]
+        [Tooltip("Use the GPU LOD0 visibility buffer to cull colliders — only instances visible in LOD0 get a collider.")]
         [SerializeField] private bool cullColliders = true;
-
-        [Range(1f, 500f)]
-        [Tooltip("Distance (metres) beyond which per-instance colliders are culled.")]
-        [SerializeField] private float cullDistance = 80f;
 
         [Tooltip("Uniform scale multiplier applied to the layer-default collider mesh.")]
         [SerializeField] private float defaultColliderScale = 1f;
@@ -134,11 +135,11 @@ namespace GrassInteract
         /// <summary>Max pooled collider count.</summary>
         public int PoolCap => this.poolCap;
 
-        /// <summary>Frustum-cull colliders beyond CullDistance.</summary>
-        public bool CullColliders => this.cullColliders;
+        /// <summary>Generate a pooled, visibility-culled collider for every instance at runtime.</summary>
+        public bool GenerateColliders => this.generateColliders;
 
-        /// <summary>Camera-distance threshold for collider culling.</summary>
-        public float CullDistance => this.cullDistance;
+        /// <summary>Use the GPU LOD0 visibility buffer to cull colliders.</summary>
+        public bool CullColliders => this.cullColliders;
 
         /// <summary>Uniform scale multiplier for the layer-default collider mesh.</summary>
         public float DefaultColliderScale => this.defaultColliderScale;

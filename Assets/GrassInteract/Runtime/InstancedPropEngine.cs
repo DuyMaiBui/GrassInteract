@@ -425,7 +425,7 @@ namespace GrassInteract
         {
             if (layer is not InstanceScatterLayer instLayer) return;
             if (!Application.isPlaying) return;
-            if (!instLayer.AnyRecordWantsCollider()) return;
+            if (!instLayer.GenerateColliders && !instLayer.AnyRecordWantsCollider()) return;
 
             var authored = instLayer.AuthoredInstances;
             if (authored == null) return;
@@ -471,10 +471,11 @@ namespace GrassInteract
                 colMesh ??= layerDefaultMesh;
                 // colMat stays null when unset → InstanceColliderPool falls back to the layer default.
 
-                if (rec.generateCollider && colMesh == null)
+                bool wouldWant = instLayer.GenerateColliders || rec.generateCollider;
+                if (wouldWant && colMesh == null)
                 {
                     Debug.LogWarning(
-                        $"[InstancedPropEngine] Record {i}: generateCollider=true but no collider mesh " +
+                        $"[InstancedPropEngine] Record {i}: collider requested but no collider mesh " +
                         "available (no per-record override, no layer default, no lod0 mesh) — skipping.");
                 }
 
@@ -483,7 +484,7 @@ namespace GrassInteract
                 scales[i]        = rec.scale * rec.colliderScale;
                 meshes[i]        = colMesh;
                 convexFlags[i]   = rec.colliderConvex;
-                wantsCollider[i] = rec.generateCollider && colMesh != null;
+                wantsCollider[i] = colMesh != null && (instLayer.GenerateColliders || rec.generateCollider);
                 materials[i]     = colMat;
             }
 
