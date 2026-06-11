@@ -10,32 +10,34 @@
 
 ---
 
-## 0. ESCALATED DESIGN DECISIONS — confirm with user before the DELETE phases
+## 0. DESIGN DECISIONS — RESOLVED (user-confirmed 2026-06-11)
 
-Scouting proved the brief's locked decision #2 ("DELETE `ScatterField`, `GrassScatter` MonoBehaviours; KEEP only SSOT scatter types") **collides with code reality**. AskUserQuestion is unavailable to this planning subagent, so these are escalated to the orchestrator with an **evidence-backed recommended default**. The plan is built around the recommended defaults; if the user overrides, the affected phases (P6, P7) change scope.
+Scouting proved the brief's locked decision #2 ("DELETE `ScatterField`, `GrassScatter` MonoBehaviours; KEEP only SSOT scatter types") **collided with code reality**. The escalations were resolved by the user:
 
-| # | Decision | Evidence | Recommended default |
+| # | Decision | Evidence | Resolution |
 |---|---|---|---|
-| **E1** | **Is `ScatterField` deletable legacy or live KEEP runtime?** | `ScatterField` is the live grass/scatter engine host: builds `IGrassEngine`(`GrassGpuEngine`/`GrassCpuEngine`) + `InstancedPropEngine` per layer from `TerrainScatterConfig`/`InstanceScatterLayer`/`DensityScatterLayer`/`ScatterLod`. `WorldPainter.cs DriveScatterField()` drives a co-located `ScatterField` for P3a/P4 grass+prop rendering. `GpuTerrainScatterGround`/`WorldPainterMigration`/`WorldPainterScatterLayerCard` also reference it. The "single scene consumer" evidence checked *scene* refs only — it missed ~30 *code* refs from KEPT WorldPainter runtime. | **KEEP-rehome** `ScatterField` + its `IGrassEngine`/prop-engine cluster as runtime WorldPainter renders through. Delete ONLY the truly-dead *authoring* (`ScatterGizmos`, `ScatterBrushLibrary`, `ScatterFieldEditorTick`, etc.) per HR#1/locked-#2, NOT the runtime engine host. |
-| **E2** | **`GrassScatter` "MonoBehaviour" — delete?** | No `GrassScatter : MonoBehaviour` exists. `GrassScatter` is a `static class` CPU scatter builder + `class GrassScatterResult`, consumed by the **frozen** `ChunkedInstanceBuffer` (KEEP) + `ChunkedInstanceBufferTests`. The brief mis-identified it. | **KEEP-rehome** the static builder (deleting it breaks frozen `ChunkedInstanceBuffer` + its test). Nothing named `GrassScatter` is a deletable MonoBehaviour. |
-| **E3** | **`DensityPaintGPU` delete vs its 8 stamp-math tests** | `DensityPaintGPU` is a DELETE target, but `DensityBrushMathTests` calls `DensityPaintGPU.ComputeStampPositions` (8 cases) in the SAME file that tests the KEEP `WorldPainterDensityEncoder`. Stamp-position math is behavior now owned by WorldPainter's spacing-stamp path. | **Port-then-delete:** before deleting `DensityPaintGPU`, confirm `ComputeStampPositions` math lives in the WorldPainter stamping path (or move it there), re-point the 8 tests at the WP equivalent, THEN delete. No coverage lost. |
-| **E4** | **3 straddle tests of DELETE targets** (`TerrainSculptUndoTests`→`TerrainSculptUndo`, `TerrainSculptRtWritebackTests`→`TerrainSculptRtWriteback`, `TerrainBrushPreviewTests`→`TerrainBrushPreview.CreateUnitDisc`) | Each directly instantiates a DELETE-target class. WorldPainter has parallel equivalents (`WorldPainterUndo`, `WorldPainterDensityEncoder`, brush-disc geometry). | **Per-test migrate:** if WorldPainter has the equivalent behavior, re-point the test; only drop a test whose exact behavior is genuinely gone. Decision documented per-test in P7. **No silent coverage drop** (development-principles §Pre-Delete Reference Check + Test Pass Gate). |
+| **E1** | **Is `ScatterField` deletable legacy or live KEEP runtime?** | `ScatterField` is the live grass/scatter engine host: builds `IGrassEngine`(`GrassGpuEngine`/`GrassCpuEngine`) + `InstancedPropEngine` per layer from `TerrainScatterConfig`/`InstanceScatterLayer`/`DensityScatterLayer`/`ScatterLod`. `WorldPainter.cs DriveScatterField()` drives a co-located `ScatterField` for P3a/P4 grass+prop rendering. `GpuTerrainScatterGround`/`WorldPainterMigration`/`WorldPainterScatterLayerCard` also reference it. The "single scene consumer" evidence checked *scene* refs only — it missed ~30 *code* refs from KEPT WorldPainter runtime. | **CONFIRMED → KEEP-rehome** `ScatterField`+`GrassScatter` runtime + the `IGrassEngine`/prop-engine cluster. Delete ONLY the old authoring UI. WorldPainter is the sole authoring tool. |
+| **E2** | **`GrassScatter` "MonoBehaviour" — delete?** | No `GrassScatter : MonoBehaviour` exists. `GrassScatter` is a `static class` CPU scatter builder + `class GrassScatterResult`, consumed by the **frozen** `ChunkedInstanceBuffer` (KEEP) + `ChunkedInstanceBufferTests`. The brief mis-identified it. | **CONFIRMED → KEEP-rehome** the static builder. Nothing named `GrassScatter` is a deletable MonoBehaviour. |
+| **E3** | **`DensityPaintGPU` delete vs its 8 stamp-math tests** | `DensityPaintGPU` is a DELETE target, but `DensityBrushMathTests` calls `DensityPaintGPU.ComputeStampPositions` (8 cases) in the SAME file that tests the KEEP `WorldPainterDensityEncoder`. Stamp-position math is behavior now owned by WorldPainter's spacing-stamp path. | **CONFIRMED → Port-then-delete:** move `ComputeStampPositions` math into the WorldPainter stamping path, re-point the 8 tests at the WP equivalent, THEN delete `DensityPaintGPU`. No coverage lost. |
+| **E4** | **3 straddle tests of DELETE targets** (`TerrainSculptUndoTests`→`TerrainSculptUndo`, `TerrainSculptRtWritebackTests`→`TerrainSculptRtWriteback`, `TerrainBrushPreviewTests`→`TerrainBrushPreview.CreateUnitDisc`) | Each directly instantiates a DELETE-target class. WorldPainter has parallel equivalents (`WorldPainterUndo`, `WorldPainterDensityEncoder`, brush-disc geometry). | **CONFIRMED → migrate** the 3 straddle tests to their WorldPainter equivalents; only drop a test whose exact behavior is genuinely gone, itemized. No silent coverage drop. |
+| **E5** | **Second demo scene `GpuTerrain/Demo/TerrainValidation.unity` — keep or sweep?** | The 2-tile `GpuTerrainRenderer` validation scene, generated by `TerrainValidationSceneBuilder`. Ref check: NOT in `EditorBuildSettings` (`m_Scenes: []`); NO test loads it; its 4 demo assets (`TileA_0_0`/`TileB_1_0`/`ValidationLayerSet`/`TerrainPatch_Validation.mat`) are referenced ONLY by the builder. | **CHANGED → DELETE** the scene + its 4 demo assets (user wants a full sweep of old-path scenes; only `InstanceScatterLayer`/`ScatterLod`-style SSOT runtime stays). Swept in P7 alongside `GrassInteractDemo.unity`. **BUT** `TerrainValidationSceneBuilder.cs` is **KEPT** — see sub-decision. |
 
-> Additional confirmed fact: a SECOND demo scene exists — `GpuTerrain/Demo/TerrainValidation.unity` (the `GpuTerrainRenderer` 2-tile validation scene, built by `TerrainValidationSceneBuilder` menu). The brief authorized deleting ONLY `GrassInteract/Demo/GrassInteractDemo.unity`. **TerrainValidation.unity is KEPT** (rehomed) unless the user says otherwise — flag E5 if they want it gone.
+### E5 sub-decision — `TerrainValidationSceneBuilder.cs` is KEEP, not DELETE
+Pre-delete ref check found `TerrainValidationSceneBuilder` is referenced by the **KEPT** `WorldPainter/WorldPainterCoachMarks.cs`: `BuildNoTilesEmptyState()` wires the shipped "Create 1×1 tile" first-run empty-state button to `TerrainValidationSceneBuilder.CreateValidationScene` (a live P6 discoverability feature). The builder is a **generator** (it *writes* a tile+scene on click), not a scene-loader — so deleting the pre-baked `TerrainValidation.unity` asset does NOT break it; it regenerates on demand. **Therefore: DELETE the pre-baked scene + 4 assets, KEEP the builder** (rehome it; in P8/P10 confirm it writes under the new `Assets/WorldPainter/…` tree, not the old `Assets/GpuTerrain/Demo/` path — see P8 §generator-path). If a future request wants the empty-state bootstrap button removed entirely, the builder becomes DELETE-able too — not in scope here.
 
 ---
 
 ## 1. File classification summary
 
-183 `.cs` files total (110 GpuTerrain + 73 GrassInteract) + 18 non-`.cs` assets (shaders/compute/uss/uxml).
+183 `.cs` files total (110 GpuTerrain + 73 GrassInteract) + non-`.cs` assets (shaders/compute/uss/uxml/scenes/SO).
 
-| Class | Count (.cs) | Meaning |
+| Class | Count | Meaning |
 |---|---|---|
-| **KEEP-rehome** | **~138** | Move into `WorldPainter`/`WorldPainter.Editor`/`WorldPainter.Tests`, preserve `.meta`/GUID, rename namespace. Includes all frozen SSOT, the CDLOD/streaming/render runtime, the `ScatterField`+`IGrassEngine` grass/prop cluster (E1), the static `GrassScatter` builder (E2), ALL WorldPainter P1–P6 editor code, and the surviving tests. |
-| **DELETE** | **~28** | Old superseded authoring + truly-dead legacy authoring (per HR#1 + locked-#2). Enumerated in §3.2. Each gets a pre-delete ref check. |
-| **MERGE/CONSOLIDATE** | **~8 pairs** | Transitional parallel classes: `WorldPainter*` (keep) vs `TerrainSculpt*`/`GpuTerrainRenderer*` (delete) — consolidate once old path is gone (§3.3). Plus oversized-file splits (§3.4). |
+| **KEEP-rehome** | **~138 .cs** (+ kept shaders/compute/hlsl + WorldPainter `.uss` + `TerrainValidationSceneBuilder.cs`) | Move into `WorldPainter`/`WorldPainter.Editor`/`WorldPainter.Tests`, preserve `.meta`/GUID, rename namespace at P9. Includes all frozen SSOT, the CDLOD/streaming/render runtime, the `ScatterField`+`IGrassEngine` grass/prop cluster (E1), the static `GrassScatter` builder (E2), ALL WorldPainter P1–P6 editor code (incl. the validation-scene builder per E5 sub-decision), and the surviving tests. |
+| **DELETE** | **~28 .cs** + **2 demo scenes** + their scene-only assets | Old superseded authoring + legacy scatter authoring (per HR#1 + locked-#2) + **both** demo scenes (`GrassInteractDemo.unity` per locked-#2 AND `TerrainValidation.unity` per E5) + the 4 `TerrainValidation` demo assets + the 4 deleted-window non-`.cs` assets. Enumerated in §3.2. Each gets a pre-delete ref check. |
+| **MERGE/CONSOLIDATE** | **~8** | Transitional parallel classes: `WorldPainter*` (keep) vs `TerrainSculpt*`/`GpuTerrainRenderer*` (delete/consolidate) once the old path is gone (§3.3). Plus oversized-file splits (§3.4). |
 
-Non-`.cs`: KEEP-rehome the terrain shaders/compute/hlsl + WorldPainter `.uss`; DELETE the ScatterStudio `.uss`/`.uxml` + `DensityPaintBrush.shader` (belong to deleted window).
+> **`.cs` DELETE count unchanged at ~28** — E5 adds *scene + ScriptableObject/material assets* to the delete set, not `.cs` files, and the only `.cs` candidate (`TerrainValidationSceneBuilder.cs`) is KEPT. The DELETE class grows by **2 scenes + 4 TerrainValidation assets** (TileA/TileB/ValidationLayerSet/TerrainPatch_Validation.mat).
 
 Full per-file table: `phase-1.md` (the inventory deliverable).
 
@@ -84,15 +86,15 @@ Assets/WorldPainter/
 │   │                    WorldPainterDensityEncoder, BrushFalloffLut, TerrainPaintTargetResolver, TileRtCache,
 │   │                    TerrainSculptRtWriteback (consolidated)
 │   ├── Inspector/      WorldPainterInspector, TerrainTileAssetEditor
-│   ├── Import/         TerrainTileImporter, TerrainValidationSceneBuilder
+│   ├── Import/         TerrainTileImporter, TerrainValidationSceneBuilder (KEPT — E5 sub-decision; writes a tile+scene on demand)
 │   ├── Migration/      WorldPainterMigration
 │   ├── Resources/      WorldPainter.uss, WorldPainterLight.uss
 │   └── AssemblyInfo.cs (GpuTerrainEditorAssemblyInfo merged)
-├── Tests/Editor/       WorldPainter.Tests.asmdef + all surviving tests (frozen-data/math + owner + brush)
-└── Demo/               TerrainValidation.unity (KEPT — E5 if user wants gone) + its tiles/mats/layerset
+└── Tests/Editor/       WorldPainter.Tests.asmdef + all surviving tests (frozen-data/math + owner + brush)
 ```
 
-> The leaf folder names use generic-role tokens per the Unity naming charter. No file *renames* are required by this plan beyond the namespace rewrite + the oversized-file partial splits — type names already conform (`WorldPainter*` is the generic feature role).
+> **No `Demo/` folder in the target tree** — both demo scenes are swept (E5: `TerrainValidation.unity` + its 4 assets; locked-#2: `GrassInteractDemo.unity` + its assets). `TerrainValidationSceneBuilder` regenerates a tile+scene on demand under the new tree, so a checked-in demo scene is no longer needed.
+> Leaf folder names use generic-role tokens per the Unity naming charter. No file *renames* are required beyond the namespace rewrite + the oversized-file partial splits — type names already conform (`WorldPainter*` is the generic feature role).
 
 ### 2.3 Frozen SSOT (preserve behavior — do NOT touch logic)
 `TerrainTileAsset`, `TerrainWorldGrid`, `TerrainHeightFormat`, `CdlodQuadtree`, `CdlodNode`, `ScatterLod`, `InstanceScatterLayer`, `DensityScatterLayer`, `ScatterLayer`, `AuthoredInstancesData`, `ChunkedInstanceBuffer`, `GpuTerrainEngine`, `HeightmapSurfaceSampler : ISurfaceSampler` seam. Moving/namespace-renaming is allowed (updates all refs); **compute kernel signatures in `TerrainBrush.compute` stay stable** — `TerrainBrushMathTests` (the behavior contract) must not change.
@@ -102,25 +104,27 @@ Assets/WorldPainter/
 ## 3. File classification detail
 
 ### 3.1 KEEP-rehome (move + namespace rewrite, preserve GUID)
-All Runtime files of both assemblies EXCEPT the delete list below; all `WorldPainter*` editor files; all surviving tests. See `phase-1.md` for the exhaustive table. Notable KEEPs that the brief implied were deletable: `ScatterField`, `GrassScatter`(static), `TerrainScatterConfig`, the `IGrassEngine` cluster (E1/E2), `TerrainValidation.unity` (E5).
+All Runtime files of both assemblies EXCEPT the delete list below; all `WorldPainter*` editor files; all surviving tests; **`TerrainValidationSceneBuilder.cs`** (E5 sub-decision — a shipped coach-marks feature depends on it). See `phase-1.md` for the exhaustive table. Notable KEEPs that the brief implied were deletable: `ScatterField`, `GrassScatter`(static), `TerrainScatterConfig`, the `IGrassEngine` cluster (E1/E2).
 
-### 3.2 DELETE (per HR#1 + locked-#2 — each with pre-delete ref check)
+### 3.2 DELETE (per HR#1 + locked-#2 + E5 — each with pre-delete ref check)
 
 **Old superseded terrain authoring (HR#1):**
 `GpuTerrainRendererEditor.cs`, `GpuTerrainRendererEditor.Sculpt.cs`, `TerrainSculptTool.cs`, `TerrainSculptTool.Stroke.cs`, `TerrainBrushStroke.cs`, `TerrainBrushPreview.cs`, `TerrainSculptState.cs`, `TerrainSculptConfig.cs`, `TerrainSculptUndo.cs`, `WorldPainterSculptTool.Density.cs` (if `DensityPaintGPU` fold-in superseded it — verify).
 
 **Legacy scatter authoring (locked-#2 — runtime engine host KEPT per E1, only authoring deleted):**
-`ScatterStudioWindow.cs`, `ScatterStudio/*` (AnchorPreviewPanel, BrushLibraryView, DensityPaintGPU, DensityPaintPanel, InstanceGhostPreview, InstancePanel, LayerPanelView, LayerRailView, LodDistanceBar, ScatterBrushPreview), `ScatterGizmos.cs`, `ScatterBrushLibrary.cs`, `ScatterBrushLibraryProvider.cs`, `ScatterDensityOverlay.cs`, `ScatterFieldEditorTick.cs`, `ScatterFieldLookup.cs`, `ScatterRebuildScheduler.cs`, `ScatterAuthoringState.cs`, `DensityPaintTool.cs`, `DensityMapFactory.cs`, `InstancePlacementTool.cs`, `TerrainScatterConfigEditor.cs` (if superseded by WorldPainter inspector — verify it isn't the only editor for a KEPT config).
+`ScatterStudioWindow.cs`, `ScatterStudio/*` (AnchorPreviewPanel, BrushLibraryView, DensityPaintGPU [after E3 test repoint], DensityPaintPanel, InstanceGhostPreview, InstancePanel, LayerPanelView, LayerRailView, LodDistanceBar, ScatterBrushPreview), `ScatterGizmos.cs`, `ScatterBrushLibrary.cs`, `ScatterBrushLibraryProvider.cs`, `ScatterDensityOverlay.cs`, `ScatterFieldEditorTick.cs`, `ScatterFieldLookup.cs`, `ScatterRebuildScheduler.cs`, `ScatterAuthoringState.cs`, `DensityPaintTool.cs`, `DensityMapFactory.cs`, `InstancePlacementTool.cs`, `TerrainScatterConfigEditor.cs` (if superseded by WorldPainter inspector — verify it isn't the only editor for a KEPT config).
 
-**Demo (locked-#2):** `GrassInteract/Demo/GrassInteractDemo.unity` + its meta. (Demo assets `DensityMap.*`, `GrassInteractDemo.mat`, `TerrainScatterConfig.asset`, `GrassInteractDemoEffector.cs` — delete if scene-only; `TerrainScatterConfig.asset` ref-check: KEEP if WorldPainter migration/runtime reads it.)
+**Demo scenes + scene-only assets (locked-#2 + E5 — FULL old-path scene sweep):**
+- `GrassInteract/Demo/GrassInteractDemo.unity` + meta (+ scene-only assets `DensityMap.*`, `GrassInteractDemo.mat`, `GrassInteractGround.mat`, `GrassInteractIndirectMat.mat`, `New Material.mat`, `ScatterPropRock.mat`, `GrassInteractDemoEffector.cs`; `TerrainScatterConfig.asset` — KEEP if WorldPainter migration/runtime reads it, else delete).
+- **`GpuTerrain/Demo/TerrainValidation.unity` + meta (E5)** + its 4 generated assets `TileA_0_0.asset`, `TileB_1_0.asset`, `ValidationLayerSet.asset`, `TerrainPatch_Validation.mat`. Ref-check confirmed: NOT in `EditorBuildSettings`, NO test loads it, the 4 assets are referenced ONLY by `TerrainValidationSceneBuilder` (which is KEPT and regenerates them on demand). Safe to delete.
 
-**Non-.cs:** `ScatterStudio.uss`, `ScatterStudio.uxml`, `ScatterStudioLight.uss`, `DensityPaintBrush.shader` (deleted-window assets).
+**Non-.cs (deleted-window assets):** `ScatterStudio.uss`, `ScatterStudio.uxml`, `ScatterStudioLight.uss`, `DensityPaintBrush.shader`.
 
 > **MANDATORY per deletion target:** grep every caller across runtime+editor+tests+scenes (`development-principles.md §Pre-Delete Reference Check`), update/remove refs, run tests, THEN `git rm` (carries `.meta`).
 
 ### 3.3 MERGE/CONSOLIDATE (transitional parallel classes)
 Once 3.2 deletes land, the surviving `WorldPainter*` classes are the sole path — consolidate any duplicated helpers:
-- `GpuTerrainRenderer` (runtime) ↔ `WorldPainter.Render.cs` ("mirrors GpuTerrainRenderer exactly"). Keep ONE multi-tile submit path. **Caution:** `GpuTerrainRenderer` is referenced by the KEPT `TerrainValidation.unity` scene + `TerrainTileAssetEditor` + `TerrainValidationSceneBuilder` — if consolidating into `WorldPainter.Render`, either keep `GpuTerrainRenderer` as the scene-facing component OR migrate the scene. Decide in P8 (ref-check first).
+- `GpuTerrainRenderer` (runtime) ↔ `WorldPainter.Render.cs` ("mirrors GpuTerrainRenderer exactly"). Keep ONE multi-tile submit path. **Note (E5 changed the picture):** with `TerrainValidation.unity` now DELETED, the only remaining `GpuTerrainRenderer` consumers are `WorldPainter.Render`, `TerrainTileAssetEditor`, and `TerrainValidationSceneBuilder` (which *constructs* a `GpuTerrainRenderer` at generation time). No checked-in scene references it anymore → consolidation is freer. Decide in P8: either keep `GpuTerrainRenderer` as the runtime component the builder instantiates + have `WorldPainter.Render` delegate to it (no dup), or fold it fully into `WorldPainter.Render` and update the builder. Ref-check `TerrainTileAssetEditor` + the builder first.
 - `TerrainSculptRtWriteback` (KEEP — still referenced by `WorldPainterDensityEncoder` + `WorldPainterSculptTool`) — keep, but verify no dead duplication vs WorldPainter writeback.
 - `TerrainPaintTargetResolver`, `TileRtCache`, `BrushFalloffLut` — shared KEEP utilities; confirm single-owner after old tool deletion.
 
@@ -137,8 +141,9 @@ Once 3.2 deletes land, the surviving `WorldPainter*` classes are the sole path �
 | `WorldPainterMigration.cs` | 230 | Split scan vs write. |
 | `WorldPainter/WorldPainterBiomePaletteView.cs` | 222 | Split card-build vs interaction. |
 | `WorldPainterInspector.cs` / `WorldPainterLodBandRuler.cs` | 212 | Borderline — split only if a clean responsibility seam exists. |
+| `TerrainValidationSceneBuilder.cs` | 253 | KEPT (E5). Split only if a clean seam exists (tile-gen vs scene-gen); also retarget its hardcoded `Assets/GpuTerrain/Demo` path to the new tree (P8). |
 
-(`TerrainSculptRtWriteback` 298, `TerrainBrushPreview` 289, `TerrainValidationSceneBuilder` 253 — first two are DELETE/borderline; `TerrainValidationSceneBuilder` split only if kept and a seam exists.)
+(`TerrainSculptRtWriteback` 298, `TerrainBrushPreview` 289 — DELETE/borderline, no split needed.)
 
 ---
 
@@ -150,14 +155,14 @@ Ordered to keep the project **compiling at every phase boundary**. The hard cons
 |---|---|---|---|---|
 | **P1** | Inventory + dependency map (the per-file KEEP/DELETE/MERGE table, every cross-ref) — DELIVERABLE ONLY, no code | **M** | — | n/a (no code change) |
 | **P2** | Target asmdef + feature-folder design lock + reference-check pass (grep every delete target's callers, record blast radius) | **S** | P1 | n/a |
-| **P3** | Create `Assets/WorldPainter/` + 3 new asmdefs; `git mv` ALL runtime KEEP files into `WorldPainter/Runtime/<feature>/` — **keep old namespaces for now**, new single `WorldPainter` asmdef replaces the 2 old runtime asmdefs. ATOMIC. | **L** | P2 | YES (intra-assembly refs unchanged; cross-asm ref now internal) |
+| **P3** | Create `Assets/WorldPainter/` + `WorldPainter` asmdef; `git mv` ALL runtime KEEP files into `WorldPainter/Runtime/<feature>/` — **keep old namespaces for now**, new single `WorldPainter` asmdef replaces the 2 old runtime asmdefs. ATOMIC. | **L** | P2 | YES (intra-assembly refs unchanged; cross-asm ref now internal) |
 | **P4** | `git mv` editor KEEP files into `WorldPainter/Editor/<feature>/`; new `WorldPainter.Editor` asmdef. ATOMIC. | **M** | P3 | YES |
 | **P5** | `git mv` test KEEP files into `WorldPainter/Tests/Editor/`; new `WorldPainter.Tests` asmdef. **GATE: 301 green.** | **M** | P4 | YES |
-| **P6** | DELETE old terrain authoring (3.2 group 1) — per-target ref check, migrate/keep the 3 straddle tests (E4) + density tests (E3). **GATE: green (count may drop only by genuinely-obsolete tests, documented).** | **M** | P5 | YES |
-| **P7** | DELETE legacy scatter authoring (3.2 group 2) + `GrassInteractDemo.unity` (locked-#2) — per-target ref check; sever the 4 dead-authoring refs while KEEPING `ScatterField` runtime (E1). **GATE: 301-minus-documented green.** | **M** | P6 | YES |
-| **P8** | MERGE/CONSOLIDATE parallel classes (3.3) + oversized-file splits (3.4). SOLID/dedup. **GATE: green.** | **L** | P7 | YES |
-| **P9** | Namespace rewrite `GpuTerrain`/`GrassInteract` → `WorldPainter` across all surviving files + asmdef `rootNamespace`. ATOMIC, single batch, verify ONCE (full recompile + long reload). **GATE: 301 green.** | **L** | P8 | YES (atomic) |
-| **P10** | Final full-suite verify + cleanup (stray metas, folder metas, packages-lock resolve) + commit/push. **FINAL GATE: 301 green, build-isolation check (authoring absent from player build).** | **S** | P9 | YES |
+| **P6** | DELETE old terrain authoring (3.2 group 1) — per-target ref check, migrate the 3 straddle tests (E4) + port density math + repoint its 8 tests (E3). **GATE: green (count may drop only by genuinely-obsolete tests, documented).** | **M** | P5 | YES |
+| **P7** | DELETE legacy scatter authoring (3.2 group 2) + **both** demo scenes (`GrassInteractDemo.unity` per locked-#2 AND `TerrainValidation.unity`+4 assets per E5) — per-target ref check; sever the dead-authoring refs while KEEPING `ScatterField` runtime (E1) and `TerrainValidationSceneBuilder` (E5 sub-decision). **GATE: post-P6-baseline green.** | **M** | P6 | YES |
+| **P8** | MERGE/CONSOLIDATE parallel classes (3.3) + oversized-file splits (3.4) + retarget `TerrainValidationSceneBuilder` generator path to the new tree. SOLID/dedup. **GATE: green.** | **L** | P7 | YES |
+| **P9** | Namespace rewrite `GpuTerrain`/`GrassInteract` → `WorldPainter` across all surviving files + asmdef `rootNamespace`. ATOMIC, single batch, verify ONCE (full recompile + long reload). **GATE: green.** | **L** | P8 | YES (atomic) |
+| **P10** | Final full-suite verify + cleanup (stray metas, folder metas, packages-lock resolve) + commit/push. **FINAL GATE: green, build-isolation check (authoring absent from player build).** | **S** | P9 | YES |
 
 **Critical path:** P1→P2→P3→P4→P5→P6→P7→P8→P9→P10 (mostly linear — file moves and renames cannot safely parallelize on a shared working tree; per `parallel-teammate-git-index-race.md` + the Unity single-worktree compile-gate, these serialize).
 **Atomic-phase callouts:** P3, P4, P9 each touch a whole assembly's compile surface — must land as one batch with ONE verify, not incremental.
@@ -170,16 +175,16 @@ Phase detail: `phase-1.md` … `phase-10.md`.
 
 | # | Risk | L | I | Score | Mitigation | Phase |
 |---|---|---|---|---|---|---|
-| R1 | **Deleting `ScatterField` (per literal brief) guts WorldPainter grass/prop rendering** | 5 | 5 | **25** | **E1 escalation** — reclassify `ScatterField`+`IGrassEngine` cluster as KEEP-rehome. Do NOT delete until user confirms. Plan default = KEEP. | P0/P7 |
-| R2 | **`.meta`/GUID loss on file move breaks scene/prefab/asset references** | 4 | 5 | **20** | `git mv` only (carries `.meta`); never delete+recreate. After each move phase, open Unity + `read_console` for missing-GUID warnings + run tests. `TileA_0_0.asset`/`ValidationLayerSet.asset` GUID refs verified intact. | P3,P4,P5 |
-| R3 | **Half-renamed assembly fails to compile (namespace rewrite mid-flight)** | 4 | 5 | **20** | Namespace rewrite is its OWN atomic phase (P9), executed as a single batch with ONE verify — never partial. Moves (P3–P5) keep OLD namespaces so they compile independently of the rename. | P9 |
-| R4 | **Silent test-coverage drop** (straddle tests of deleted classes E3/E4 dropped, not migrated) | 4 | 4 | **16** | Per-test migrate decision documented in P6/P7; only drop a test whose exact behavior is provably gone. `development-principles §Test Pass Gate` — count delta must be itemized, never silent. | P6,P7 |
-| R5 | **Frozen-SSOT behavior regressed by a move/rename touching logic** | 3 | 5 | **15** | Moves carry files verbatim (namespace line only at P9). `TerrainBrushMathTests` + the 216 data/math tests are the contract — green before/after every phase. Any logic edit to a frozen type = STOP-and-ask. | all |
-| R6 | `GpuTerrainRenderer`↔`WorldPainter.Render` consolidation breaks the KEPT `TerrainValidation.unity` scene (scene references the runtime component) | 3 | 4 | 12 | P8 ref-checks the scene before consolidating; keep `GpuTerrainRenderer` as scene-facing OR migrate scene with verified GUIDs. | P8 |
-| R7 | Stale `packages-lock.json` silently drops test assemblies from discovery (89 vs 301) → false "all green" | 3 | 4 | 12 | Resolve packages before trusting any gate; assert the run reports the FULL 301 count, not a truncated set (predecessor handoff lesson). | every gate |
+| R1 | **Deleting `ScatterField` (per literal brief) guts WorldPainter grass/prop rendering** | 5 | 5 | **25** | **E1 RESOLVED → KEEP** `ScatterField`+`IGrassEngine` cluster as KEEP-rehome. Mitigation locked: it is NOT deleted. | P7 (KEEP discipline) |
+| R2 | **`.meta`/GUID loss on file move breaks scene/prefab/asset references** | 4 | 5 | **20** | `git mv` only (carries `.meta`); never delete+recreate. After each move phase, open Unity + `read_console` for missing-GUID warnings + run tests. | P3,P4,P5 |
+| R3 | **Half-renamed assembly fails to compile (namespace rewrite mid-flight)** | 4 | 5 | **20** | Namespace rewrite is its OWN atomic phase (P9), single batch, ONE verify — never partial. Moves (P3–P5) keep OLD namespaces so they compile independently of the rename. | P9 |
+| R4 | **Silent test-coverage drop** (straddle tests of deleted classes E3/E4 dropped, not migrated) | 4 | 4 | **16** | E3 port-then-repoint + E4 per-test migrate, documented in P6/P7; only drop a test whose exact behavior is provably gone. `development-principles §Test Pass Gate` — count delta itemized, never silent. | P6,P7 |
+| R5 | **Frozen-SSOT behavior regressed by a move/rename touching logic** | 3 | 5 | **15** | Moves carry files verbatim (namespace line only at P9). `TerrainBrushMathTests` + the data/math tests are the contract — green before/after every phase. Any logic edit to a frozen type = STOP-and-ask. | all |
+| R6 | **Deleting `TerrainValidation.unity` (E5) breaks the KEPT coach-marks "Create 1×1 tile" empty-state button** | 3 | 3 | 9 | Ref-check proved the builder is a *generator* (regenerates the scene on click), not a scene-loader — deleting the pre-baked asset does NOT break the button. KEEP `TerrainValidationSceneBuilder`; P7 deletes only the scene+4 assets; P8 retargets the generator output path to the new tree. Verify the button still generates a tile post-merge at P10. | P7,P8,P10 |
+| R7 | Stale `packages-lock.json` silently drops test assemblies from discovery (89 vs full count) → false "all green" | 3 | 4 | 12 | Resolve packages before trusting any gate; assert the run reports the FULL expected count, not a truncated set (predecessor handoff lesson). | every gate |
 | R8 | Two-Unity-instance MCP trap routes compile/test to the wrong editor → phantom errors / 0-test runs | 3 | 3 | 9 | ALWAYS `set_active_instance("GrassInteract@de203215")`, verify path ends `/GrassInteract/Assets`, re-pin after every reload. | every gate |
 
-**R1 (25) and R2/R3 (20) are high-risk → mitigated BEFORE their phases start** (R1 by the E1 escalation answer; R2 by git-mv discipline; R3 by the atomic-rename phase design).
+**R1 (25) and R2/R3 (20) are high-risk → mitigated BEFORE their phases start** (R1 by the E1 resolution = KEEP; R2 by git-mv discipline; R3 by the atomic-rename phase design).
 
 ---
 
@@ -192,12 +197,14 @@ Phase detail: `phase-1.md` … `phase-10.md`.
 | P3 runtime move + asmdef | L | atomic; blocked by P2; long reload |
 | P4 editor move + asmdef | M | atomic; blocked by P3 |
 | P5 test move + asmdef + GATE | M | blocked by P4 |
-| P6 delete old terrain authoring | M | blocked by P5; straddle-test migrate |
-| P7 delete legacy scatter auth + demo | M | blocked by P6; E1 KEEP discipline |
-| P8 consolidate + split | L | blocked by P7; SOLID/dedup |
+| P6 delete old terrain authoring | M | blocked by P5; E3 port + E4 straddle-migrate |
+| P7 delete legacy scatter auth + BOTH demo scenes | M | blocked by P6; E1 KEEP discipline + E5 scene sweep |
+| P8 consolidate + split + retarget builder path | L | blocked by P7; SOLID/dedup |
 | P9 namespace rename | L | atomic; blocked by P8; full recompile |
-| P10 final verify + commit | S | blocked by P9 |
+| P10 final verify + commit | S | blocked by P9; coach-marks button smoke-check |
 | **Total** | **≈ 3L + 4M + 2S ≈ 5L-equivalent** | Critical path = all phases linear (shared worktree + Unity compile-gate serialize moves/renames) |
+
+> E5 did not materially change effort — it adds one scene + 4 assets to P7's delete batch (mechanical) and one path-retarget + one smoke-check to P8/P10 (small). No phase effort rating changes.
 
 ---
 
@@ -206,10 +213,11 @@ Phase detail: `phase-1.md` … `phase-10.md`.
 - [ ] **SC1** — Exactly 3 asmdefs exist (`WorldPainter`, `WorldPainter.Editor`, `WorldPainter.Tests`); the 6 old asmdefs are gone. (`find Assets -name '*.asmdef'`)
 - [ ] **SC2** — Zero `namespace GpuTerrain`/`namespace GrassInteract` and zero `using GpuTerrain`/`using GrassInteract` remain. (`grep -rn`)
 - [ ] **SC3** — `run_tests` reports the FULL expected count green (301 minus any itemized, user-confirmed obsolete straddle tests) — never a truncated discovery.
-- [ ] **SC4** — All DELETE targets in §3.2 are gone; each had a recorded pre-delete ref check; no dangling reference compiles. (`read_console` clean)
+- [ ] **SC4** — All DELETE targets in §3.2 are gone (incl. BOTH demo scenes + the 4 TerrainValidation assets per E5); each had a recorded pre-delete ref check; no dangling reference compiles. (`read_console` clean)
 - [ ] **SC5** — No file exceeds 200 lines without a documented responsibility justification (§3.4 splits done).
 - [ ] **SC6** — A player build target compiles with zero authoring symbols pulled in (Editor asmdef `includePlatforms:[Editor]` verified; grep authoring types absent from runtime asm).
 - [ ] **SC7** — `git log --stat` shows file moves as renames (R≈100%), proving `.meta` GUIDs preserved.
+- [ ] **SC8** — The KEPT coach-marks "Create 1×1 tile" empty-state button still generates a tile via `TerrainValidationSceneBuilder` under the new tree (E5/E6 regression smoke-check at P10).
 
 ---
 
@@ -223,4 +231,4 @@ Each phase is one commit. Any phase that fails its gate is reverted with `git re
 
 `/t1k:cook plans/260611-2319-worldpainter-merge/plan.md --phase 1`
 
-> **Before P6/P7 (the destructive phases), the cook MUST surface escalations E1–E5 (§0) to the user via `AskUserQuestion` and proceed on the recommended defaults only if confirmed.** The planning subagent could not ask directly.
+> Escalations E1–E5 are RESOLVED (§0, user-confirmed 2026-06-11). E5 sub-decision (`TerrainValidationSceneBuilder` KEPT) and the generator-path retarget (P8) + coach-marks smoke-check (P10, SC8) are the only open follow-ups, all in-scope. The plan is execution-ready — no further user gating required before the destructive phases.
