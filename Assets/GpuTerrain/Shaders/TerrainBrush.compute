@@ -1,0 +1,149 @@
+// TerrainBrush.compute — Phase 5 sculpt + paint compute kernels.
+// All kernels operate on the per-tile working RenderTexture(s).
+// Dispatch: ceil(RT_RES / 8) × ceil(RT_RES / 8) × 1 thread groups.
+
+#pragma kernel RaiseLower
+#pragma kernel Smooth
+#pragma kernel Flatten
+#pragma kernel PaintSplat
+
+// ── Shared parameters ────────────────────────────────────────────────────────
+
+/// Height working texture (RFloat, read+write). Normalized [0,1].
+RWTexture2D<float>  _HeightRT;
+
+/// Splat working texture (RGBA float, read+write). Each channel = layer weight [0,1].
+RWTexture2D<float4> _SplatRT;
+
+/// Brush center in tile UV space [0,1].
+float2 _BrushCenterUV;
+
+/// Brush radius in UV space (radius_m / TILE_SIZE_M).
+float  _BrushRadiusUV;
+
+/// Stroke strength [0,1].
+float  _Strength;
+
+/// Resolution of the working RT (texels per edge = BRUSH_RT_RES).
+int    _RTRes;
+
+// ── RaiseLower parameters ────────────────────────────────────────────────────
+
+/// +1 = raise, -1 = lower.
+float _RaiseSign;
+
+// ── Flatten parameters ───────────────────────────────────────────────────────
+
+/// Target normalized height for Flatten kernel.
+float _FlattenTarget;
+
+// ── PaintSplat parameters ────────────────────────────────────────────────────
+
+/// Layer index [0,3] to paint.
+int _SplatLayer;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Smooth falloff: 1 at center, 0 at brush edge (smoothstep-based).
+float BrushFalloff(float2 texelUV, float2 centerUV, float radiusUV)
+{
+    float dist = length(texelUV - centerUV);
+    float t    = saturate(dist / max(radiusUV, 0.0001f));
+    // Cubic falloff: stays near 1 in center, drops smoothly to 0 at edge.
+    float inv  = 1.0f - t;
+    return inv * inv * (3.0f - 2.0f * inv);
+}
+
+float2 TexelToUV(uint2 id)
+{
+    return (float2(id) + 0.5f) / float(_RTRes);
+}
+
+// ── RaiseLower kernel ────────────────────────────────────────────────────────
+// Raises (+1) or lowers (-1) the height RT within the brush radius.
+
+[numthreads(8, 8, 1)]
+void RaiseLower(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
+
+    float2 uv     = TexelToUV(id.xy);
+    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    if (weight <= 0.0f) return;
+
+    float cur  = _HeightRT[id.xy];
+    float delta = _Strength * weight * _RaiseSign * 0.01f; // 0.01 scale keeps strokes gentle
+    _HeightRT[id.xy] = saturate(cur + delta);
+}
+
+// ── Smooth kernel ─────────────────────────────────────────────────────────────
+// Box-blurs the height RT within the brush radius (radius-3 fixed kernel).
+
+[numthreads(8, 8, 1)]
+void Smooth(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
+
+    float2 uv     = TexelToUV(id.xy);
+    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    if (weight <= 0.0f) return;
+
+    // 3x3 box average.
+    float sum  = 0.0f;
+    float cnt  = 0.0f;
+    for (int dy = -3; dy <= 3; ++dy)
+    {
+        for (int dx = -3; dx <= 3; ++dx)
+        {
+            int2 nb = int2(id.xy) + int2(dx, dy);
+            if (nb.x < 0 || nb.x >= _RTRes || nb.y < 0 || nb.y >= _RTRes) continue;
+            sum += _HeightRT[nb];
+            cnt += 1.0f;
+        }
+    }
+    float avg = (cnt > 0.0f) ? (sum / cnt) : _HeightRT[id.xy];
+    float cur = _HeightRT[id.xy];
+    _HeightRT[id.xy] = lerp(cur, avg, _Strength * weight);
+}
+
+// ── Flatten kernel ────────────────────────────────────────────────────────────
+// Pushes height towards _FlattenTarget within the brush radius.
+
+[numthreads(8, 8, 1)]
+void Flatten(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
+
+    float2 uv     = TexelToUV(id.xy);
+    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    if (weight <= 0.0f) return;
+
+    float cur = _HeightRT[id.xy];
+    _HeightRT[id.xy] = lerp(cur, _FlattenTarget, _Strength * weight);
+}
+
+// ── PaintSplat kernel ──────────────────────────────────────────────────────────
+// Paints _SplatLayer weight within the brush radius.
+// Each channel written independently; normalisation is done in the Phase 2 shader.
+
+[numthreads(8, 8, 1)]
+void PaintSplat(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
+
+    float2 uv     = TexelToUV(id.xy);
+    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    if (weight <= 0.0f) return;
+
+    float4 splat = _SplatRT[id.xy];
+    float  paint = _Strength * weight;
+
+    // Increase active layer, decrease others proportionally.
+    float4 target = splat;
+    if (_SplatLayer == 0) target.x = min(1.0f, target.x + paint);
+    if (_SplatLayer == 1) target.y = min(1.0f, target.y + paint);
+    if (_SplatLayer == 2) target.z = min(1.0f, target.z + paint);
+    if (_SplatLayer == 3) target.w = min(1.0f, target.w + paint);
+
+    _SplatRT[id.xy] = target;
+}
