@@ -22,7 +22,7 @@ namespace GpuTerrain.Editor
             var menu = new GenericMenu();
             menu.AddItem(new GUIContent("Splat layer"), false, () => this.AddSplatLayer());
             menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayer());
-            menu.AddDisabledItem(new GUIContent("Props layer (P4)"));
+            menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayer());
             menu.AddDisabledItem(new GUIContent("Biome (P5)"));
             menu.ShowAsContext();
         }
@@ -141,6 +141,47 @@ namespace GpuTerrain.Editor
 
             WorldPainterState.ActiveLayerIndex =
                 Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
+            this.RefreshStack();
+        }
+
+        private void AddPropLayer()
+        {
+            // Create a new InstanceScatterLayer sub-asset with smart defaults.
+            var layer = ScriptableObject.CreateInstance<GrassInteract.InstanceScatterLayer>();
+            layer.name = $"Props {this.scatterLayersProp.arraySize}";
+
+            // Create a companion AuthoredInstancesData sub-asset.
+            var authoredData = ScriptableObject.CreateInstance<GrassInteract.AuthoredInstancesData>();
+            authoredData.name = $"{layer.name}_Authored";
+
+            string scenePath = this.painter.gameObject.scene.path;
+            if (!string.IsNullOrEmpty(scenePath))
+            {
+                string dir       = System.IO.Path.GetDirectoryName(scenePath)!;
+                string layerPath = System.IO.Path.Combine(dir, $"{layer.name}.asset").Replace('\\', '/');
+                string dataPath  = System.IO.Path.Combine(dir, $"{authoredData.name}.asset").Replace('\\', '/');
+                AssetDatabase.CreateAsset(layer, layerPath);
+                AssetDatabase.CreateAsset(authoredData, dataPath);
+
+                // Wire the authored data into the layer via SerializedObject.
+                using var layerSo = new SerializedObject(layer);
+                var authoredProp  = layerSo.FindProperty("authoredInstances");
+                if (authoredProp != null)
+                {
+                    authoredProp.objectReferenceValue = authoredData;
+                    layerSo.ApplyModifiedPropertiesWithoutUndo();
+                }
+
+                AssetDatabase.SaveAssets();
+            }
+
+            Undo.RecordObject(this.painter, "Add Prop Layer");
+            int newIdx = this.scatterLayersProp.arraySize;
+            this.scatterLayersProp.InsertArrayElementAtIndex(newIdx);
+            this.scatterLayersProp.GetArrayElementAtIndex(newIdx).objectReferenceValue = layer;
+            this.serializedObject.ApplyModifiedProperties();
+
+            WorldPainterState.ActiveLayerIndex = 1 + this.painter.SplatLayers.Count + newIdx;
             this.RefreshStack();
         }
 

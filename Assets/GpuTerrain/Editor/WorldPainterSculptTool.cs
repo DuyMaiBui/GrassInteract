@@ -42,6 +42,10 @@ namespace GpuTerrain.Editor
         internal RenderTexture?        densityRT          = null;
         internal DensityScatterLayer?  activeDensityLayer = null;
 
+        // ── Prop stamp emitter (P4 task 2) ────────────────────────────────────
+
+        internal readonly WorldPainterPropStampEmitter propEmitter = new WorldPainterPropStampEmitter();
+
         // ── Per-stroke tracking ───────────────────────────────────────────────
 
         internal readonly HashSet<Vector2Int> undoPushedCoords    = new HashSet<Vector2Int>();
@@ -163,6 +167,12 @@ namespace GpuTerrain.Editor
                 var previewColor = new Color(0.3f, 0.7f, 1.0f, 0.6f); // WorldPainter blue
                 TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, null);
                 HandleUtility.Repaint();
+
+                // Prop layer ghost preview (P4 task 3 — inline Handles, no GrassInteract.Editor dep).
+                // Draw a green wire disc at the hover point when a Prop layer is active.
+                LayerType hoverType = WorldPainterState.ActiveLayerType(painter, out _);
+                if (hoverType == LayerType.Props && e.type == EventType.Repaint)
+                    this.DrawPropGhostHandles(worldPoint, valid: true);
             }
 
             switch (e.GetTypeForControl(controlId))
@@ -185,6 +195,26 @@ namespace GpuTerrain.Editor
             }
 
             this.DrawHud();
+        }
+
+        // ── Prop ghost preview (P4 task 3, option A — Handles only) ──────────
+
+        /// <summary>
+        /// Draws an inline prop placement ghost using Handles — green (valid placement)
+        /// or red (slope/overlap rejected). No dependency on GrassInteract.Editor.
+        /// </summary>
+        private void DrawPropGhostHandles(Vector3 worldPos, bool valid)
+        {
+            // Wire disc at brush centre scaled to ~1m prop representation.
+            Color ghostColor = valid
+                ? new Color(0.3f, 1f, 0.3f, 0.8f)
+                : new Color(1f, 0.2f, 0.2f, 0.8f);
+
+            using (new Handles.DrawingScope(ghostColor))
+            {
+                Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
+                Handles.DrawLine(worldPos, worldPos + Vector3.up * 1.5f);
+            }
         }
 
         // ── HUD ───────────────────────────────────────────────────────────────

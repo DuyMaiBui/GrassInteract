@@ -187,13 +187,16 @@ namespace GpuTerrain.Editor
             typeChip.AddToClassList("wp-type-chip");
             row.Add(typeChip);
 
-            // Albedo/LOD0 swatch chip for Splat and Grass rows.
-            if (type == LayerType.Splat || type == LayerType.Grass)
+            // Albedo/LOD0 swatch chip for Splat, Grass, and Props rows.
+            if (type == LayerType.Splat || type == LayerType.Grass || type == LayerType.Props)
             {
                 var swatch = new VisualElement();
                 swatch.AddToClassList("wp-splat-swatch");
                 if (albedoPreview != null)
                     swatch.style.backgroundImage = new StyleBackground(albedoPreview);
+                // Props rows use a teal background tint when no preview available.
+                if (type == LayerType.Props && albedoPreview == null)
+                    swatch.style.backgroundColor = new StyleColor(new Color(0.1f, 0.6f, 0.5f, 0.7f));
                 row.Add(swatch);
             }
 

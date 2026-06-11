@@ -35,6 +35,10 @@ namespace GpuTerrain.Editor
         private WorldPainterLodBandRuler?    lodBandRuler;
         private WorldPainterScatterLayerCard? scatterCard;
 
+        // ── Prop sub-views (P4) ───────────────────────────────────────────────
+
+        private WorldPainterPropLayerCard? propCard;
+
         // ── CreateInspectorGUI ────────────────────────────────────────────────
 
         public override VisualElement CreateInspectorGUI()
@@ -74,6 +78,7 @@ namespace GpuTerrain.Editor
             this.lodBandRuler   = new WorldPainterLodBandRuler(this.previewCache);
             this.scatterCard    = new WorldPainterScatterLayerCard(
                 this.lodPreviewPanel, this.lodBandRuler, this.previewCache);
+            this.propCard = new WorldPainterPropLayerCard();
 
             // Scatter layer card area — refreshed when active layer index changes.
             var cardArea = new VisualElement();
@@ -91,6 +96,15 @@ namespace GpuTerrain.Editor
                     if (si >= 0 && this.scatterCard != null)
                     {
                         var card = this.scatterCard.Build(painter, si);
+                        if (card != null) cardArea.Add(card);
+                    }
+                }
+                else if (layerType == LayerType.Props)
+                {
+                    int si = WorldPainterState.ActiveScatterIndex(painter);
+                    if (si >= 0 && this.propCard != null)
+                    {
+                        var card = this.propCard.Build(painter, si);
                         if (card != null) cardArea.Add(card);
                     }
                 }

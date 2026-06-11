@@ -2,14 +2,18 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using GrassInteract;
 
 namespace GpuTerrain.Editor
 {
     /// <summary>
     /// Per-tile snapshot undo stack for the WorldPainter sculpt tool (task 9).
     ///
+    /// Extended in Phase 4 (task 5) to also snapshot instance records for prop layers,
+    /// using the same depth/memory caps and eviction policy.
+    ///
     /// Design §7.4:
-    ///   - Depth cap: 10 snapshots per tile.
+    ///   - Depth cap: 10 snapshots per tile / per layer key.
     ///   - Memory cap: 128 MB total across all tiles; evict oldest when exceeded.
     ///   - Eviction: oldest-first (LinkedList head = oldest).
     ///   - One Unity Undo group per stroke → single Ctrl+Z reverts one stroke.
@@ -202,5 +206,64 @@ namespace GpuTerrain.Editor
             Buffer.BlockCopy(src, 0, dst, 0, src.Length);
             return dst;
         }
+
+        // ── Record snapshots (Phase 4 task 5 — prop stroke undo) ─────────────
+
+        // Key = layer instance ID (layer.GetInstanceID()).
+        private readonly Dictionary<int, LinkedList<List<InstanceRecord>>> recordStacks =
+            new Dictionary<int, LinkedList<List<InstanceRecord>>>();
+
+        /// <summary>
+        /// Snapshot current authored records for <paramref name="layer"/> BEFORE a prop stroke.
+        /// Deep-copies the list so the snapshot is immutable.
+        /// Evicts oldest when depth cap exceeded.
+        /// </summary>
+        public void PushRecords(GrassInteract.AuthoredInstancesData data, int layerKey)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
+            if (!this.recordStacks.TryGetValue(layerKey, out var stack))
+            {
+                stack = new LinkedList<List<InstanceRecord>>();
+                this.recordStacks[layerKey] = stack;
+            }
+
+            // Deep-copy the current working list.
+            var snapshot = new List<InstanceRecord>(data.WorkingList);
+            stack.AddLast(snapshot);
+
+            while (stack.Count > DEPTH_CAP)
+                stack.RemoveFirst();
+        }
+
+        /// <summary>
+        /// Pop the most-recent record snapshot for a layer and restore the working list.
+        /// Returns true when a snapshot was found and restored.
+        /// </summary>
+        public bool PopRecords(GrassInteract.AuthoredInstancesData data, int layerKey)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
+            if (!this.recordStacks.TryGetValue(layerKey, out var stack) || stack.Count == 0)
+                return false;
+
+            var snap = stack.Last!.Value;
+            stack.RemoveLast();
+
+            // Restore working list in-place.
+            var list = data.WorkingList;
+            list.Clear();
+            list.AddRange(snap);
+            data.PackBlob();
+
+            return true;
+        }
+
+        /// <summary>Returns true if any record snapshot is available for the layer key.</summary>
+        public bool CanUndoRecords(int layerKey) =>
+            this.recordStacks.TryGetValue(layerKey, out var s) && s.Count > 0;
+
+        /// <summary>Clears all record snapshots for all layers.</summary>
+        public void ClearAllRecords() => this.recordStacks.Clear();
     }
 }

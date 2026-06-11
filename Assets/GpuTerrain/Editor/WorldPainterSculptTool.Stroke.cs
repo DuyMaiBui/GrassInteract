@@ -187,6 +187,34 @@ namespace GpuTerrain.Editor
                     }
                 }
             }
+            else if (activeType == LayerType.Props && painter != null)
+            {
+                // Props use CPU spacing-stamp emitter (no GPU kernel).
+                int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
+                if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
+                {
+                    var propLayer = painter.ScatterLayers[scatterIdx] as GrassInteract.InstanceScatterLayer;
+                    if (propLayer != null)
+                    {
+                        bool isDelete = Event.current != null && Event.current.shift;
+                        // Push undo before first emit on this layer this stroke.
+                        var authored = propLayer.AuthoredInstances;
+                        if (authored != null)
+                        {
+                            int key = propLayer.GetInstanceID();
+                            if (!WorldPainterAuthoring.UndoStack.CanUndoRecords(key))
+                                WorldPainterAuthoring.UndoStack.PushRecords(authored, key);
+                        }
+
+                        this.propEmitter.Emit(
+                            propLayer,
+                            worldPos,
+                            brush.size * 0.5f,
+                            deleteMode: isDelete,
+                            surfaceSampler: null);
+                    }
+                }
+            }
             else
             {
                 this.DispatchHeightKernel(groups, heightRT);
