@@ -38,8 +38,9 @@ namespace GpuTerrain
         /// <summary>
         /// Raw R16 height bytes: heightRes × heightRes × 2 bytes, row-major, little-endian.
         /// Index: (z * heightRes + x) * 2 = low byte, +1 = high byte.
+        /// Edit only via editor brushes — the raw array is hidden in the Inspector.
         /// </summary>
-        [SerializeField] public byte[] heightData = System.Array.Empty<byte>();
+        [HideInInspector] [SerializeField] public byte[] heightData = System.Array.Empty<byte>();
 
         /// <summary>Number of texels per edge in the height map (including shared boundary texel).</summary>
         [SerializeField] public int heightRes = TerrainWorldGrid.DEFAULT_HEIGHT_RES;
@@ -54,8 +55,9 @@ namespace GpuTerrain
         /// <summary>
         /// RGBA32 splat bytes: splatRes × splatRes × 4 bytes, row-major.
         /// Channel mapping SSOT: R=layer0, G=layer1, B=layer2, A=layer3 (see class doc).
+        /// Edit only via editor brushes — the raw array is hidden in the Inspector.
         /// </summary>
-        [SerializeField] public byte[] splatData = System.Array.Empty<byte>();
+        [HideInInspector] [SerializeField] public byte[] splatData = System.Array.Empty<byte>();
 
         /// <summary>Number of texels per edge in the splat map.</summary>
         [SerializeField] public int splatRes = TerrainWorldGrid.DEFAULT_SPLAT_RES;
