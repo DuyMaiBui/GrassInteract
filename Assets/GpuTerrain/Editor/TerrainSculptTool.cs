@@ -67,12 +67,12 @@ namespace GpuTerrain.Editor
 
             Ray  ray    = HandleUtility.GUIPointToWorldRay(e.mousePosition);
             bool hasHit = this.TryGetBrushWorldPoint(ray, renderer, out Vector3 worldPoint,
-                out Vector3 normal);
+                out _);
 
             if (hasHit)
             {
-                TerrainBrushPreview.Set(worldPoint, normal,
-                    TerrainSculptState.BrushSize, TerrainSculptState.BrushColor());
+                TerrainBrushPreview.Set(worldPoint,
+                    TerrainSculptState.BrushSize, TerrainSculptState.BrushColor(), s_heightFn);
                 HandleUtility.Repaint();
             }
 
@@ -100,6 +100,26 @@ namespace GpuTerrain.Editor
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
+        // Cached so the brush preview gets a stable delegate (no per-event allocation).
+        // Resolves the live ActiveRenderer each call so it always targets the current tiles.
+        private static readonly TerrainBrushPreview.HeightFn s_heightFn = SampleActiveTerrainHeight;
+
+        /// <summary>
+        /// Per-vertex terrain height query for the conforming brush disc. Resolves the tile
+        /// under (worldX, worldZ) on the active renderer, then samples the SSOT CPU heightmap
+        /// (matches the GPU VTF). Returns false off-grid → preview falls back to flat.
+        /// </summary>
+        private static bool SampleActiveTerrainHeight(float worldX, float worldZ, out float worldY)
+        {
+            worldY = 0f;
+            var renderer = TerrainSculptState.ActiveRenderer;
+            if (renderer == null) return false;
+            Vector2Int coord = TerrainWorldGrid.WorldToTileCoord(worldX, worldZ);
+            TerrainTileAsset? tile = FindTileForCoord(renderer, coord);
+            if (tile == null) return false;
+            return TerrainHeightSampleCpu.TrySample(tile, worldX, worldZ, out worldY);
+        }
+
         internal static TerrainTileAsset? FindTileForCoord(
             GpuTerrainRenderer renderer, Vector2Int coord)
         {
@@ -126,7 +146,9 @@ namespace GpuTerrain.Editor
                 var origin2d = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
                 float midY   = (tile.minHeight + tile.maxHeight) * 0.5f;
                 var plane    = new Plane(Vector3.up, new Vector3(origin2d.x, midY, origin2d.y));
-                if (plane.Raycast(ray, out float dist))
+                // Bound dist: a near-parallel ray yields an astronomical hit point that would
+                // produce garbage brush-disc geometry. 1e6 m is far beyond any real terrain.
+                if (plane.Raycast(ray, out float dist) && dist > 0f && dist < 1e6f)
                 {
                     worldPoint = ray.GetPoint(dist); normal = Vector3.up; return true;
                 }

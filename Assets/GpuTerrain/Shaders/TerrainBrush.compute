@@ -1,11 +1,16 @@
-// TerrainBrush.compute — Phase 5 sculpt + paint compute kernels.
+// TerrainBrush.compute — height + splat compute kernels.
 // All kernels operate on the per-tile working RenderTexture(s).
 // Dispatch: ceil(RT_RES / 8) × ceil(RT_RES / 8) × 1 thread groups.
+//
+// Refactored in Batch 2 to use BrushMask.hlsl for the per-texel weight.
+// Kernel signatures / names preserved so TerrainBrushMathTests stays green.
 
 #pragma kernel RaiseLower
 #pragma kernel Smooth
 #pragma kernel Flatten
 #pragma kernel PaintSplat
+
+#include "BrushMask.hlsl"
 
 // ── Shared parameters ────────────────────────────────────────────────────────
 
@@ -27,6 +32,9 @@ float  _Strength;
 /// Resolution of the working RT (texels per edge = BRUSH_RT_RES).
 int    _RTRes;
 
+/// 1 = use falloff LUT (_FalloffLUT), 0 = use inline cubic falloff.
+int    _UseFalloffLUT;
+
 // ── RaiseLower parameters ────────────────────────────────────────────────────
 
 /// +1 = raise, -1 = lower.
@@ -44,19 +52,24 @@ int _SplatLayer;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Smooth falloff: 1 at center, 0 at brush edge (smoothstep-based).
+/// Smooth falloff: backward-compat CPU reference (kept for inline kernel path).
+/// The BrushMask.hlsl BrushFalloffInline is the canonical implementation.
 float BrushFalloff(float2 texelUV, float2 centerUV, float radiusUV)
 {
-    float dist = length(texelUV - centerUV);
-    float t    = saturate(dist / max(radiusUV, 0.0001f));
-    // Cubic falloff: stays near 1 in center, drops smoothly to 0 at edge.
-    float inv  = 1.0f - t;
-    return inv * inv * (3.0f - 2.0f * inv);
+    return BrushFalloffInline(texelUV, centerUV, radiusUV);
 }
 
 float2 TexelToUV(uint2 id)
 {
-    return (float2(id) + 0.5f) / float(_RTRes);
+    return TexelToUV_BM(id, _RTRes);
+}
+
+// ── Per-texel weight (one-liner via BrushMask.hlsl) ─────────────────────────
+
+float TexelWeight(float2 uv)
+{
+    bool useLUT = (_UseFalloffLUT != 0);
+    return BrushWeight(uv, _BrushCenterUV, _BrushRadiusUV, useLUT);
 }
 
 // ── RaiseLower kernel ────────────────────────────────────────────────────────
@@ -68,11 +81,11 @@ void RaiseLower(uint3 id : SV_DispatchThreadID)
     if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
 
     float2 uv     = TexelToUV(id.xy);
-    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    float  weight = TexelWeight(uv);
     if (weight <= 0.0f) return;
 
-    float cur  = _HeightRT[id.xy];
-    float delta = _Strength * weight * _RaiseSign * 0.01f; // 0.01 scale keeps strokes gentle
+    float cur   = _HeightRT[id.xy];
+    float delta = _Strength * weight * _RaiseSign * 0.01f; // 0.01 keeps strokes gentle
     _HeightRT[id.xy] = saturate(cur + delta);
 }
 
@@ -85,12 +98,12 @@ void Smooth(uint3 id : SV_DispatchThreadID)
     if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
 
     float2 uv     = TexelToUV(id.xy);
-    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    float  weight = TexelWeight(uv);
     if (weight <= 0.0f) return;
 
     // 3x3 box average.
-    float sum  = 0.0f;
-    float cnt  = 0.0f;
+    float sum = 0.0f;
+    float cnt = 0.0f;
     for (int dy = -3; dy <= 3; ++dy)
     {
         for (int dx = -3; dx <= 3; ++dx)
@@ -115,7 +128,7 @@ void Flatten(uint3 id : SV_DispatchThreadID)
     if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
 
     float2 uv     = TexelToUV(id.xy);
-    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    float  weight = TexelWeight(uv);
     if (weight <= 0.0f) return;
 
     float cur = _HeightRT[id.xy];
@@ -132,7 +145,7 @@ void PaintSplat(uint3 id : SV_DispatchThreadID)
     if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
 
     float2 uv     = TexelToUV(id.xy);
-    float  weight = BrushFalloff(uv, _BrushCenterUV, _BrushRadiusUV);
+    float  weight = TexelWeight(uv);
     if (weight <= 0.0f) return;
 
     float4 splat = _SplatRT[id.xy];

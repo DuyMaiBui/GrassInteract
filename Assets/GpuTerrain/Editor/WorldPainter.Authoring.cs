@@ -6,13 +6,15 @@ using UnityEditor;
 namespace GpuTerrain.Editor
 {
     /// <summary>
-    /// Editor-only brush-engine driver entry point for <see cref="WorldPainter"/>.
+    /// Editor-only brush-engine driver for <see cref="WorldPainter"/>.
     ///
-    /// This file lives in the GpuTerrain.Editor assembly (Editor-only platform)
-    /// and must NEVER be referenced from the GpuTerrain runtime assembly.
+    /// Owns the shared undo stack targeting WorldPainter tile refs (task 9).
+    /// The <see cref="WorldPainterSculptTool"/> is the primary dispatch path (task 8);
+    /// this class provides singleton plumbing (undo stack, active painter ref,
+    /// and the EditorApplication.update tick for async writeback).
     ///
-    /// Batch 1: entry STUB only — no stroke dispatch logic yet.
-    /// Full brush dispatch wiring is Batch 2 (tasks 6–9).
+    /// All authoring code stays inside #if UNITY_EDITOR and the Editor asmdef.
+    /// WorldPainter.cs (runtime) must NEVER reference this file.
     /// </summary>
     [InitializeOnLoad]
     internal static class WorldPainterAuthoring
@@ -26,39 +28,44 @@ namespace GpuTerrain.Editor
         /// </summary>
         internal static WorldPainter? ActivePainter { get; set; }
 
+        // ── Unified undo stack (task 9) ───────────────────────────────────────
+
+        private static WorldPainterUndo? undoInstance;
+
+        /// <summary>
+        /// Shared undo stack for WorldPainter tile snapshots.
+        /// Bounded depth 10 / 128 MB cap / evict-oldest (design §7.4).
+        /// </summary>
+        internal static WorldPainterUndo UndoStack =>
+            undoInstance ??= new WorldPainterUndo();
+
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
         static WorldPainterAuthoring()
         {
-            // Subscribe to editor update loop once at domain reload.
-            // Actual stroke dispatch added in Batch 2.
             EditorApplication.update += OnEditorUpdate;
         }
 
         private static void OnEditorUpdate()
         {
-            // Stub: Batch 2 wires stroke-loop logic here.
-            // Keep empty for now — no allocations in the hot path.
+            // No-op tick — kept for future writeback orchestration.
         }
 
-        // ── Brush engine entry (stub — Batch 2 fills this in) ─────────────────
+        // ── Brush engine entry ─────────────────────────────────────────────────
 
         /// <summary>
         /// Called by the scene-view EditorTool when a mouse-drag stroke event fires.
-        /// Stub in Batch 1; actual compute dispatch is implemented in Batch 2.
+        /// Actual dispatch handled in <see cref="WorldPainterSculptTool"/>.
         /// </summary>
-        /// <param name="painter">Target painter receiving the stroke.</param>
-        /// <param name="worldPos">World-space brush centre this frame.</param>
         internal static void OnStrokeUpdate(WorldPainter painter, Vector3 worldPos)
         {
-            // Batch 2: call TerrainPaintTargetResolver → TerrainBrushStroke dispatch.
             _ = painter;
             _ = worldPos;
         }
 
         /// <summary>
         /// Called on mouse-up to commit the stroke to disk (RT writeback).
-        /// Stub in Batch 1; TerrainSculptRtWriteback.ExecuteSync called in Batch 2.
+        /// Actual commit handled in <see cref="WorldPainterSculptTool"/>.
         /// </summary>
         internal static void OnStrokeEnd(WorldPainter painter)
         {
