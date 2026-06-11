@@ -5,7 +5,7 @@
 // and will be renamed to WorldPainter.Editor / WorldPainter.Tests in P4/P5.
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("GpuTerrain.Editor")]
-[assembly: InternalsVisibleTo("GrassInteract.Editor")]
+[assembly: InternalsVisibleTo("WorldPainter.Editor")]
+[assembly: InternalsVisibleTo("WorldPainter.Tests")]
 [assembly: InternalsVisibleTo("GpuTerrain.EditorTests")]
 [assembly: InternalsVisibleTo("GrassInteract.EditorTests")]

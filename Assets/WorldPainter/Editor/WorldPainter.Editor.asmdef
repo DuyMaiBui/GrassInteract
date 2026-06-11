@@ -1,6 +1,6 @@
 {
-    "name": "GrassInteract.Editor",
-    "rootNamespace": "GrassInteract.Editor",
+    "name": "WorldPainter.Editor",
+    "rootNamespace": "WorldPainter.Editor",
     "references": [
         "WorldPainter"
     ],
@@ -11,7 +11,7 @@
     "allowUnsafeCode": false,
     "overrideReferences": false,
     "precompiledReferences": [],
-    "autoReferenced": false,
+    "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
     "noEngineReferences": false
