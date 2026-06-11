@@ -1,6 +1,6 @@
 {
-    "name": "GrassInteract",
-    "rootNamespace": "GrassInteract",
+    "name": "WorldPainter",
+    "rootNamespace": "WorldPainter",
     "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],

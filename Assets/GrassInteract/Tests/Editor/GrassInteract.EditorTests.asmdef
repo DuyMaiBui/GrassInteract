@@ -2,9 +2,8 @@
     "name": "GrassInteract.EditorTests",
     "rootNamespace": "GrassInteract.Tests",
     "references": [
-        "GrassInteract",
+        "WorldPainter",
         "GrassInteract.Editor",
-        "GpuTerrain",
         "GpuTerrain.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",

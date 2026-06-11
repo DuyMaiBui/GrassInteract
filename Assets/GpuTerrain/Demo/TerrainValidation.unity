@@ -299,6 +299,78 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1436996013
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1436996015}
+  - component: {fileID: 1436996014}
+  m_Layer: 0
+  m_Name: WorldPainter
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1436996014
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1436996013}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 09745a11318463b4a9852278112e6b2d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: GpuTerrain::GpuTerrain.WorldPainter
+  worldGrid:
+    tileSizeM: 256
+    heightRes: 257
+    splatRes: 512
+  tiles:
+  - coord: {x: 0, y: 0}
+    tileAsset: {fileID: 11400000, guid: 09262bad4a127b947a40b855ae745f82, type: 2}
+  - coord: {x: 1, y: 0}
+    tileAsset: {fileID: 11400000, guid: ecc968ffde0b5e64db03bb3ad5d24665, type: 2}
+  splatLayers:
+  - name: Splat 0
+    albedo: {fileID: 0}
+    normal: {fileID: 0}
+    tiling: {x: 0, y: 0}
+  - name: Splat 1
+    albedo: {fileID: 0}
+    normal: {fileID: 0}
+    tiling: {x: 0, y: 0}
+  activeSplatLayerIndex: 0
+  scatterLayers: []
+  biomes: []
+  cullCompute: {fileID: 7200000, guid: 0372c160c85ed5840b84dc4ff78748d9, type: 3}
+  patchMaterial: {fileID: 0}
+  lodRangesM:
+  - 32
+  - 64
+  - 128
+  - 256
+--- !u!4 &1436996015
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1436996013}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2052406686
 GameObject:
   m_ObjectHideFlags: 0
@@ -360,3 +432,4 @@ SceneRoots:
   - {fileID: 1392688203}
   - {fileID: 2052406688}
   - {fileID: 404196199}
+  - {fileID: 1436996015}

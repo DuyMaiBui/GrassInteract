@@ -2,7 +2,7 @@
     "name": "GrassInteract.Editor",
     "rootNamespace": "GrassInteract.Editor",
     "references": [
-        "GrassInteract"
+        "WorldPainter"
     ],
     "includePlatforms": [
         "Editor"
