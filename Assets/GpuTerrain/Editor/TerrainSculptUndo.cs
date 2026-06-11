@@ -103,7 +103,10 @@ namespace GpuTerrain.Editor
 
             // Restore bytes into the asset.
             Array.Copy(snap.HeightData, tile.heightData, snap.HeightData.Length);
-            Array.Copy(snap.SplatData,  tile.splatData,  snap.SplatData.Length);
+            // L2: guard against null splatData — tile may have been created without splat.
+            if (snap.SplatData.Length > 0 && tile.splatData != null &&
+                tile.splatData.Length == snap.SplatData.Length)
+                Array.Copy(snap.SplatData, tile.splatData, snap.SplatData.Length);
 
             return snap;
         }

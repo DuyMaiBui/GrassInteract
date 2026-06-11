@@ -6,17 +6,36 @@ namespace GpuTerrain.Editor
     /// <summary>
     /// Shared static state for terrain sculpt/paint brush settings.
     /// Mirrors the ScatterAuthoringState pattern so the Inspector
-    /// (<see cref="TerrainTileAssetEditor"/>) and the EditorTool
+    /// (<see cref="GpuTerrainRendererEditor"/>) and the EditorTool
     /// (<see cref="TerrainSculptTool"/>) read from one SSOT.
     ///
     /// Not persisted — defaults reset on domain reload (acceptable for editor tools).
     /// </summary>
     public static class TerrainSculptState
     {
-        // ── Active tile ───────────────────────────────────────────────────────
+        // ── Active renderer ───────────────────────────────────────────────────
 
-        /// <summary>Tile currently bound for sculpting. Set by the Inspector.</summary>
-        public static TerrainTileAsset? ActiveTile { get; set; }
+        /// <summary>Renderer currently bound for sculpting. Set by the Inspector.</summary>
+        public static GpuTerrainRenderer? ActiveRenderer { get; set; }
+
+        /// <summary>
+        /// Coord of the last tile that received a brush stroke this session.
+        /// Used by Undo/Save in the renderer inspector to target the right tile.
+        /// Cleared when ActiveRenderer changes so stale coord from a previous renderer
+        /// does not gate the Save/Undo buttons on a newly selected renderer.
+        /// </summary>
+        public static Vector2Int? LastStrokedCoord { get; set; }
+
+        // ── Shared undo stack (SSOT) ──────────────────────────────────────────
+
+        // Lazy-init: no allocation cost when the tool is never activated.
+        private static TerrainSculptUndo? undoInstance;
+
+        /// <summary>
+        /// Single shared undo stack used by both <see cref="TerrainSculptTool"/> and
+        /// <see cref="GpuTerrainRendererEditor"/>. Neither constructs its own instance.
+        /// </summary>
+        public static TerrainSculptUndo Undo => undoInstance ??= new TerrainSculptUndo();
 
         // ── Mode ──────────────────────────────────────────────────────────────
 
@@ -45,10 +64,7 @@ namespace GpuTerrain.Editor
         /// Returns the world-space brush preview colour for the current effective mode.
         /// Raise=green, Lower=red, Smooth=cyan, Flatten=yellow, Paint=orange.
         /// </summary>
-        public static Color BrushColor()
-        {
-            return ModeColor(EffectiveMode);
-        }
+        public static Color BrushColor() => ModeColor(EffectiveMode);
 
         /// <summary>Returns the brush preview colour for a given sculpt mode.</summary>
         public static Color ModeColor(SculptMode mode)

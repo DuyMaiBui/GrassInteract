@@ -67,52 +67,65 @@ namespace GpuTerrain
                     $"[TerrainTileGpuResources] Tile ({tile.tileCoord}) heightData invalid: " +
                     $"expected {tile.ExpectedHeightBytes} bytes, got {tile.heightData?.Length ?? 0}.");
 
-            this.Dispose();
-
-            // ── Height texture ───────────────────────────────────────────────
-            TextureFormat heightFmt = SystemInfo.SupportsTextureFormat(PRIMARY_HEIGHT_FORMAT)
+            // Compute chosenHeightFmt BEFORE the reuse check so the format comparison is correct.
+            TextureFormat chosenHeightFmt = SystemInfo.SupportsTextureFormat(PRIMARY_HEIGHT_FORMAT)
                 ? PRIMARY_HEIGHT_FORMAT
                 : FALLBACK_HEIGHT_FORMAT;
-            this.HeightFormat = heightFmt;
+            this.HeightFormat = chosenHeightFmt;
 
-            this.heightTex = new Texture2D(tile.heightRes, tile.heightRes, heightFmt,
-                mipChain: false, linear: true)
-            {
-                name         = $"TerrainHeight_{tile.tileCoord.x}_{tile.tileCoord.y}",
-                wrapMode     = TextureWrapMode.Clamp,
-                filterMode   = FilterMode.Bilinear,
-            };
+            // ── Height texture: reuse same Texture2D when res/format match ────
+            // Keeping the same object preserves the material's _HeightTex binding after commit
+            // (stale-rebind fix). Only allocate-new when res or format changed.
+            bool reuseHeight = this.heightTex != null
+                && this.heightTex.width  == tile.heightRes
+                && this.heightTex.height == tile.heightRes
+                && this.heightTex.format == chosenHeightFmt;
 
-            if (heightFmt == PRIMARY_HEIGHT_FORMAT)
+            if (!reuseHeight)
             {
-                // R16: raw bytes map 1:1 to the texture's native R16 format.
-                this.heightTex.LoadRawTextureData(tile.heightData);
-            }
-            else
-            {
-                // RHalf fallback: convert R16 raw ushort → half float per texel.
-                this.heightTex.LoadRawTextureData(this.ConvertR16ToRHalf(tile));
-            }
-            this.heightTex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
-
-            // ── Splat texture (only if data is valid) ────────────────────────
-            if (tile.IsSplatValid)
-            {
-                this.splatTex = new Texture2D(tile.splatRes, tile.splatRes, SPLAT_FORMAT,
+                if (this.heightTex != null) { SafeDestroy(this.heightTex); this.heightTex = null; }
+                this.heightTex = new Texture2D(tile.heightRes, tile.heightRes, chosenHeightFmt,
                     mipChain: false, linear: true)
                 {
-                    name         = $"TerrainSplat_{tile.tileCoord.x}_{tile.tileCoord.y}",
-                    wrapMode     = TextureWrapMode.Clamp,
-                    filterMode   = FilterMode.Bilinear,
+                    name       = $"TerrainHeight_{tile.tileCoord.x}_{tile.tileCoord.y}",
+                    wrapMode   = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Bilinear,
                 };
-                this.splatTex.LoadRawTextureData(tile.splatData);
+            }
+
+            if (chosenHeightFmt == PRIMARY_HEIGHT_FORMAT)
+                this.heightTex!.LoadRawTextureData(tile.heightData);
+            else
+                this.heightTex!.LoadRawTextureData(this.ConvertR16ToRHalf(tile));
+            this.heightTex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+
+            // ── Splat texture: same reuse logic ──────────────────────────────
+            if (tile.IsSplatValid)
+            {
+                bool reuseSplat = this.splatTex != null
+                    && this.splatTex.width  == tile.splatRes
+                    && this.splatTex.height == tile.splatRes
+                    && this.splatTex.format == SPLAT_FORMAT;
+
+                if (!reuseSplat)
+                {
+                    if (this.splatTex != null) { SafeDestroy(this.splatTex); this.splatTex = null; }
+                    this.splatTex = new Texture2D(tile.splatRes, tile.splatRes, SPLAT_FORMAT,
+                        mipChain: false, linear: true)
+                    {
+                        name       = $"TerrainSplat_{tile.tileCoord.x}_{tile.tileCoord.y}",
+                        wrapMode   = TextureWrapMode.Clamp,
+                        filterMode = FilterMode.Bilinear,
+                    };
+                }
+                this.splatTex!.LoadRawTextureData(tile.splatData);
                 this.splatTex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
             }
 
             this.IsUploaded = true;
 
             Debug.Log($"[TerrainTileGpuResources] Uploaded tile {tile.tileCoord}: " +
-                      $"height={tile.heightRes}² ({heightFmt}), " +
+                      $"height={tile.heightRes}² ({chosenHeightFmt}) reuse={reuseHeight}, " +
                       $"splat={tile.splatRes}² ({SPLAT_FORMAT}), " +
                       $"range=[{tile.minHeight},{tile.maxHeight}]");
         }

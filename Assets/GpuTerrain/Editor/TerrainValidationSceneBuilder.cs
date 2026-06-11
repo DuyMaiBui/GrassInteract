@@ -18,10 +18,8 @@ namespace GpuTerrain.Editor
     ///   Assets/GpuTerrain/Demo/ValidationLayerSet.asset
     ///   Assets/GpuTerrain/Demo/TerrainValidation.unity
     ///
-    /// Driver: TWO GpuTerrainRenderer components (one per tile). This is intentional:
-    /// TerrainStreamingManager requires the camera within its residency ring to make tiles
-    /// resident — unsuitable for a deterministic offline scene. Two renderers ensure both
-    /// tiles are always visible regardless of camera position.
+    /// ONE GpuTerrainRenderer with a tiles array of size 2.  Both tiles are always
+    /// visible in the validation scene; one shared lodRangesM governs both.
     /// </summary>
     public static class TerrainValidationSceneBuilder
     {
@@ -65,14 +63,13 @@ namespace GpuTerrain.Editor
                 if (patchShader != null)
                 {
                     patchMat = new Material(patchShader) { name = "TerrainPatch_Validation" };
-                    AssetDatabase.CreateAsset(patchMat,
-                        DEMO_DIR + "/TerrainPatch_Validation.mat");
+                    AssetDatabase.CreateAsset(patchMat, DEMO_DIR + "/TerrainPatch_Validation.mat");
                 }
             }
 
             if (cullCompute == null)
                 Debug.LogWarning("[TerrainValidation] Could not find TerrainNodeCull.compute — " +
-                    "renderers will warn on enable. Assign manually in the scene.");
+                    "renderer will warn on enable. Assign manually in the scene.");
             if (patchMat == null)
                 Debug.LogWarning("[TerrainValidation] Could not find/create TerrainPatch material. " +
                     "Assign manually in the scene.");
@@ -90,7 +87,7 @@ namespace GpuTerrain.Editor
             string path, Vector2Int coord,
             System.Func<int, float, float, byte[]> heightGen)
         {
-            int res = TerrainWorldGrid.DEFAULT_HEIGHT_RES;
+            int res      = TerrainWorldGrid.DEFAULT_HEIGHT_RES;
             int splatRes = TerrainWorldGrid.DEFAULT_SPLAT_RES;
 
             TerrainTileAsset? existing = AssetDatabase.LoadAssetAtPath<TerrainTileAsset>(path);
@@ -140,7 +137,7 @@ namespace GpuTerrain.Editor
         private static byte[] GenerateDiagonalRidges(int res, float minH, float maxH)
         {
             byte[] data = new byte[res * res * TerrainHeightFormat.BYTES_PER_SAMPLE];
-            float freq = 8f; // number of ridge cycles across the tile
+            float freq = 8f;
             for (int z = 0; z < res; z++)
             {
                 for (int x = 0; x < res; x++)
@@ -162,7 +159,7 @@ namespace GpuTerrain.Editor
             byte[] data = new byte[splatRes * splatRes * 4];
             for (int i = 0; i < splatRes * splatRes; i++)
             {
-                data[i * 4 + 0] = 255; // R = layer 0 full weight
+                data[i * 4 + 0] = 255;
                 data[i * 4 + 1] = 0;
                 data[i * 4 + 2] = 0;
                 data[i * 4 + 3] = 0;
@@ -179,12 +176,10 @@ namespace GpuTerrain.Editor
                 ? existing
                 : ScriptableObject.CreateInstance<TerrainLayerSet>();
 
-            // layerAlbedos is private — assign via SerializedObject so it serialises correctly.
             using var so = new SerializedObject(ls);
             so.Update();
             SerializedProperty albedosProp = so.FindProperty("layerAlbedos");
             albedosProp.arraySize = 1;
-            // Layer 0: leave as null — TerrainLayerSet.BuildArray falls back to white 4×4.
             albedosProp.GetArrayElementAtIndex(0).objectReferenceValue = null;
             SerializedProperty tilingProp = so.FindProperty("layerTiling");
             tilingProp.floatValue = TerrainShadingConfig.DEFAULT_LAYER_TILING;
@@ -215,11 +210,8 @@ namespace GpuTerrain.Editor
             light.intensity = 1f;
             lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
 
-            // Tile A renderer: tileCoord (0,0) → world X ∈ [0, 256].
-            CreateTileRenderer("TerrainRenderer_A", tileA, cullCompute, patchMat);
-
-            // Tile B renderer: tileCoord (1,0) → world X ∈ [256, 512].
-            CreateTileRenderer("TerrainRenderer_B", tileB, cullCompute, patchMat);
+            // ONE renderer with both tiles.
+            CreateTerrainRenderer("TerrainRenderer", new[] { tileA, tileB }, cullCompute, patchMat);
 
             // Camera: positioned at X=256 (seam), Y=80, Z=-60, looking at the seam.
             var camGo = new GameObject("Main Camera");
@@ -235,19 +227,26 @@ namespace GpuTerrain.Editor
             Debug.Log("[TerrainValidation] Scene saved: " + SCENE_PATH);
         }
 
-        private static void CreateTileRenderer(
-            string goName, TerrainTileAsset tile,
+        private static void CreateTerrainRenderer(
+            string goName, TerrainTileAsset[] tiles,
             ComputeShader? cullCompute, Material? patchMat)
         {
-            var go = new GameObject(goName);
+            var go       = new GameObject(goName);
             var renderer = go.AddComponent<GpuTerrainRenderer>();
 
-            // Assign inspector fields via SerializedObject (all are private [SerializeField]).
             using var so = new SerializedObject(renderer);
             so.Update();
-            so.FindProperty("tileAsset").objectReferenceValue     = tile;
+
+            // Populate the tiles list.
+            var tilesProp = so.FindProperty("tiles");
+            tilesProp.arraySize = tiles.Length;
+            for (int i = 0; i < tiles.Length; i++)
+                tilesProp.GetArrayElementAtIndex(i).objectReferenceValue = tiles[i];
+
+            // Write hidden infra fields (deterministic; auto-resolve handles runtime null).
             so.FindProperty("cullCompute").objectReferenceValue   = cullCompute;
             so.FindProperty("patchMaterial").objectReferenceValue = patchMat;
+
             so.ApplyModifiedPropertiesWithoutUndo();
         }
     }

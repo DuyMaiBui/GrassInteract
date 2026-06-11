@@ -93,6 +93,31 @@ namespace GpuTerrain
         /// </summary>
         internal Vector2 TileOriginWS { get; private set; }
 
+        // ── Internal sculpt seam ──────────────────────────────────────────────
+
+        /// <summary>The committed height Texture2D for this tile (null when not built).</summary>
+        internal Texture2D? HeightTexture => this.gpuResources?.HeightTexture;
+
+        /// <summary>The live GPU resources for this tile (null when not built).</summary>
+        internal TerrainTileGpuResources? GpuResources => this.gpuResources;
+
+        /// <summary>
+        /// Bind the working RenderTexture as _HeightTex for instant VTF preview.
+        /// Decode parity: RT stores normalized [0,1]; SampleHeightVTF produces same range.
+        /// </summary>
+        internal void BeginSculptPreview(RenderTexture rt)
+        {
+            if (this.patchMaterial != null)
+                this.patchMaterial.SetTexture(ID_HeightTex, rt);
+        }
+
+        /// <summary>Rebind the committed Texture2D to restore normal rendering after stroke.</summary>
+        internal void EndSculptPreview()
+        {
+            if (this.patchMaterial != null && this.gpuResources?.HeightTexture != null)
+                this.patchMaterial.SetTexture(ID_HeightTex, this.gpuResources.HeightTexture);
+        }
+
         // ── Build ─────────────────────────────────────────────────────────────
 
         public void Build(TerrainTileAsset tile, TerrainTileGpuResources gpuRes, float[] lodRangesM)
