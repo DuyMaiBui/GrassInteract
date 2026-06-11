@@ -286,15 +286,7 @@ namespace GpuTerrain.Editor
         }
 
         private TerrainTileGpuResources? FindGpu(WorldPainter painter, Vector2Int coord)
-        {
-            // WorldPainter does not yet own GpuTerrainEngines directly.
-            // In P1 we drive sculpt through the existing GpuTerrainRenderer if present,
-            // otherwise fall back to a transient upload path (T3-compatible).
-            // Look up via the scene's GpuTerrainRenderer for this tile.
-            var renderer = Object.FindObjectOfType<GpuTerrainRenderer>();
-            if (renderer == null) return null;
-            return renderer.ResourcesForCoord(coord);
-        }
+            => painter.ResourcesForCoord(coord);
 
         private bool TryGetBrushWorldPoint(Ray ray, WorldPainter painter, out Vector3 worldPoint)
         {
