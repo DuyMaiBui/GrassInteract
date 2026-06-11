@@ -35,8 +35,37 @@ namespace GpuTerrain.Editor
         /// <summary>
         /// Index into the layer stack of the currently selected (active) layer.
         /// -1 = no layer selected. The layer stack view reads/writes this.
+        /// Stack order (display): 0 = Height (synthetic), 1..N = splat rows.
         /// </summary>
         public static int ActiveLayerIndex { get; set; } = -1;
+
+        /// <summary>
+        /// Returns the <see cref="LayerType"/> and splat channel index for the currently
+        /// active layer.  The stack layout is: index 0 = Height (synthetic), indices 1..K
+        /// = Splat rows (mapped to channel 0..K-1).
+        /// </summary>
+        /// <param name="painter">The active WorldPainter (needed for splatLayers.Count).</param>
+        /// <param name="splatChannel">
+        /// Output: 0-based splat channel [0..3] if the active layer is Splat; -1 otherwise.
+        /// </param>
+        /// <returns>The <see cref="LayerType"/> of the active layer.</returns>
+        public static LayerType ActiveLayerType(WorldPainter painter, out int splatChannel)
+        {
+            splatChannel = -1;
+            int idx = ActiveLayerIndex;
+            if (idx <= 0) return LayerType.Height; // 0 or -1 = Height base
+
+            // Splat rows occupy indices 1 .. splatLayers.Count
+            int splatCount = painter.SplatLayers.Count;
+            if (idx <= splatCount)
+            {
+                splatChannel = idx - 1; // map stack display index → channel 0-based
+                return LayerType.Splat;
+            }
+
+            // Future: Grass/Props rows would follow. Default to Height for safety.
+            return LayerType.Height;
+        }
 
         // ── Brush settings (SSOT) ─────────────────────────────────────────────
 

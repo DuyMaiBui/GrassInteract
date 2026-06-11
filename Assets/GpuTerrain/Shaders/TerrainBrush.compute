@@ -136,8 +136,10 @@ void Flatten(uint3 id : SV_DispatchThreadID)
 }
 
 // ── PaintSplat kernel ──────────────────────────────────────────────────────────
-// Paints _SplatLayer weight within the brush radius.
-// Each channel written independently; normalisation is done in the Phase 2 shader.
+// Paints _SplatLayer weight within the brush radius using BrushMask.hlsl weight.
+// After adding to the active channel, all 4 channels are renormalized so that
+// the sum stays ≤ 1 (blend normalization).  The inactive channels are scaled
+// down proportionally so painting layer B reduces overlapping A weight.
 
 [numthreads(8, 8, 1)]
 void PaintSplat(uint3 id : SV_DispatchThreadID)
@@ -151,12 +153,36 @@ void PaintSplat(uint3 id : SV_DispatchThreadID)
     float4 splat = _SplatRT[id.xy];
     float  paint = _Strength * weight;
 
-    // Increase active layer, decrease others proportionally.
+    // Accumulate into the active layer channel (clamped to 1).
     float4 target = splat;
-    if (_SplatLayer == 0) target.x = min(1.0f, target.x + paint);
-    if (_SplatLayer == 1) target.y = min(1.0f, target.y + paint);
-    if (_SplatLayer == 2) target.z = min(1.0f, target.z + paint);
-    if (_SplatLayer == 3) target.w = min(1.0f, target.w + paint);
+    if (_SplatLayer == 0) target.x = saturate(target.x + paint);
+    if (_SplatLayer == 1) target.y = saturate(target.y + paint);
+    if (_SplatLayer == 2) target.z = saturate(target.z + paint);
+    if (_SplatLayer == 3) target.w = saturate(target.w + paint);
+
+    // Renormalize: if the total exceeds 1, scale down non-active channels
+    // proportionally so the sum is clamped to 1.
+    float total = target.x + target.y + target.z + target.w;
+    if (total > 1.0f)
+    {
+        // Determine active channel value.
+        float activeVal = 0.0f;
+        if (_SplatLayer == 0) activeVal = target.x;
+        if (_SplatLayer == 1) activeVal = target.y;
+        if (_SplatLayer == 2) activeVal = target.z;
+        if (_SplatLayer == 3) activeVal = target.w;
+
+        // Budget available for non-active channels.
+        float budget   = saturate(1.0f - activeVal);
+        float otherSum = total - activeVal;
+
+        float scale = (otherSum > 1e-6f) ? (budget / otherSum) : 0.0f;
+
+        if (_SplatLayer != 0) target.x *= scale;
+        if (_SplatLayer != 1) target.y *= scale;
+        if (_SplatLayer != 2) target.z *= scale;
+        if (_SplatLayer != 3) target.w *= scale;
+    }
 
     _SplatRT[id.xy] = target;
 }

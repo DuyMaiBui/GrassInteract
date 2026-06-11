@@ -138,6 +138,8 @@ namespace GpuTerrain.Editor
         {
             if (this.brushCompute == null) return;
 
+            var painter = WorldPainterState.ActivePainter;
+
             var brush = WorldPainterState.Brush;
             var worldXZ = new Vector2(worldPos.x, worldPos.z);
             TerrainPaintTargetResolver.WorldBrushToTileUV(
@@ -152,14 +154,37 @@ namespace GpuTerrain.Editor
             this.brushCompute.SetFloat("_Strength",        brush.strength);
             this.brushCompute.SetInt("_RTRes",             rtRes);
 
-            string kernelName = TerrainSculptConfig.KERNEL_RAISE_LOWER;
-            float  raiseSign  = 1f;
+            // Determine kernel by active layer type: Height → RaiseLower, Splat → PaintSplat.
+            LayerType activeType = LayerType.Height;
+            int splatChannel = -1;
+            if (painter != null)
+                activeType = WorldPainterState.ActiveLayerType(painter, out splatChannel);
 
-            int k = this.brushCompute.FindKernel(kernelName);
+            if (activeType == LayerType.Splat)
+                this.DispatchSplatKernel(groups, splatChannel, splatRT);
+            else
+                this.DispatchHeightKernel(groups, heightRT);
+        }
+
+        private void DispatchHeightKernel(int groups, RenderTexture heightRT)
+        {
+            if (this.brushCompute == null) return;
+
+            int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_RAISE_LOWER);
             this.falloffLut.BindToCompute(this.brushCompute, k);
-
             this.brushCompute.SetTexture(k, "_HeightRT", heightRT);
-            this.brushCompute.SetFloat("_RaiseSign", raiseSign);
+            this.brushCompute.SetFloat("_RaiseSign", 1f);
+            this.brushCompute.Dispatch(k, groups, groups, 1);
+        }
+
+        private void DispatchSplatKernel(int groups, int splatChannel, RenderTexture splatRT)
+        {
+            if (this.brushCompute == null) return;
+
+            int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_SPLAT);
+            this.falloffLut.BindToCompute(this.brushCompute, k);
+            this.brushCompute.SetTexture(k, "_SplatRT", splatRT);
+            this.brushCompute.SetInt("_SplatLayer", Mathf.Clamp(splatChannel, 0, TerrainSculptConfig.MAX_SPLAT_LAYERS - 1));
             this.brushCompute.Dispatch(k, groups, groups, 1);
         }
 

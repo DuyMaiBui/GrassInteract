@@ -61,6 +61,9 @@ namespace GpuTerrain
 
     public sealed partial class WorldPainter
     {
+        /// <summary>Hard cap on splat layers — one RGBA32 channel per layer.</summary>
+        public const int MAX_SPLAT_LAYERS = 4;
+
         // ── World grid ────────────────────────────────────────────────────────
 
         [Header("World Grid")]
@@ -86,8 +89,35 @@ namespace GpuTerrain
         [Header("Splat Layers (≤4)")]
         [SerializeField] private List<SplatLayerDef> splatLayers = new();
 
+        [Tooltip("Index of the currently active splat layer for painting (0-based).")]
+        [SerializeField] private int activeSplatLayerIndex = 0;
+
         /// <summary>Surface splat definitions. Limited to 4 by the RGBA32 splat RT layout.</summary>
         public List<SplatLayerDef> SplatLayers => this.splatLayers;
+
+        /// <summary>Index of the active splat layer used by the paint kernel (0-based).</summary>
+        public int ActiveSplatLayerIndex
+        {
+            get => this.activeSplatLayerIndex;
+            set => this.activeSplatLayerIndex = Mathf.Clamp(value, 0, Mathf.Max(0, this.splatLayers.Count - 1));
+        }
+
+        /// <summary>
+        /// Adds a new splat layer.
+        /// Throws <see cref="InvalidOperationException"/> if the 4-layer cap would be exceeded.
+        /// Error is surfaced rather than silently dropped (errors-over-fallbacks rule).
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Raised when splatLayers.Count == MAX_SPLAT_LAYERS.</exception>
+        public void AddSplatLayer(SplatLayerDef layer)
+        {
+            if (this.splatLayers.Count >= MAX_SPLAT_LAYERS)
+                throw new InvalidOperationException(
+                    $"[WorldPainter] Cannot add splat layer '{layer.name}': " +
+                    $"the RGBA32 splat RT supports at most {MAX_SPLAT_LAYERS} layers. " +
+                    $"Remove an existing layer before adding a new one.");
+
+            this.splatLayers.Add(layer);
+        }
 
         // ── Scatter layer refs (Tier C) ───────────────────────────────────────
 
