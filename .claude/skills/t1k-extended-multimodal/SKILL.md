@@ -11,7 +11,7 @@ allowed-tools:
   - Write
   - Edit
 argument-hint: "[file-path] [prompt]"
-version: 2.13.3
+version: 2.14.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

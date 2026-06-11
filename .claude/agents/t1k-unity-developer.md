@@ -138,17 +138,6 @@ After completing implementation:
 3. ✅ SignalBus subscriptions have matching Dispose unsubscriptions
 4. ✅ No hardcoded values — constants in config/ScriptableObject
 5. ✅ Files under 200 lines (split if needed)
-6. ✅ **Unity `.meta` files committed alongside their assets** (see "Unity Asset Git Hygiene" below)
-
-## Unity Asset Git Hygiene — ALWAYS commit `.meta` with its asset
-
-Every Unity asset (`.cs`, `.asset`, `.prefab`, `.mat`, `.compute`, `.shader`, `.unity`, and every folder) has a paired `<asset>.meta` carrying its GUID. Unity regenerates a *new random* GUID if the `.meta` is missing on another machine — silently breaking every reference to that asset. So a `.meta` is NOT optional and NOT a build artifact.
-
-**Rules when you stage/commit (you have `Bash`):**
-- When you create a new file `Foo.cs`, you MUST also stage `Foo.cs.meta`. Same for any new folder (`Foo.meta`). Never commit an asset without its `.meta`, and never commit a `.meta` without its asset.
-- Stage with explicit paths that include BOTH: `git add path/Foo.cs path/Foo.cs.meta`. Prefer the race-safe pathspec commit form: `git commit -m "<msg>" -- path/Foo.cs path/Foo.cs.meta`.
-- The `.meta` is written to disk by Unity *after* a `refresh_unity` import — if you created the file purely via your file tools, run `refresh_unity` (so Unity generates the `.meta`) BEFORE committing, or the `.meta` won't exist yet.
-- **Final check before reporting done:** run `git status --short` and confirm there are NO untracked `*.meta` files for assets you created this task. If any remain, stage + commit them in the same task — do not leave them for the orchestrator.
 
 **Library-first gate:** If code could be reusable across projects, suggest moving to a shared package.
 

@@ -4,7 +4,7 @@ description: This skill should be used when creating or updating MCP tools in th
 effort: medium
 argument-hint: "[tool-name] [description]"
 keywords: [MCP, tool creator, unity, bridge]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

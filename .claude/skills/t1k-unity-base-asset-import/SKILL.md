@@ -4,7 +4,7 @@ description: Import, validate, rename, and promote Unity assets from a project's
 effort: medium
 context: fork
 keywords: [import assets, promote assets, validate assets, asset import, incoming assets, asset naming check, asset pipeline]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

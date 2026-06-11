@@ -5,7 +5,7 @@ keywords: [parallel, multi-agent, orchestrate, teammates, concurrent, delegate]
 argument-hint: "<template> <context> [--devs|--researchers|--reviewers|--debuggers N] [--delegate]"
 effort: high
 tools: [Read, Write, Edit, Glob, Grep, Bash, Agent, TeamCreate, TaskCreate, TaskUpdate, TaskList, SendMessage, AskUserQuestion, ToolSearch, Skill]
-version: 2.13.3
+version: 2.14.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
@@ -151,6 +151,7 @@ Every teammate spawn prompt MUST include the following discipline reminders. The
 |---|---|---|
 | 150K context checkpoint (SELF-MONITORED) | "At ~150K context tokens, STOP investigation. Run `git status`. Commit + push any pending edits BEFORE composing your summary or reading more files. **No system reminder fires at 150K** — you must self-monitor. Start finalizing at ~120K; be done committing by ~150K. Multi-commit per logical chunk is preferred over one big final commit." | `~/.claude/rules/agent-completion-discipline.md` + gotcha below |
 | Race-free commit (parallel-safe) | "Use `git commit -m '<msg>' -- <file1> [<file2>...]` (pathspec form). NEVER `git add .` / `git add -A` / `git commit -a` / two-step `git add` + `git commit`. Concurrent teammates share the git index; sweeping commits steal other teammates' staged work." | `rules/parallel-teammate-git-index-race.md` |
+| Contract-first integration | "When your output meets another teammate's at a shared boundary (API ↔ client, producer ↔ consumer, two modules), the lead-supplied integration contract is authoritative — code against it EXACTLY: exact path/method, payload field names + types + casing, enums, success/error envelope, null semantics. Do not invent or paraphrase the shape. Flag any contract gap to the lead BEFORE implementing your side." | `rules/contract-first-integration.md` |
 | Test coverage per Gate 4 | "Every new/modified system MUST have a test in the package's `Tests/EditMode/`. Compile + run tests before reporting done. Zero failures required." | project `CLAUDE.md` § Completion Gates (Gate 4) |
 | Burst discipline | "Add `[BurstCompile]` to struct `ISystem` and `OnUpdate`/`OnCreate`/`OnDestroy`. No managed types in `IComponentData`. No `System.Linq` in runtime. No `[BurstCompile]` on static utility classes (BC1064)." | skill `t1k-unity-dots-core-jobs-burst` |
 | Parallel-agent worktree variant (Unity submodule) | "When 3+ parallel agents target **divergent branches** on the same git submodule, lead MUST pre-create one worktree per agent (`git worktree add -B <branch> <path> <base>`) BEFORE spawning. Agents commit inside their path; HEAD races are impossible. **Unity caveat:** agents that need `run_tests` MUST stay in the main worktree — the Editor only sees main-worktree content." | `docs/parallel-teammate-git-index-race.md` § "Parallel-agent worktree pattern (Unity DOTS submodule)" |

@@ -4,7 +4,7 @@ description: LitMotion zero-alloc tween library for Unity — LMotion.Create, Bi
 effort: high
 context: fork
 keywords: [litmotion, tween, animation, zero-allocation]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: animation
@@ -128,6 +128,21 @@ handle.IsActive();   // check if running
 - **Sequences** — `LSequence.Create()` chains motions; `.Append()` = serial, `.Join()` = parallel. For callbacks in sequences, see [project-utilities.md](references/project-utilities.md).
 
 ## Gotchas
+- **`Cancel()` / `Complete()` THROW on an inactive handle (`InvalidOperationException: Motion has been destroyed or no longer exists`)** — unlike DOTween's `.Kill()`, which silently no-ops on a dead/finished tween. The default (never-started) `MotionHandle` struct and any handle whose motion has already finished are *not* active. A direct DOTween→LitMotion port of `tween.Kill()` → `handle.Cancel()` will crash the first time it runs before the motion starts, or on any cleanup path (`Hide()`/`Dispose()`/`OnDestroy()`) after the motion completed. **Always guard:**
+
+  ```csharp
+  // ❌ WRONG — throws if sequenceHandle is default or already finished
+  this.sequenceHandle.Cancel();
+
+  // ✅ CORRECT — guard every Cancel()/Complete() with IsActive()
+  if (this.sequenceHandle.IsActive()) this.sequenceHandle.Cancel();
+
+  // ✅ For collections / nullable handles
+  foreach (var h in this.handles) if (h.IsActive()) h.Cancel();
+  if (this.maybeTween.HasValue && this.maybeTween.Value.IsActive()) this.maybeTween.Value.Cancel();
+  ```
+
+  Migration field report (TheOneFeature, 2026-06-09): unguarded `Cancel()` ports crashed in `TextCounting`, `ChestRewardsView`, `TweenTabElementAnim`, `StreakSuddenDeadPlayerView`, `StreakGroupView`, `DonateMilestoneView`, `BarPulseHandler`, et al. — surfacing as unobserved UniTask exceptions from popup Dispose paths.
 - **Leaked handles**: `MotionHandle` not disposed or `.AddTo(gameObject)` missing → motion runs after object destroyed, causing NullReferenceException. Always `.AddTo()` or manually `.Cancel()` in OnDestroy/OnDisable
 - **AddTo destroys, not disables**: `.AddTo(gameObject)` cancels on **GameObject.Destroy**, not on `SetActive(false)`. Components that disable/enable frequently need manual cancellation in `OnDisable()`
 - **BindTo on destroyed target**: Binding to a Transform/CanvasGroup that gets destroyed mid-tween silently fails or throws. Cancel the handle before destroying the target

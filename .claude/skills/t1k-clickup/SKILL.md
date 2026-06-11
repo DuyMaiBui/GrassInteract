@@ -4,7 +4,7 @@ description: "Manage ClickUp tasks, comments, time tracking, docs, and chat via 
 keywords: [clickup, click up, clickup task, clickup mcp, clickup comment, clickup time tracking, clickup doc, clickup page, clickup chat, clickup reminder, create task, update task, find tasks, log time]
 argument-hint: "[operation or task identifier]"
 effort: medium
-version: 2.13.3
+version: 2.14.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
@@ -312,6 +312,7 @@ When a user asks to "import the Sales CRM template" or "build a sales pipeline":
 - **`priority` is a string enum.** `"urgent"`, `"high"`, `"normal"`, `"low"`. Numeric values (e.g., `2`) are rejected.
 - **Dates are strings, not epoch.** `due_date`, `start_date`, `remind_at` all take `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. The MCP converts using the user's timezone — never pass epoch ms.
 - **Time entry duration is a string, not a number.** `"1h 30m"` or `"90m"` (minutes-only). NOT milliseconds, NOT seconds.
+- **`time_estimate` is milliseconds (a number), NOT a duration string.** Distinct from time-entry durations above: `clickup_create_task` / `clickup_update_task`'s `time_estimate` field takes raw milliseconds. 1h=`3600000`, 3h=`10800000`. Passing `"180"` for "3h" sets 0.18s, not 3h — convert hours to ms (`hours * 3600000`).
 - **`parent.type` on docs is a quoted string enum** with mapping: `"4"`=space, `"5"`=folder, `"6"`=list, `"7"`=everything, `"12"`=workspace. Folder is `"5"` (not `"6"`); list is `"6"` (not `"7"`). Bare numbers are rejected.
 - **`workspace_id` auto-detect.** The MCP infers workspace from session auth. Never pass `workspace_id` unless explicitly overriding (rare cross-workspace ops).
 - **Status values are workspace/space-specific.** "In Progress" in one space may not exist in another. Read `clickup_get_list(list_id)` first to see valid statuses before assuming.

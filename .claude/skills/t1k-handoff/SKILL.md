@@ -4,7 +4,7 @@ description: "Save and resume session context for handoffs between sessions or d
 keywords: [handoff, session, resume, transfer, context, save, restore]
 argument-hint: "save|resume|list [date-slug|--global]"
 effort: medium
-version: 2.13.3
+version: 2.14.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
@@ -107,8 +107,9 @@ Location: {active-plan-dir}/HANDOFF.md | .claude/handoffs/{date}-{slug}.md | $HO
    - Else: if a `.claude/` dir exists in project scope → save to `.claude/handoffs/{YYMMDD}-{slug}.md`.
    - Else (global-only mode, no project) → save to `$HOME/.claude/handoffs/{YYMMDD}-{slug}.md`.
 4. Synthesize key decisions from recent conversation (last 20 exchanges mentioning architecture, choice, decided, rejected).
-5. Write the markdown file; include the final `Location:` line in the header so future `resume` can find it unambiguously.
-6. Report: `saved to {absolute-path} ({chosen-scope})`, summary of what was captured.
+5. Ensure the parent dir exists before writing: `mkdir -p "$(dirname <save-path>)"` (Bash). The resolved target (`{plan-dir}/HANDOFF.md`, `.claude/handoffs/`, or `$HOME/.claude/handoffs/`) may not exist yet — Write fails on a missing parent dir. If `mkdir -p` fails, fall back to `$HOME/.claude/handoffs/{YYMMDD}-{slug}.md` (its parent is created the same way).
+6. Write the markdown file; include the final `Location:` line in the header so future `resume` can find it unambiguously.
+7. Report: `saved to {absolute-path} ({chosen-scope})`, summary of what was captured.
 
 Slug is auto-generated from the active plan name or current task, lowercased, max 30 chars. Not used when saving to `{plan-dir}/HANDOFF.md` (filename is fixed).
 

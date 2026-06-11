@@ -24,7 +24,7 @@ triggers:
   - DrawMeleeHumanoid
   - DrawRangerHumanoid
 keywords: [placeholder, greybox, prototype, POC, demo, primitives, URP, validation]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

@@ -1,9 +1,9 @@
 {
   "module": "t1k-extended",
-  "version": "2.13.3",
+  "version": "2.14.0",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-10T09:19:10.426Z",
+  "generatedAt": "2026-06-11T05:09:08.778Z",
   "files": {
     "skills": [
       "t1k-architecture/SKILL.md",
@@ -164,5 +164,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:40d0c24a5ddce6d47e4739ee21bccbb93544bebe2ecfc456b24be3b80f2bdcea"
+  "checksum": "sha256:72507f971198ce690a0168eeafc94a7e658e1fc099fa521c4835651c0ee53f8b"
 }

@@ -46,3 +46,50 @@ Dated reproductions of gotchas surfaced in real cooks. Body rules live in `SKILL
   void OnEnable() { handle = LMotion.Create(0f, 1f, 1f).BindToAlpha(canvasGroup); }
   void OnDisable() { if (handle.IsActive()) handle.Cancel(); }
   ```
+
+## `MotionIsInSequence` — a handle inside an `LSequence` CANNOT be cancelled individually
+
+- **Date:** 2026-06-09
+- **Project / session:** TheOneFeature RewardAnimation currency-flyout linger fix
+- **Symptom:** `InvalidOperationException: Cannot access the motion in sequence.` thrown from `LitMotion.Error.MotionIsInSequence` at runtime, inside an `AppendCallback` that called `moveHandle.Cancel()` on a handle previously added to the sequence via `.Append(moveHandle)`.
+- **Pattern (the trap):**
+  ```csharp
+  var moveHandle = LMotion.Create(a, b, d).BindToLocalPositionY(t);   // bound, now also...
+  var fadeHandle = LMotion.Create(1f, 0f, d).BindToColorA(text);
+  LSequence.Create()
+      .Append(moveHandle)        // ...adopted by the sequence
+      .Join(fadeHandle)
+      .AppendCallback(() => {
+          if (moveHandle.IsActive()) moveHandle.Cancel();   // ❌ THROWS MotionIsInSequence
+          Recycle(obj);
+      })
+      .Run();
+  ```
+- **Root cause:** once a `MotionHandle` is appended/joined into an `LSequence`, the sequence OWNS its lifecycle. Calling `.Cancel()` (or `.Complete()`) on the child handle throws `MotionIsInSequence`. **`handle.IsActive()` returns `true` for a sequenced handle**, so an `if (handle.IsActive())` guard does NOT protect you — it lets the illegal `Cancel()` through.
+- **Resolution:**
+  1. **Don't cancel children.** A sequence drives its children to completion; on natural completion they end with the sequence — there is no leak to defend against. Just do the post-work (e.g. `Recycle`) in `AppendCallback`.
+  2. **To stop a sequence early, cancel the SEQUENCE handle** returned by `.Run()`, never the child handles:
+     ```csharp
+     var seq = LSequence.Create().Append(moveHandle).Join(fadeHandle).Run();
+     // later, to abort: if (seq.IsActive()) seq.Cancel();
+     ```
+- **Corollary — the cancel-before-Recycle rule (see pooling incident below) applies only to STANDALONE handles** (`.BindTo…()` / `MotionPath.CreatePathMotion` not appended to any sequence). Standalone handles MUST be cancelled before recycling a pooled object; sequenced handles MUST NOT.
+
+## Pooled objects: cancel STANDALONE handles before `Recycle()` (LitMotion ignores `SetActive(false)`)
+
+- **Date:** 2026-06-09
+- **Project / session:** TheOneFeature RewardAnimation currency-flyout linger fix
+- **Symptom:** after a currency icon flew into the top bar it did not vanish — it reappeared/drifted near the spawn origin (≈ screen center) for a short time before disappearing. Introduced by a DOTween → LitMotion migration.
+- **Root cause:** LitMotion runs on a central PlayerLoop and does **not** cancel motions when a GameObject is deactivated. `IObjectPoolManager.Recycle()` deactivates the object, so any still-live STANDALONE motion (path, scale, or an infinite `WithLoops(-1, Yoyo)` idle bob) keeps driving the transform after it returns to the pool and bleeds into its next spawn. The DOTween version guarded this with `transform.DOKill()` at spawn and before recycle; the migration dropped those with no equivalent.
+- **Resolution:** store every standalone `MotionHandle` bound to a pooled object and cancel them in a `try/finally` immediately before `Recycle`, so even an interrupted `await` (scene teardown) cleans up:
+  ```csharp
+  var scaleHandle = LMotion.Create(...).BindToLocalScale(t);
+  var pathHandle  = MotionPath.CreatePathMotion(t, path, d, ease);
+  try { await pathHandle.ToUniTask(); /* snap + meet-target + vfx */ }
+  finally {
+      if (scaleHandle.IsActive()) scaleHandle.Cancel();   // standalone → safe to cancel
+      if (pathHandle.IsActive())  pathHandle.Cancel();
+      pool.Recycle(obj);
+  }
+  ```
+- **Gotcha:** do NOT apply this to handles that live inside an `LSequence` — see the `MotionIsInSequence` incident above. The reference implementation that got it right first was `EntryButtonItemCurrencyAnimation` (`activeMotions` dict + `KillAllMotions` over standalone handles only).

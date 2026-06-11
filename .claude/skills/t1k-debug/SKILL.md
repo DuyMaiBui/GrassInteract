@@ -5,7 +5,7 @@ keywords: [debug, investigate, diagnose, crash, error, trace, root-cause]
 argument-hint: "[error or issue description]"
 effort: high
 tools: [Read, Glob, Grep, Bash, Write, Edit, Task, Agent, TaskCreate, TaskUpdate, TaskList, TodoWrite, AskUserQuestion, Skill]
-version: 2.16.3
+version: 2.17.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

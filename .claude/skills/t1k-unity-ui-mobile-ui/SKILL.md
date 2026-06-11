@@ -3,7 +3,7 @@ name: t1k:unity:ui:mobile-ui
 description: Unity mobile UI — touch input, gestures (pinch/swipe/drag), responsive layouts, safe areas, uGUI optimization, UI Toolkit, accessibility for mobile game UI.
 effort: medium
 keywords: [mobile UI, responsive, unity, canvas]
-version: 2.2.1
+version: 2.3.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui

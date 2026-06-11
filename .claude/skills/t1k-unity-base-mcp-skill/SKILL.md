@@ -4,7 +4,7 @@ description: Orchestrate Unity Editor via MCP tools — GameObjects, scripts, sc
 effort: high
 context: fork
 keywords: [MCP, unity MCP, tool, bridge]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
@@ -133,6 +133,19 @@ If `claude mcp get` shows ANY of the following, the install is wrong — remove 
 | Any third-party fork of `unity-mcp` | Only the The1Studio fork carries our tool patches. |
 
 If the Editor panel shows `Configured` with Claude Code but `claude mcp get` shows the broken PyPI command, click the panel's **`Unregister`** button, then re-run the canonical install commands above. NEVER click "Install Skills" or "Configure All Detected Clients" to recover — those re-write the broken config every time.
+
+### Gotcha — `claude mcp get`/`list` returns NOTHING but tools still load (broken entry hiding in another project's scope)
+
+Symptom (observed 2026-06-10): `claude mcp get UnityMCP` → `No MCP server found`, `claude mcp list | grep -i unity` → empty, yet the session has `mcp__UnityMCP__*` tools loaded and the SessionStart hook prints `[t1k:mcp] action=ok name="UnityMCP" scope=user`. Looks like there's no config at all, but there is — a **stale, broken** `UnityMCP` registered at **project scope under a _different_ project** (e.g. `~/.claude.json` → `projects["…/DOTS-AI"].mcpServers.UnityMCP` with the banned `--offline mcpforunityserver` args). `claude mcp get`/`list` only inspect the current project + user scope, so a foreign project-scoped entry is invisible to them while the live session connects from a stale snapshot.
+
+Diagnose by grepping the whole config, not just the CLI:
+
+```bash
+grep -n 'UnityMCP\|mcpforunity\|mcp-for-unity\|--offline' ~/.claude.json
+python3 -c "import json;d=json.load(open('$HOME/.claude.json'));[print(p,'->',c.get('mcpServers',{}).get('UnityMCP',{}).get('args')) for p,c in d.get('projects',{}).items() if 'UnityMCP' in c.get('mcpServers',{})]"
+```
+
+Fix: re-register at **user** scope from the beta fork (canonical install above), then delete the foreign project-scoped entry so it can't shadow/confuse later. The user-scope registration is the SSOT — never rely on a project-scoped one.
 
 ## 🔍 When MCP doesn't respond — diagnose Unity status WITHOUT MCP
 

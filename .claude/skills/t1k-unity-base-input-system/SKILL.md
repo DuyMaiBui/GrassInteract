@@ -4,7 +4,7 @@ description: Unity New Input System (com.unity.inputsystem) — InputAction, Inp
 effort: high
 context: fork
 keywords: [input system, controls, input, unity]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

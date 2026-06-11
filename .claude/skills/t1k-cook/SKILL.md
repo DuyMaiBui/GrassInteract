@@ -5,7 +5,7 @@ keywords: [implement, build, feature, add, create, develop, end-to-end]
 argument-hint: "[task|plan-path] [--interactive|--fast|--parallel|--auto|--no-test|--tdd]"
 effort: high
 tools: [Read, Glob, Grep, Bash, Write, Edit, MultiEdit, Task, Agent, WebFetch, WebSearch, TodoWrite, AskUserQuestion, Skill]
-version: 2.16.3
+version: 2.17.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
@@ -28,17 +28,7 @@ The skill MUST NOT emit "no plan matching" / "exact path required" until the pro
 
 ## Tool guard — `AskUserQuestion` is deferred
 
-`AskUserQuestion` is a deferred tool: its name appears in the deferred-tools system-reminder but its schema is NOT loaded at session start. Direct invocation fails with `InputValidationError`.
-
-**Operational pre-step (mandatory before drafting any structured multi-option question):**
-
-1. Verify `AskUserQuestion` is in the loaded tool list. If not, run:
-   ```
-   ToolSearch(query="select:AskUserQuestion", max_results=1)
-   ```
-2. THEN draft and invoke the tool with batched options.
-
-**Failure mode this guard prevents:** assistant remembers the rule, drafts the question correctly in its head, then because the tool isn't loaded, falls back to "I'll just write the options as prose, and call the tool next time." Drafting prose bullets first is a violation — see `rules/always-ask-on-unresolved.md` "Forbidden prose" table.
+`AskUserQuestion` is deferred (name in the system-reminder, schema NOT loaded; direct call → `InputValidationError`). Before drafting any structured multi-option question, if it's not in the loaded tool list run `ToolSearch(query="select:AskUserQuestion", max_results=1)` THEN invoke it. Drafting prose option-bullets first (instead of loading the schema) is a violation. Full rule: `rules/ask-before-deciding.md` + `rules/always-ask-on-unresolved.md` "Forbidden prose" table.
 
 ## Decision tree — which path do I take?
 
@@ -71,58 +61,22 @@ Follow protocol: `skills/t1k-cook/references/activation-protocol.md`
 
 HARD-GATE contract: see `rules/workflow-gates.md` (auto-loaded).
 
+Full enforceable detail for all four gates: `references/hard-gates.md`. Markers below are the machine-readable contract; the one-line summaries are authoritative-by-reference.
+
 <HARD-GATE>
-Do NOT write implementation code until a plan exists and has been reviewed.
-This applies regardless of task simplicity. "Simple" tasks are where unexamined assumptions waste the most time.
-Exception: `--fast` mode skips research but still requires a plan step.
-User override: If user explicitly says "just code it" or "skip planning", respect their instruction.
+No implementation code until a plan exists and has been reviewed — regardless of task simplicity. Exception: `--fast` skips research but still requires a plan. Override: user says "just code it"/"skip planning". Detail: `references/hard-gates.md` § HARD-GATE.
 </HARD-GATE>
 
 <HARD-GATE-SCOUT-FIRST>
-Before planning OR asking clarifying questions, scan the codebase. Mandatory scout outputs:
-
-1. Project type, language(s), framework(s) — from `package.json` / `pyproject.toml` / `go.mod` / `*.csproj` / `Cargo.toml` / Unity `manifest.json` / Cocos `package.json` / etc.
-2. Existing modules/files relevant to the task
-3. Current patterns/conventions for similar features (so the implementation matches them)
-4. Existing docs in `./docs/` and any in-flight plans in `./plans/` covering this area
-5. Public APIs, schemas, contracts that the task could affect
-
-State a 3-6 bullet codebase-context summary to the user BEFORE asking questions. Skip ONLY when input is a `plan.md` / `phase-*.md` path (the plan already encodes scout output).
+Before planning OR questions, scan the codebase; emit the 5 mandatory scout outputs (project type, relevant modules, conventions, docs/plans, affected contracts) + a 3–6 bullet context summary. Skip only when input is a `plan.md`/`phase-*.md` path. Detail: `references/hard-gates.md` § Scout-First.
 </HARD-GATE-SCOUT-FIRST>
 
 <HARD-GATE-EXACT-REQUIREMENTS>
-Before producing a plan, you MUST be able to answer ALL five in one concrete sentence each (use `AskUserQuestion` to pin them down — do NOT proceed on vague intent):
-
-1. **Expected output** — the concrete artifact(s) the user will see at the end (file paths, feature behavior, UI screen, API endpoint + payload, CLI command + flags).
-2. **Acceptance criteria** — specific behaviors / inputs → outputs / edge cases that MUST work to call it "done".
-3. **Scope boundary** — what is explicitly OUT of scope this round.
-4. **Non-negotiable constraints** — stack, file locations, naming, backward compatibility, deadlines, performance budgets.
-5. **Touchpoints** — which existing files/modules (from scout) will be modified or extended; which contracts must stay stable.
-
-Ground every `AskUserQuestion` option in scout findings (e.g., "Add to `src/api/users.ts` (matches existing pattern) or new `src/api/profile.ts`?"). Skip ONLY when input is a `plan.md` / `phase-*.md` path (the plan already encodes these).
+Before a plan, answer all 5 in one concrete sentence each (via `AskUserQuestion`, scout-grounded — never on vague intent): expected output, acceptance criteria, scope boundary, non-negotiable constraints, touchpoints. Skip only when input is a plan path. Detail: `references/hard-gates.md` § Exact-Requirements.
 </HARD-GATE-EXACT-REQUIREMENTS>
 
 <HARD-GATE-NO-SIDE-EFFECTS>
-Implementation is NOT done until verified to be side-effect-free. Code-review and test gates MUST prove ALL five:
-
-1. New behavior matches every acceptance criterion above.
-2. All tests pass — including tests in modules that share files/contracts with the change.
-3. No existing business logic / workflow regression: explicitly walk each touchpoint and any caller of changed functions.
-4. No new lint / type / build errors anywhere in the repo.
-5. Public contracts unchanged unless intentional and called out (function signatures, exported types, API responses, DB schemas, env vars, config keys).
-
-User override: If user invoked `--no-test`, item 2 is downgraded to a warning. Surface the unverified-tests risk in the finalize `AskUserQuestion` so the user accepts the trade-off rather than having it silently chosen. Items 1, 3, 4, 5 remain enforceable via the mandatory `t1k-code-reviewer` subagent.
-
-If review/testing reveals a side effect, regression, or broken workflow, STOP. Use `AskUserQuestion` to present:
-- What broke (file, test, workflow, user-facing behavior)
-- Why this implementation caused it (1-line cause)
-- 2-4 concrete options, e.g.:
-  - "Revert this slice and re-plan with stricter scope"
-  - "Keep the implementation and update `<dependents>` to match the new contract"
-  - "Add a compatibility shim at `<boundary>` so old callers keep working"
-  - "Accept the regression — old behavior was unintended/buggy"
-
-Let the user decide. Do not silently patch around regressions.
+Not done until review+test gates prove all 5: matches acceptance, all (incl. shared-contract) tests pass, no touchpoint regression, no new lint/type/build errors, public contracts unchanged (or intentional+noted). `--no-test` downgrades item 2 to a surfaced warning. Side effect → STOP, `AskUserQuestion` with options. Detail: `references/hard-gates.md` § No-Side-Effects.
 </HARD-GATE-NO-SIDE-EFFECTS>
 
 Anti-rationalization discipline: see `rules/agent-anti-rationalization.md` (auto-loaded).
@@ -157,17 +111,7 @@ flowchart TD
 
 ## Smart Intent Detection
 
-| Input Pattern | Detected Mode |
-|---------------|---------------|
-| Path to `plan.md` or `phase-*.md` | code — execute existing plan |
-| Contains "fast", "quick" | fast — skip research |
-| Contains "trust me", "auto" | auto — auto-approve low-risk artifact-validated steps; stop on high-risk |
-| Lists 3+ features OR "parallel" | parallel — multi-agent |
-| Contains "no test", "skip test" | no-test — skip testing |
-| Contains "tdd", "test first", "test-driven" | tdd — write tests before implementation |
-| Default | interactive — full workflow |
-
-Full detection logic: `references/intent-detection.md`
+Mode from input: `plan.md`/`phase-*.md` path → **code** · "fast"/"quick" → **fast** · "trust me"/"auto" → **auto** (low-risk auto-approve, stop on high-risk) · 3+ features/"parallel" → **parallel** · "no test"/"skip test" → **no-test** · "tdd"/"test first" → **tdd** · default → **interactive**. Full detection logic: `references/intent-detection.md`.
 
 ## Workflow
 
@@ -199,6 +143,7 @@ Review processes: `references/review-cycle.md`
 - `--tdd + --no-test`: REFUSE with error: "TDD mode inherently requires the test suite; `--no-test` is contradictory. Remove one of the flags."
 - `--tdd + --parallel` is unsupported and will error. Do not attempt to combine them.
 - `--auto + --interactive`: existing guard, unchanged.
+- `--parallel` **contract-first gate** (`rules/contract-first-integration.md`): before spawning parallel implementers whose outputs meet at a shared boundary (API ↔ client, producer ↔ consumer, two modules), DEFINE the integration contract — exact path/method, payload field names + types + **casing**, enums, success/error envelope, null semantics — and embed it **verbatim** in every implementer's brief (or point all at the SSOT types/schema file). Per-side typecheck cannot catch a contract mismatch; the post-implement `t1k-code-reviewer` MUST assert both sides honor the contract.
 
 ## Artifact Gate (harness for the review + finalize stages)
 
@@ -206,21 +151,9 @@ After implementing, write the 5 required artifacts and validate via the workflow
 
 ## Required Subagents — CRITICAL ENFORCEMENT
 
-Testing, Review, and Finalize phases **MUST** use the Task tool to spawn:
+Testing, Review, and Finalize phases **MUST** spawn subagents via the Task tool (separation of cognitive powers — the implementer is not the reviewer; the planner is not the coder). Phase → agent: Research→`t1k-researcher` · Plan→`t1k-planner` · Implement→`implementer` (kit-resolved) · UI→`ui-ux-designer` · Test→`t1k-tester`/`t1k-debugger` · Review→`t1k-code-reviewer` (acceptance + no-regression + contracts + patterns + clean-build checks) · Finalize→`t1k-project-manager`+`t1k-docs-manager`+`t1k-git-manager`. Full table + per-agent rationale + injection protocol: `references/subagent-patterns.md`.
 
-| Phase | Subagent | Why (separation of cognitive powers) |
-|---|---|---|
-| Research (optional) | `t1k-researcher` | External-context gathering without polluting main session |
-| Plan | `t1k-planner` | Plan discipline; not the implementer |
-| Implement | `implementer` (resolved per-kit via routing JSON) | Engine-specific (Unity DOTS, Cocos, RN, web, etc.) |
-| UI work | `ui-ux-designer` (when applicable, kit-resolved) | UX-first lens |
-| Test | `t1k-tester`, `t1k-debugger` | Independent verification |
-| Review | `t1k-code-reviewer` | Independent review with explicit checks: every acceptance criterion met; no regression in touchpoints/blast-radius; no breaking changes to public contracts; follows scout patterns; no new lint/type/build errors |
-| Finalize | `t1k-project-manager` + `t1k-docs-manager` + `t1k-git-manager` | Plan sync-back, docs update, conventional commits |
-
-**If workflow ends with 0 Task tool calls, it is INCOMPLETE.** Do not inline testing, review, or finalization yourself — the value of multi-agent is the **cognitive separation of powers** (the implementer is not the reviewer; the planner is not the coder). Same context = same blind spots. Multi-agent that share one context, with no acceptance criteria, with no artifacts, is just many-people-being-wrong-together.
-
-Full subagent table and injection protocol: `references/subagent-patterns.md`
+**If workflow ends with 0 Task tool calls, it is INCOMPLETE.** Same context = same blind spots; multi-agent sharing one context with no acceptance criteria and no artifacts is just many-people-being-wrong-together.
 
 **Finalize (never skip):** t1k-project-manager → plan sync-back | t1k-docs-manager → update `./docs` | t1k-git-manager → commit offer
 
@@ -237,36 +170,7 @@ Always enforced (every mode): 100% test pass (unless `--no-test`), artifact-gate
 
 ## When implementation goes wrong — recovery via rollback
 
-If an implementation corrupts `~/.claude/` state (bad merge, mis-applied
-prefix, broken hooks), use the H7 rollback command rather than a manual
-clean-up:
-
-```
-t1k rollback --kit <name> --to-snapshot pre-<previous-version>
-```
-
-- Snapshots live at `~/.claude/.t1k-snapshots/<kit>/pre-<version>/`.
-  Cap is 5 most-recent per kit; older ones soft-move to
-  `~/.claude/.t1k-trash/<kit>/`.
-- `--to-snapshot` MUST literally start with `pre-` (e.g. `pre-2.4.1`).
-  Bare versions are rejected.
-- `--yes` is currently a no-op as of cli@v4.14.0 — does not bypass
-  anything. Future-proof only.
-- Restore is a non-destructive copy: files added by the bad implementation
-  are NOT removed. Run `/t1k:doctor` afterwards to spot stragglers.
-
-**Critical caveat (cli@v4.14.0):** the install/update pipeline does not
-yet auto-create snapshots. If `t1k rollback` reports
-`snapshot '<kit>/pre-<version>' does not exist`, fall back to
-`t1k install --reset` (the sanctioned destructive path; takes its own
-`~/.claude-backup-{ISO-ts}/` first). NEVER `rm -rf ~/.claude/` — <!-- gate:allow-rm-claude (rule statement) -->
-the `validate-no-raw-rm-claude.cjs` gate forbids it and you'll lose
-`.t1k-snapshots/`, `.t1k-trash/`, and any user-customized files.
-
-For per-file/per-step recovery, prefer `git restore` on the project
-side; the H7 rollback is for `~/.claude/` state, not project source.
-Full reference: `skills/t1k-kit/references/cli-commands.md` →
-`t1k rollback`.
+Corrupted `~/.claude/` state (bad merge, mis-applied prefix, broken hooks) → use H7 rollback, not manual cleanup: `t1k rollback --kit <name> --to-snapshot pre-<previous-version>`. If the snapshot doesn't exist (pipeline doesn't auto-snapshot as of cli@v4.14.0), fall back to `t1k install --reset` (takes its own backup). NEVER `rm -rf ~/.claude/` — <!-- gate:allow-rm-claude (rule statement) --> the gate forbids it. Full procedure (snapshot cap, `pre-` prefix rule, non-destructive restore caveat): `references/rollback-recovery.md`.
 
 ## Environment Variables
 

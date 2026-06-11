@@ -5,7 +5,7 @@ keywords: [explore, search, find, codebase, navigate, usages, grep]
 argument-hint: "[query]"
 effort: low
 tools: [Read, Glob, Grep, Bash, Task, Agent]
-version: 2.16.3
+version: 2.17.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

@@ -4,7 +4,7 @@ description: "Manage optional skill modules for modular kits. Use for 'install m
 keywords: [modules, install, remove, preset, update, list, manage]
 argument-hint: "<subcommand> [args] [--kit <kit>] [--yes|--force|--replace]"
 effort: medium
-version: 2.16.3
+version: 2.17.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

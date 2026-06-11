@@ -4,7 +4,7 @@ description: "Security audit using STRIDE threat model and OWASP Top 10 checklis
 keywords: [security, vulnerabilities, owasp, stride, threat-model, audit, penetration]
 argument-hint: "[path] [--scope auth|api|data] [--auto-fix] [--report]"
 effort: high
-version: 2.13.3
+version: 2.14.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

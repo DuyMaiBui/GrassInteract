@@ -5,7 +5,7 @@ keywords: [fix, bug, error, resolve, patch, repair, test-failure]
 argument-hint: "[issue] [--auto|--review|--quick|--parallel]"
 effort: medium
 tools: [Read, Glob, Grep, Bash, Write, Edit, MultiEdit, Task, Agent, TodoWrite, AskUserQuestion, Skill]
-version: 2.16.3
+version: 2.17.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
@@ -38,38 +38,7 @@ If the user provides a fuzzy plan/path/phase arg (e.g. `chaosforge-demo`, `plans
 
 ## Step 0.5 — Issue Claim Gate (fires ONLY when a target GitHub issue is supplied)
 
-Before running Scout or Diagnose, check and acquire a claim on the issue via the SSOT script — never run `gh issue edit` or `gh pr create` for claiming yourself.
-
-```bash
-node .claude/scripts/t1k-issue-claim.cjs check <owner/repo#N>
-```
-
-Read the emitted JSON `state` field:
-
-| state | Action |
-|---|---|
-| `"held"` (foreign holder) | **HARD BLOCK.** Surface `holder` + `prNumber`. Instruct user to re-run with `--steal` if they want to override. Do NOT proceed to Scout/Diagnose. |
-| `"free"` OR `--steal` flag given | Run `acquire`: `node .claude/scripts/t1k-issue-claim.cjs acquire <owner/repo#N>`. Use the returned `markerLine`, `bodyTrailer` (`Fixes #N`), and `labelToApply` when opening the WIP draft PR — the draft PR IS the durable claim. |
-| `"skip"` | Out-of-scope repo or no config. Proceed normally without claiming. |
-| `"stale"` | A foreign draft PR is stale (inactive > config threshold). Proceed as `free`; the stale holder is reported only, not a blocker. |
-
-**After opening the WIP draft PR — tie-break re-check (mandatory):** the moment the draft PR exists, run the deterministic tie-break so a sub-second double-acquire can't leave two open PRs on the issue:
-
-```bash
-node .claude/scripts/t1k-issue-claim.cjs acquire <owner/repo#N> --pr <newPrNumber>
-```
-
-If a lower-numbered claim PR by another contributor exists, the script auto-closes **your** PR and emits `{state:"held", yielded:true}` — stop and yield. Otherwise it confirms `{acquired:true}` and you proceed. (Mirrors `t1k-sync-back`'s post-PR step; Mitigation 1 of the no-CAS residual risk in `rules/issue-claim-discipline.md`.)
-
-**Finalize step:** when the fix PR is ready for review, call `release` to convert the draft to ready-for-review:
-
-```bash
-node .claude/scripts/t1k-issue-claim.cjs release <owner/repo#N>
-```
-
-The `release` call marks the linked draft PR ready (draft → ready hands off to `t1k-babysit-pr`). Merge or close auto-releases the claim via GitHub state — no manual cleanup needed.
-
-> This gate delegates all claim logic to `.claude/scripts/t1k-issue-claim.cjs`. Do NOT run `gh issue edit` or `gh pr create` for the claim itself. See `rules/issue-claim-discipline.md` for the full enforcement rule.
+Before Scout/Diagnose, claim the issue via the SSOT script — never `gh issue edit`/`gh pr create` for claiming yourself: `node .claude/scripts/t1k-issue-claim.cjs check <owner/repo#N>`. On `state:"held"` → HARD BLOCK (surface holder+PR; `--steal` to override). On `"free"`/`--steal` → `acquire` + open the WIP draft PR (the draft IS the claim), then re-run `acquire … --pr <N>` for the deterministic tie-break. `release` marks it ready when the fix lands. Full state table + tie-break + finalize: `references/issue-claim-gate.md`. Enforcement: `rules/issue-claim-discipline.md`.
 
 ## Decision tree — which path do I take?
 
@@ -96,57 +65,22 @@ Pick by intent; keep loading minimal.
 
 HARD-GATE contract: see `rules/workflow-gates.md` (auto-loaded).
 
+Full enforceable detail for all four gates: `references/hard-gates.md`. Markers below are the machine-readable contract; the one-line summaries are authoritative-by-reference.
+
 <HARD-GATE>
-Do NOT propose or implement fixes before completing Steps 1-2 (Scout + Diagnose).
-Symptom fixes are failure. Find the cause first through structured analysis, NEVER guessing.
-If 3+ fix attempts fail, STOP and question the architecture — discuss with user before attempting more.
-User override: `--quick` mode allows fast scout-diagnose-fix cycle for trivial issues (lint, type errors).
+No fixes before Steps 1–2 (Scout + Diagnose). Symptom fixes = failure; find the cause, never guess. 3+ failed attempts → STOP, question the architecture with the user. Override: `--quick` (trivial lint/type). Detail: `references/hard-gates.md` § HARD-GATE.
 </HARD-GATE>
 
 <HARD-GATE-SCOUT-FIRST>
-Always scan the codebase BEFORE asking clarifying questions or forming hypotheses. Mandatory scout outputs (collect before Step 2):
-
-1. Project type, language(s), framework(s) — from `package.json` / `pyproject.toml` / `go.mod` / `*.csproj` / `Cargo.toml` / Unity `manifest.json` / Cocos `package.json` / etc.
-2. The exact file(s) where the symptom surfaces + their direct callers/dependents
-3. Related tests covering the affected area
-4. Recent commits (`git log --oneline -20`) touching scouted files — possible introducer
-5. Existing patterns/conventions for this kind of code (so the fix matches them)
-
-State a 3-6 bullet codebase-context summary to the user BEFORE asking questions. This kills the "imagined context" failure mode where the model hallucinates architecture from a few file reads instead of grounding hypotheses in real codebase evidence.
+Scan the codebase BEFORE questions/hypotheses; emit the 5 mandatory scout outputs (project type, symptom file+callers, covering tests, recent commits, existing patterns) + a 3–6 bullet context summary. Kills the "imagined context" failure. Detail: `references/hard-gates.md` § Scout-First.
 </HARD-GATE-SCOUT-FIRST>
 
 <HARD-GATE-EXACT-ROOT-CAUSE>
-Do NOT propose a fix until you can answer ALL six in one concrete sentence each:
-
-1. **Exact symptom** — precise error message / failing assertion / observed behavior (copy verbatim, NOT paraphrased).
-2. **Reproduction steps** — minimal sequence that triggers it (commands, inputs, environment).
-3. **Expected vs actual** — what SHOULD happen vs what DOES happen.
-4. **Root cause** (NOT symptom) — the underlying defect: specific line, missing check, race condition, contract violation, design flaw. Cite `file:line` evidence.
-5. **Why now** — what change/condition exposed it today: recent commit (point to SHA), data shape change, env divergence, dep upgrade, half-finished migration. If you cannot answer "why now", you do not yet understand the system — return to scout.
-6. **Blast radius** — every code path that depends on the broken behavior or shares the same root cause.
-
-If ANY item is vague ("probably", "I think", "something with…"), use `AskUserQuestion` to gather missing facts (logs, repro, env) OR run more scout/debug — NEVER guess. Ground every `AskUserQuestion` option in scout findings (specific files, specific commits, specific functions) — never abstract.
+No fix until all 6 slots are answered in one concrete sentence each: symptom (verbatim), repro, expected-vs-actual, root-cause (`file:line`), why-now, blast-radius. Any vague slot → `AskUserQuestion` or more scout, never guess. Detail: `references/hard-gates.md` § Root-Cause.
 </HARD-GATE-EXACT-ROOT-CAUSE>
 
 <HARD-GATE-NO-SIDE-EFFECTS>
-The fix is NOT done until verified to be side-effect-free. Step 5 MUST prove ALL five:
-
-1. Original symptom no longer reproduces (re-run exact pre-fix repro from #2 above).
-2. All tests in modified files + transitively-affected modules pass.
-3. No business logic / workflow regression in the blast radius identified above (run those tests too, or manually walk the affected flows).
-4. No new lint / type / build errors introduced anywhere.
-5. Public API contracts (function signatures, exported types, response shapes, DB schemas, env vars) unchanged — OR the change is intentional and called out in the commit message.
-
-If verification reveals a side effect, regression, or broken workflow, STOP. Do NOT silently patch around it. Use `AskUserQuestion` to present:
-- What broke (file, test, workflow)
-- Why the fix caused it (1-line cause)
-- 2-4 concrete options, e.g.:
-  - "Revert the fix and try a different root-cause angle"
-  - "Keep the fix and update dependent code at `<files>` to match the new contract"
-  - "Narrow the fix scope to `<subset>` so the regression goes away"
-  - "Accept the regression — it was buggy behavior the test was locking in"
-
-Let the user decide. Do not assume.
+Not done until Step 5 proves all 5: repro gone, affected tests pass, no blast-radius regression, no new lint/type/build errors, public contracts unchanged (or intentional + noted). Side effect found → STOP, `AskUserQuestion` with concrete options. Detail: `references/hard-gates.md` § No-Side-Effects.
 </HARD-GATE-NO-SIDE-EFFECTS>
 
 Anti-rationalization discipline: see `rules/agent-anti-rationalization.md` (auto-loaded).

@@ -4,7 +4,7 @@ description: "Git operations with conventional commits. Stage, commit, push, PR,
 keywords: [git, commit, push, branch, pull-request, stage, merge, issue-link, fixes, closes]
 argument-hint: "cm|cp|pr|merge [args]"
 effort: low
-version: 2.16.3
+version: 2.17.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

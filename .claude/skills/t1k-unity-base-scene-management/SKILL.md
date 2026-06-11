@@ -3,7 +3,7 @@ name: t1k:unity:base:scene-management
 description: Scene loading (async/additive), transitions, DontDestroyOnLoad patterns, and bootstrap architecture for Unity 6. Use when managing scenes or loading screens.
 effort: medium
 keywords: [scene management, loading, scene, unity]
-version: 2.2.0
+version: 2.2.2
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
