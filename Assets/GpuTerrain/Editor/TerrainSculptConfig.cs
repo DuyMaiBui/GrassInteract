@@ -53,6 +53,7 @@ namespace GpuTerrain.Editor
         public const string KERNEL_SMOOTH        = "Smooth";
         public const string KERNEL_FLATTEN        = "Flatten";
         public const string KERNEL_PAINT_SPLAT   = "PaintSplat";
+        public const string KERNEL_PAINT_DENSITY = "PaintDensity";
 
         // ── Compute thread group size ────────────────────────────────────────
 

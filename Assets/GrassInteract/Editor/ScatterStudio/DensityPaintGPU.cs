@@ -14,6 +14,14 @@ namespace GrassInteract.Editor
     /// that is Blit'd from <c>rt</c> before each stamp render.
     ///
     /// <para>
+    /// <b>SUPERSEDED (P3b):</b> The density paint math is now folded into
+    /// <c>TerrainBrush.compute</c> (<c>PaintDensity</c> kernel) and
+    /// <c>GpuTerrain.Editor.WorldPainterDensityEncoder</c>. This class is kept alive
+    /// because <c>DensityPaintTool</c> and <c>DensityPaintPanel</c> (Scatter Studio window)
+    /// still reference it. Remove when Scatter Studio retires. Do NOT add new callers.
+    /// </para>
+    ///
+    /// <para>
     /// <b>BLOCKER-1 fix — no same-RT read-modify-write:</b><br/>
     /// D3D11 (and Metal/Vulkan under some drivers) produces undefined results when the same
     /// RenderTexture is bound as both render target and shader input in the same draw call.

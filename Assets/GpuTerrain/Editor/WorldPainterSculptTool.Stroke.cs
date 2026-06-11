@@ -1,4 +1,5 @@
 #nullable enable
+using GrassInteract;
 using UnityEditor;
 using UnityEngine;
 
@@ -66,6 +67,7 @@ namespace GpuTerrain.Editor
         private void TeardownActiveStroke(WorldPainter? painter)
         {
             this.writeback.CancelPending();
+            this.densityEncoder.CancelPending();
             UnityEngine.Rendering.AsyncGPUReadback.WaitAllRequests();
 
             if (painter != null)
@@ -81,6 +83,12 @@ namespace GpuTerrain.Editor
                     }
                 }
             }
+
+            // Flush density encoder on mouse-up (synchronous final persist).
+            if (this.activeDensityLayer != null && this.densityRT != null)
+                this.densityEncoder.ExecuteSync(this.activeDensityLayer, this.densityRT);
+
+            this.ReleaseDensityRT();
 
             this.stroke.End();
             this.rtCache.ReleaseAll();
@@ -154,16 +162,35 @@ namespace GpuTerrain.Editor
             this.brushCompute.SetFloat("_Strength",        brush.strength);
             this.brushCompute.SetInt("_RTRes",             rtRes);
 
-            // Determine kernel by active layer type: Height → RaiseLower, Splat → PaintSplat.
+            // Determine kernel by active layer type.
+            // Height → RaiseLower, Splat → PaintSplat, Grass → PaintDensity.
             LayerType activeType = LayerType.Height;
             int splatChannel = -1;
             if (painter != null)
                 activeType = WorldPainterState.ActiveLayerType(painter, out splatChannel);
 
             if (activeType == LayerType.Splat)
+            {
                 this.DispatchSplatKernel(groups, splatChannel, splatRT);
+            }
+            else if (activeType == LayerType.Grass && painter != null)
+            {
+                int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
+                if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
+                {
+                    var scatterLayer = painter.ScatterLayers[scatterIdx] as GrassInteract.DensityScatterLayer;
+                    if (scatterLayer != null)
+                    {
+                        var dRT = this.GetOrCreateDensityRT(scatterLayer);
+                        if (dRT != null)
+                            this.DispatchDensityKernel(groups, dRT);
+                    }
+                }
+            }
             else
+            {
                 this.DispatchHeightKernel(groups, heightRT);
+            }
         }
 
         private void DispatchHeightKernel(int groups, RenderTexture heightRT)
@@ -186,6 +213,22 @@ namespace GpuTerrain.Editor
             this.brushCompute.SetTexture(k, "_SplatRT", splatRT);
             this.brushCompute.SetInt("_SplatLayer", Mathf.Clamp(splatChannel, 0, TerrainSculptConfig.MAX_SPLAT_LAYERS - 1));
             this.brushCompute.Dispatch(k, groups, groups, 1);
+        }
+
+        private void DispatchDensityKernel(int groups, RenderTexture densityRT)
+        {
+            if (this.brushCompute == null) return;
+
+            int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
+            this.falloffLut.BindToCompute(this.brushCompute, k);
+            this.brushCompute.SetTexture(k, "_DensityRT", densityRT);
+            // Mode 0 = Paint. Erase/smooth extend via different _DensityMode values (P4+).
+            this.brushCompute.SetInt("_DensityMode", 0);
+            this.brushCompute.Dispatch(k, groups, groups, 1);
+
+            // Queue throttled async writeback to the density layer.
+            if (this.activeDensityLayer != null)
+                this.densityEncoder.RequestAsync(this.activeDensityLayer, densityRT);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

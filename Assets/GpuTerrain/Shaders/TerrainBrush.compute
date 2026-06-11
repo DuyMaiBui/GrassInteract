@@ -1,14 +1,17 @@
-// TerrainBrush.compute — height + splat compute kernels.
+// TerrainBrush.compute — height + splat + density compute kernels.
 // All kernels operate on the per-tile working RenderTexture(s).
 // Dispatch: ceil(RT_RES / 8) × ceil(RT_RES / 8) × 1 thread groups.
 //
 // Refactored in Batch 2 to use BrushMask.hlsl for the per-texel weight.
 // Kernel signatures / names preserved so TerrainBrushMathTests stays green.
+// P3b: Density kernel added — folds DensityPaintGPU paint/erase/smooth math
+//      over BrushMask.hlsl weight. DensityBrushMathTests is the contract.
 
 #pragma kernel RaiseLower
 #pragma kernel Smooth
 #pragma kernel Flatten
 #pragma kernel PaintSplat
+#pragma kernel PaintDensity
 
 #include "BrushMask.hlsl"
 
@@ -49,6 +52,14 @@ float _FlattenTarget;
 
 /// Layer index [0,3] to paint.
 int _SplatLayer;
+
+// ── PaintDensity parameters ───────────────────────────────────────────────────
+
+/// Density working texture (RFloat, read+write). Normalized [0,1].
+RWTexture2D<float> _DensityRT;
+
+/// Density paint mode: 0 = Paint (add), 1 = Erase (subtract), 2 = Smooth (blur).
+int _DensityMode;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -185,4 +196,55 @@ void PaintSplat(uint3 id : SV_DispatchThreadID)
     }
 
     _SplatRT[id.xy] = target;
+}
+
+// ── PaintDensity kernel ────────────────────────────────────────────────────────
+// Folds DensityPaintGPU paint/erase/smooth math over BrushMask.hlsl weight.
+// Mirrors the three modes from the legacy shader path so DensityBrushMathTests
+// (the contract) exercises identical math through this shared kernel.
+//
+// _DensityMode 0 = Paint  : add Strength * weight (clamped to [0,1])
+// _DensityMode 1 = Erase  : subtract Strength * weight (clamped to [0,1])
+// _DensityMode 2 = Smooth : lerp toward local 3×3 average by Strength * weight
+
+[numthreads(8, 8, 1)]
+void PaintDensity(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
+
+    float2 uv     = TexelToUV(id.xy);
+    float  weight = TexelWeight(uv);
+    if (weight <= 0.0f) return;
+
+    float cur   = _DensityRT[id.xy];
+    float delta = _Strength * weight;
+
+    if (_DensityMode == 0)
+    {
+        // Paint: accumulate density.
+        _DensityRT[id.xy] = saturate(cur + delta);
+    }
+    else if (_DensityMode == 1)
+    {
+        // Erase: subtract density.
+        _DensityRT[id.xy] = saturate(cur - delta);
+    }
+    else
+    {
+        // Smooth: box-blur the density RT within the brush radius (3×3 kernel).
+        float sum = 0.0f;
+        float cnt = 0.0f;
+        for (int dy = -3; dy <= 3; ++dy)
+        {
+            for (int dx = -3; dx <= 3; ++dx)
+            {
+                int2 nb = int2(id.xy) + int2(dx, dy);
+                if (nb.x < 0 || nb.x >= _RTRes || nb.y < 0 || nb.y >= _RTRes) continue;
+                sum += _DensityRT[nb];
+                cnt += 1.0f;
+            }
+        }
+        float avg = (cnt > 0.0f) ? (sum / cnt) : cur;
+        _DensityRT[id.xy] = lerp(cur, avg, delta);
+    }
 }

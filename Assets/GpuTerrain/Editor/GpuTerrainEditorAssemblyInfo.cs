@@ -4,3 +4,6 @@ using System.Runtime.CompilerServices;
 // (e.g. TerrainBrushPreview.CreateUnitDisc) can be unit-tested. Mirrors the runtime
 // GpuTerrainAssemblyInfo pattern.
 [assembly: InternalsVisibleTo("GpuTerrain.EditorTests")]
+// Density kernel + encoder folded into GpuTerrain (P3b); DensityBrushMathTests still
+// live in GrassInteract.EditorTests, so expose internals to that assembly too.
+[assembly: InternalsVisibleTo("GrassInteract.EditorTests")]

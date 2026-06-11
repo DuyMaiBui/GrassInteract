@@ -1,5 +1,6 @@
 #nullable enable
 using System.Collections.Generic;
+using GrassInteract;
 using UnityEditor;
 using UnityEditor.EditorTools;
 using UnityEngine;
@@ -29,10 +30,17 @@ namespace GpuTerrain.Editor
         // ── Tool resources ────────────────────────────────────────────────────
 
         internal ComputeShader? brushCompute;
-        internal readonly TerrainSculptRtWriteback writeback  = new TerrainSculptRtWriteback();
-        internal readonly TileRtCache              rtCache    = new TileRtCache();
-        internal readonly WorldPainterStroke       stroke     = new WorldPainterStroke();
-        internal readonly BrushFalloffLut          falloffLut = new BrushFalloffLut();
+        internal readonly TerrainSculptRtWriteback   writeback       = new TerrainSculptRtWriteback();
+        internal readonly WorldPainterDensityEncoder densityEncoder  = new WorldPainterDensityEncoder();
+        internal readonly TileRtCache                rtCache         = new TileRtCache();
+        internal readonly WorldPainterStroke         stroke          = new WorldPainterStroke();
+        internal readonly BrushFalloffLut            falloffLut      = new BrushFalloffLut();
+
+        // ── Density RT (per scatter-layer, one per stroke) ────────────────────
+        // Allocated on first Grass-layer stamp; released on TeardownActiveStroke.
+
+        internal RenderTexture?        densityRT          = null;
+        internal DensityScatterLayer?  activeDensityLayer = null;
 
         // ── Per-stroke tracking ───────────────────────────────────────────────
 
@@ -83,7 +91,11 @@ namespace GpuTerrain.Editor
             this.falloffLut.Dispose();
         }
 
-        private void OnEditorUpdate() => this.writeback.Tick();
+        private void OnEditorUpdate()
+        {
+            this.writeback.Tick();
+            this.densityEncoder.Tick();
+        }
 
         // ── LUT re-upload (finding #3) ────────────────────────────────────────
 

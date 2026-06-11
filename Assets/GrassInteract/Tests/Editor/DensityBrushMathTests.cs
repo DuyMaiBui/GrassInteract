@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using GrassInteract.Editor;
+using GpuTerrain.Editor;
 
 namespace GrassInteract.Tests
 {
@@ -328,6 +329,92 @@ namespace GrassInteract.Tests
             Vector3 rotatedForward = rot * Vector3.forward;
             float dot = Vector3.Dot(rotatedForward, normal);
             Assert.AreEqual(1f, dot, 1e-4f, "Decal +Z (face normal) must align with surface normal");
+        }
+
+        // ── 6. WorldPainterDensityEncoder round-trip (GPU-gated) ─────────────
+
+        /// <summary>
+        /// RT→bytes→map round-trip for <see cref="WorldPainterDensityEncoder"/>.
+        /// Allocates a small R8_UNorm (or best supported) RT, blits a known value 0.7,
+        /// calls <see cref="WorldPainterDensityEncoder.ExecuteSync"/> with a blank
+        /// <see cref="DensityScatterLayer"/> whose <c>densityMap</c> is a fresh 16×16 Texture2D,
+        /// and asserts the map's R channel ≈ 0.7.
+        ///
+        /// Gated behind <c>SystemInfo.graphicsDeviceType != Null</c>.
+        /// </summary>
+        [Test]
+        public void DensityEncoder_RoundTrip_RTToBytesPreservesValue()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("Skipping density encoder round-trip test — null graphics device.");
+                return;
+            }
+
+            const int   SIZE    = 16;
+            const float DENSITY = 0.7f;
+
+            // Allocate small RT.
+            GraphicsFormat fmt;
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, GraphicsFormatUsage.Render))
+                fmt = GraphicsFormat.R8_UNorm;
+            else if (SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, GraphicsFormatUsage.Render))
+                fmt = GraphicsFormat.R16_SFloat;
+            else
+                fmt = GraphicsFormat.R32_SFloat;
+
+            var rt = new RenderTexture(SIZE, SIZE, 0, fmt) { enableRandomWrite = true };
+            rt.Create();
+
+            // Blit known value into RT.
+            var seed = new Texture2D(SIZE, SIZE, TextureFormat.RGBA32, false, true);
+            var seedPx = new Color[SIZE * SIZE];
+            for (int i = 0; i < seedPx.Length; ++i)
+                seedPx[i] = new Color(DENSITY, DENSITY, DENSITY, 1f);
+            seed.SetPixels(seedPx);
+            seed.Apply(false);
+            Graphics.Blit(seed, rt);
+
+            // Create a blank Texture2D to receive the encoder output.
+            var map = new Texture2D(SIZE, SIZE, TextureFormat.RFloat, false, true);
+            var blank = new Color[SIZE * SIZE];
+            for (int i = 0; i < blank.Length; ++i) blank[i] = Color.black;
+            map.SetPixels(blank);
+            map.Apply(false);
+
+            // Create a minimal DensityScatterLayer ScriptableObject for the encoder.
+            // We set its densityMap via the accessor (the layer is created in-memory only).
+            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
+
+            // Directly set the serialised field via SerializedObject so DensityMap returns `map`.
+            var so    = new UnityEditor.SerializedObject(layer);
+            var prop  = so.FindProperty("densityMap");
+            if (prop != null) { prop.objectReferenceValue = map; so.ApplyModifiedPropertiesWithoutUndo(); }
+
+            try
+            {
+                var encoder = new WorldPainterDensityEncoder();
+                encoder.ExecuteSync(layer, rt);
+
+                // Verify: every map pixel R ≈ DENSITY within R8 quantisation tolerance.
+                Color[] result = map.GetPixels();
+                Assert.AreEqual(SIZE * SIZE, result.Length, "Pixel count mismatch after round-trip");
+
+                float tol = 1.5f / 255f; // ±1 step for R8 quantisation
+                for (int i = 0; i < result.Length; ++i)
+                {
+                    Assert.AreEqual(DENSITY, result[i].r, tol,
+                        $"Pixel {i} R after round-trip: expected ~{DENSITY} got {result[i].r}");
+                }
+            }
+            finally
+            {
+                rt.Release();
+                Object.DestroyImmediate(rt);
+                Object.DestroyImmediate(seed);
+                Object.DestroyImmediate(map);
+                Object.DestroyImmediate(layer);
+            }
         }
     }
 }
