@@ -18,12 +18,12 @@ namespace WorldPainter
     }
 
     /// <summary>
-    /// V3 per-instance record (strict brainstorm §2, Phase A D1 final + Phase 1 PhysicMaterial).
+    /// V3 per-instance record (strict brainstorm Â§2, Phase A D1 final + Phase 1 PhysicMaterial).
     ///
     /// Fixed header (36 B):
     ///   Vector3 position      12 B
     ///   Quaternion rotation   16 B
-    ///   float scale            4 B  (uniform — non-uniform V1 records collapse to average XYZ on migration)
+    ///   float scale            4 B  (uniform â€” non-uniform V1 records collapse to average XYZ on migration)
     ///   uint overrideMask      4 B
     ///
     /// Optional ColliderConfigured block (20 B) appended when the ColliderConfigured bit is set:
@@ -50,7 +50,7 @@ namespace WorldPainter
         /// <summary>Bitmask of active overrides. See <see cref="InstanceOverrideMask"/>.</summary>
         public InstanceOverrideMask overrideMask;
 
-        // ── Optional collider fields (populated when ColliderConfigured bit is set) ─
+        // â”€â”€ Optional collider fields (populated when ColliderConfigured bit is set) â”€
 
         /// <summary>Whether this instance spawns a collider.</summary>
         [System.NonSerialized] public bool generateCollider;
@@ -73,7 +73,7 @@ namespace WorldPainter
         /// </summary>
         [System.NonSerialized] public int colliderMaterialRefIndex;
 
-        // ── Byte layout constants (V3) ────────────────────────────────────────
+        // â”€â”€ Byte layout constants (V3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>Byte size of the V3 fixed header.</summary>
         public const int FIXED_BYTES = 36; // 12 + 16 + 4 + 4
@@ -99,7 +99,13 @@ namespace WorldPainter
     /// List{Object} for object references (meshes) indexed from the blob.
     ///
     /// V3 blob layout: [VERSION_BYTE=3] + [records...]. A blob whose version byte is not 3 is
-    /// rejected with an exception — legacy V1/V2 formats are no longer supported.
+    /// rejected with an exception â€” legacy V1/V2 formats are no longer supported.
+    ///
+    /// â”€â”€ Per-tile bucket keying (Phase 1 extension) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /// The <see cref="tileCoordKeys"/> + <see cref="tileBlobValues"/> parallel lists form a
+    /// signed <see cref="Vector2Int"/> â†’ blob-segment index map for per-tile streaming.
+    /// The V3 blob above remains the canonical global storage; tile buckets are an additive
+    /// index layer â€” they do NOT duplicate instance data.
     ///
     /// Asmdef boundary: this file must NOT use UnityEditor. Editor helpers live in
     /// Editor/InstancePickingService.cs and Editor/TerrainScatterConfigEditor.cs.
@@ -107,30 +113,102 @@ namespace WorldPainter
     [CreateAssetMenu(menuName = "WorldPainter/Authored Instances Data", order = 100)]
     public sealed class AuthoredInstancesData : ScriptableObject, ISerializationCallbackReceiver
     {
-        // ── Blob version ───────────────────────────────────────────────────────
+        // â”€â”€ Blob version â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private const byte VERSION_BYTE = 3;
 
-        // ── Serialized storage ─────────────────────────────────────────────────
+        // â”€â”€ Per-tile bucket keying (additive index, Phase 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        /// <summary>
+        /// Tile coordinate keys for per-tile instance lookup.
+        /// Parallel list with <see cref="tileBlobValues"/>.
+        /// Each entry is a signed <see cref="Vector2Int"/> tile coordinate.
+        /// </summary>
+        [SerializeField] private List<Vector2Int> tileCoordKeys = new();
+
+        /// <summary>
+        /// Per-tile record index ranges (x = startIndex, y = count) into the working list.
+        /// Parallel list with <see cref="tileCoordKeys"/>.
+        /// Managed by the lifecycle API â€” do NOT hand-edit.
+        /// </summary>
+        [SerializeField] private List<Vector2Int> tileBlobValues = new();
+
+        /// <summary>
+        /// Returns the tile coord keys (read-only view). Use <see cref="RegisterTileBucket"/> /
+        /// <see cref="UnregisterTileBucket"/> to mutate.
+        /// </summary>
+        public IReadOnlyList<Vector2Int> TileCoordKeys => this.tileCoordKeys;
+
+        /// <summary>
+        /// Registers a tile bucket index range (startIndex, count) for a given coord.
+        /// Overwrites any existing entry for the same coord.
+        /// </summary>
+        public void RegisterTileBucket(Vector2Int coord, int startIndex, int count)
+        {
+            for (int i = 0; i < this.tileCoordKeys.Count; i++)
+            {
+                if (this.tileCoordKeys[i] == coord)
+                {
+                    this.tileBlobValues[i] = new Vector2Int(startIndex, count);
+                    return;
+                }
+            }
+            this.tileCoordKeys.Add(coord);
+            this.tileBlobValues.Add(new Vector2Int(startIndex, count));
+        }
+
+        /// <summary>
+        /// Removes the tile bucket entry for <paramref name="coord"/>. No-op if absent.
+        /// </summary>
+        public void UnregisterTileBucket(Vector2Int coord)
+        {
+            for (int i = this.tileCoordKeys.Count - 1; i >= 0; i--)
+            {
+                if (this.tileCoordKeys[i] == coord)
+                {
+                    this.tileCoordKeys.RemoveAt(i);
+                    this.tileBlobValues.RemoveAt(i);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns the (startIndex, count) range for <paramref name="coord"/>, or (-1,-1) if absent.
+        /// </summary>
+        public (int startIndex, int count) GetTileBucketRange(Vector2Int coord)
+        {
+            for (int i = 0; i < this.tileCoordKeys.Count; i++)
+            {
+                if (this.tileCoordKeys[i] == coord)
+                {
+                    var v = this.tileBlobValues[i];
+                    return (v.x, v.y);
+                }
+            }
+            return (-1, -1);
+        }
+
+        // â”€â”€ Serialized storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         [Tooltip("Binary blob encoding all InstanceRecord entries (V3 format). " +
-                 "Managed by AuthoredInstancesData — do NOT hand-edit.")]
+                 "Managed by AuthoredInstancesData â€” do NOT hand-edit.")]
         [SerializeField] private byte[] blob = Array.Empty<byte>();
 
         [Tooltip("Object references (meshes) indexed from the byte blob's collider override blocks.")]
         [SerializeField] private List<UnityEngine.Object> objectRefs = new();
 
-        // ── Runtime cache ──────────────────────────────────────────────────────
+        // â”€â”€ Runtime cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private NativeArray<InstanceRecord> runtimeRecords;
         private bool runtimeDirty = true;
 
-        // ── Mutable list (working set for editor tools) ────────────────────────
+        // â”€â”€ Mutable list (working set for editor tools) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         [System.NonSerialized]
         private List<InstanceRecord>? workingList;
 
-        // ── ISerializationCallbackReceiver ─────────────────────────────────────
+        // â”€â”€ ISerializationCallbackReceiver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>Called by Unity before serialization. Packs the working list into the blob.</summary>
         public void OnBeforeSerialize()
@@ -153,7 +231,7 @@ namespace WorldPainter
                 this.runtimeRecords.Dispose();
         }
 
-        // ── Working list API ──────────────────────────────────────────────────
+        // â”€â”€ Working list API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>
         /// Returns the mutable working list of instance records. Populated lazily from the blob on
@@ -173,7 +251,7 @@ namespace WorldPainter
         public int Count => this.workingList != null ? this.workingList.Count : this.CountFromBlob();
 
         /// <summary>
-        /// Appends a new record to the working list (does NOT pack the blob — call
+        /// Appends a new record to the working list (does NOT pack the blob â€” call
         /// <see cref="PackBlob"/> before saving).
         /// </summary>
         public void AddRecord(InstanceRecord record)
@@ -196,7 +274,7 @@ namespace WorldPainter
             this.runtimeDirty = true;
         }
 
-        // ── P2 public API ─────────────────────────────────────────────────────
+        // â”€â”€ P2 public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>Tries to read the record at <paramref name="idx"/>. Returns false if out-of-range.</summary>
         public bool TryGetRecord(int idx, out InstanceRecord rec)
@@ -270,7 +348,7 @@ namespace WorldPainter
             this.runtimeDirty = true;
         }
 
-        // ── Object-ref helpers ─────────────────────────────────────────────────
+        // â”€â”€ Object-ref helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>Returns the object at <paramref name="refIndex"/> in objectRefs, or null.</summary>
         public UnityEngine.Object? GetObjectRef(int refIndex)
@@ -288,7 +366,7 @@ namespace WorldPainter
             return this.objectRefs.Count - 1;
         }
 
-        // ── Blob pack / unpack ────────────────────────────────────────────────
+        // â”€â”€ Blob pack / unpack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>
         /// Packs the working list into the serialized blob (V3 format with version header byte).
@@ -360,7 +438,7 @@ namespace WorldPainter
             return this.UnpackBlobV3();
         }
 
-        // ── V3 unpack ─────────────────────────────────────────────────────────
+        // â”€â”€ V3 unpack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private List<InstanceRecord> UnpackBlobV3()
         {
@@ -404,7 +482,7 @@ namespace WorldPainter
             return list;
         }
 
-        // ── CountFromBlob ────────────────────────────────────────────────────
+        // â”€â”€ CountFromBlob â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private int CountFromBlob()
         {
@@ -436,7 +514,7 @@ namespace WorldPainter
             return count;
         }
 
-        // ── Runtime NativeArray access ────────────────────────────────────────
+        // â”€â”€ Runtime NativeArray access â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>
         /// Returns a NativeArray view of all authored instance records (Allocator.Persistent).
@@ -459,7 +537,7 @@ namespace WorldPainter
             return this.runtimeRecords;
         }
 
-        // ── Blob serialization helpers ─────────────────────────────────────────
+        // â”€â”€ Blob serialization helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private static void WriteFloat(byte[] buf, ref int offset, float value)
         {
