@@ -5,7 +5,7 @@ t1k-adapter:
   engine: nakama
   capabilities: [modules, packages]
   priority: 85
-version: 2.14.1
+version: 2.14.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

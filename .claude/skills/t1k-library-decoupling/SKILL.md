@@ -3,7 +3,7 @@ name: t1k:library-decoupling
 description: Keep a library core free of third-party (paid/asset/SDK/npm) dependencies via interface + provider seams in opt-in bridge packages. Engine-agnostic (Unity, Cocos, React Native, web, any kit). Use when adding/using any third-party API in library code, decoupling an existing hard dependency, or scaffolding an opt-in vendor package. Engine mechanics in references/.
 keywords: [library decoupling, third-party, vendor seam, interface provider, opt-in package, NoOp bridge, graceful degrade, decouple dependency, asset-store decouple, npm decouple]
 effort: medium
-version: 2.14.1
+version: 2.14.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

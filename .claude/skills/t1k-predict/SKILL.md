@@ -4,7 +4,7 @@ description: "5 expert personas debate proposed changes before implementation. C
 keywords: [predict, debate, review, risky, tradeoffs, expert, pre-implementation]
 argument-hint: "<proposed change description>"
 effort: medium
-version: 2.14.1
+version: 2.14.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

@@ -1518,7 +1518,7 @@
       ]
     },
     "core": {
-      "version": "modules-20260612-0248",
+      "version": "modules-20260612-0332",
       "installedAt": "2026-06-09T07:07:32.681Z",
       "files": [
         {
@@ -4537,13 +4537,13 @@
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "t1k-base": {
-      "version": "2.17.1",
+      "version": "2.17.2",
       "kit": "theonekit-core",
       "repository": "The1Studio/theonekit-core",
       "installedAt": "2026-06-09T07:07:32.811Z"
     },
     "t1k-extended": {
-      "version": "2.14.1",
+      "version": "2.14.2",
       "kit": "theonekit-core",
       "repository": "The1Studio/theonekit-core",
       "installedAt": "2026-06-09T07:07:32.811Z"
