@@ -8,10 +8,11 @@ namespace WorldPainter.Editor
     /// World-space brush cursor for terrain sculpt strokes.
     ///
     /// The cursor is a plain hidden <see cref="GameObject"/> with a <see cref="MeshRenderer"/> —
-    /// a normal 3D object in the world. Its transform is moved/scaled to follow the brush each
-    /// frame (scale = brush diameter in metres), so it holds a constant WORLD size and the camera
-    /// projects it exactly like any other scene object: it scales naturally with zoom, never
-    /// inflates. The decal shader draws it over the terrain (ZTest Always).
+    /// a normal 3D object in the world. Its transform is moved to the hit point each frame and
+    /// scaled by <see cref="HandleUtility.GetHandleSize"/> so it holds a constant ON-SCREEN size
+    /// regardless of how near the scene-view camera is (no perspective inflation when you zoom in).
+    /// The cursor size is still proportional to the brush radius. The decal shader draws it over
+    /// the terrain (ZTest Always).
     ///
     /// The tool pushes brush state via <see cref="Set"/> while hovering a surface; the object is
     /// hidden again when <see cref="Set"/> stops being called (freshness timeout).
@@ -30,6 +31,9 @@ namespace WorldPainter.Editor
         private const double FRESH_SECONDS     = 0.25;
         private const int    TEX_SIZE          = 64;
         private const string DECAL_SHADER      = "WorldPainter/BrushDecal";
+        // Maps brush radius → on-screen cursor size (in HandleUtility.GetHandleSize units).
+        // Tuned so the default 12 m brush shows a comfortably visible cursor.
+        private const float  SCREEN_SIZE_K     = 0.125f;
 
         // ── Cached scene object + resources ───────────────────────────────────
 
@@ -86,11 +90,16 @@ namespace WorldPainter.Editor
             if (!EnsureResources()) return;
 
             float   lift   = Mathf.Max(Y_OFFSET_MIN, radius * Y_OFFSET_FRACTION);
-            float   diameter = radius * 2f;
+            Vector3 center = new Vector3(worldPoint.x, worldPoint.y + lift, worldPoint.z);
 
-            // A normal 3D object: position at the hit point, lie flat in XZ, scale to the brush
-            // diameter in metres. The camera handles the rest — constant world size at any zoom.
-            previewGo!.transform.position   = new Vector3(worldPoint.x, worldPoint.y + lift, worldPoint.z);
+            // Constant ON-SCREEN size, independent of how near the scene-view camera is.
+            // HandleUtility.GetHandleSize(center) returns the world length that maps to a fixed
+            // screen size at that point — it grows with camera distance, exactly cancelling the
+            // perspective shrink, so the cursor holds the same pixel size at any zoom. Still
+            // proportional to the brush radius so a bigger brush shows a bigger cursor.
+            float diameter = HandleUtility.GetHandleSize(center) * radius * SCREEN_SIZE_K;
+
+            previewGo!.transform.position   = center;
             previewGo.transform.rotation    = Quaternion.identity;
             previewGo.transform.localScale  = new Vector3(diameter, 1f, diameter);
 
