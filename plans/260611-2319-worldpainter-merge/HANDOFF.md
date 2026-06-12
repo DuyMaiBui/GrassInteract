@@ -1,6 +1,27 @@
 # Handoff — WorldPainter merge (in progress)
 
-## Status: P3–P7 COMPLETE + green (296 tests). P8–P10 remaining.
+## Status: P3–P8b COMPLETE + green (279 tests). P8c (splits) + P9 (rename) + P10 remaining.
+
+### P8a (`bee3525`) + P8b (`194790f`) done — 279/279 green
+- P8a: deleted the dead sculpt-mode island (TerrainBrushStroke/SculptMode, TerrainSculptState/ModeColor, TerrainSculptUndo). WorldPainterSculptTool uses a fixed preview color + LayerType, so SculptMode/ModeColor were dead. Dropped 6 ModeColor + 11 TerrainSculptUndoTests (296→279). _pending-delete folder gone.
+- P8b: deleted empty Assets/GpuTerrain + Assets/GrassInteract tree shells. Re-homed KEEP Meshes → WorldPainter/Runtime/Scatter/Meshes (GUIDs preserved), README/MIGRATION → WorldPainter/. Deleted regenerated TerrainValidation.unity (switch editor to Assets/Scenes/SampleScene.unity FIRST via manage_scene load, else it re-saves). Retargeted TerrainValidationSceneBuilder → gitignored Assets/WorldPainter/Generated/. **Fixed REAL broken post-merge hardcoded paths** (were silently failing): WorldPainterInspector .uss x2, WorldPainterSculptTool TerrainBrush.compute, GpuTerrainRenderer + WorldPainter.Render TerrainNodeCull.compute + TerrainPatch.mat (all GpuTerrain/... → WorldPainter/...).
+
+### USER CORE GOALS — DONE
+✅ merged to one WorldPainter assembly set · ✅ WorldPainter is sole editor+runtime authoring path · ✅ duplicate/dead code removed (island, parallel classes, broken paths) · ✅ feature-folder structure. Remaining is POLISH: namespace text rename + ≤200-line splits.
+
+### P8c — oversized-file splits (≤200-line guideline, plan §3.4) — OPTIONAL hygiene
+Split into partials by responsibility: WorldPainterSculptTool.Stroke.cs (349), WorldPainterUndo.cs (269), WorldPainterLayerStackView.Mutations.cs (256), WorldPainterSculptTool.cs (247), WorldPainterLayerStackView.cs (246), WorldPainterBrushDock.cs (243), WorldPainterLodPreviewPanel.cs (231), WorldPainterMigration.cs (230), WorldPainterBiomePaletteView.cs (222), borderline 212s. Each split = add a `partial`-class file, move a cohesive method group, gate.
+
+### P9 — namespace rename (ATOMIC, delicate — 3 GOTCHAS, do with fresh context)
+Goal: `GpuTerrain`/`GrassInteract` (+`.Editor`/`.Tests`) namespaces → `WorldPainter`/`WorldPainter.Editor`/`WorldPainter.Tests`.
+1. **Type-name collision** — DO NOT blanket-replace. Type names start with the token: `GpuTerrainRenderer`, `GpuTerrainEngine`, `GpuTerrainScatterGround`, `GrassInteractor`, `GrassInteractorBuffer`, `GrassInteractorData`. Use WORD-BOUNDARY regex `\bGpuTerrain\b`/`\bGrassInteract\b` → `WorldPainter` (matches namespace decls/usings/qualified `X.` refs; the `\b` does NOT match before `Renderer`/`Engine`/`or...` so type names are safe).
+2. **Type==namespace** — there is a `public sealed partial class WorldPainter : MonoBehaviour`. After rename it becomes `WorldPainter.WorldPainter` (type same name as namespace) → CS0118/ambiguity risk in `WorldPainter.member` expressions. The class is a MonoBehaviour used via instances (likely no `WorldPainter.staticMember`), so it MAY compile clean — but verify via gate; if CS0118 fires, either qualify with `global::` at the few sites OR rename the class (e.g. `WorldPainterComponent`) — that's a public-API change, ask user first.
+3. **Shader-name strings** — `\bGpuTerrain\b` also hits shader-name string literals like `Shader.Find("GpuTerrain/BrushDecal")` (TerrainBrushPreview) and `"GpuTerrain/TerrainPatch"` (builder). These must stay in sync with the `Shader "GpuTerrain/..."` decls inside the .shader/.compute files (NOT touched by a .cs-only sed). EITHER exclude string literals from the rename, OR also rename the shader decls in the .shader/.compute files to match. Decide before running.
+Atomic: one sed batch over all surviving .cs → refresh → verify ONCE (long reload). Revert path: single commit, reset to the P8 commit. SC2 = zero `GpuTerrain`/`GrassInteract` namespace/using remain.
+
+### P10 — full-suite (expect ~279) + SC checks (SC2 namespaces, SC5 ≤200 lines, SC6 player-build authoring-isolation via Editor-platform asmdef, SC7 git renames, SC8 coach-marks "Create 1×1 tile" smoke via Tools/WorldPainter menu) + push. NOT pushed yet.
+
+### Original P3-P7 detail below:
 
 ### P7 done (commit `4fc1d2a`) — 296/296 green
 Deleted ALL scatter authoring (ScatterStudio + DensityPaint* + Scatter* editors) + both demo scenes (GrassInteractDemo + TerrainValidation + assets). KEEP: ScatterField/GrassScatter runtime + TerrainValidationSceneBuilder. Ported `DensityPaintGPU.ComputeStampPositions` → new `WorldPainterStampMath` (Editor/Brush, KEEP); repointed its 5 tests. Dropped 5 GPU/decal tests of deleted code (documented). 301→296.
