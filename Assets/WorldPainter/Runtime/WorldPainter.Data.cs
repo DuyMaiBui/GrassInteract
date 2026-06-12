@@ -79,7 +79,24 @@ namespace WorldPainter
         public WorldMapAsset? Map
         {
             get => this.map;
-            set => this.map = value;
+            set
+            {
+                if (this.map == value) return;
+                this.map = value;
+#if UNITY_EDITOR
+                // Edit-mode authoring: assigning a map must immediately (re)build engines and
+                // repaint. Otherwise the newly created tile(s) only appear on the next incidental
+                // Scene/Game-view repaint — which often never happens right after the factory
+                // creates them, leaving the user with a created-but-not-rendered tile.
+                // Play mode is left to LateUpdate's TryBuild (this guard avoids premature builds
+                // during scene load).
+                if (!Application.isPlaying)
+                {
+                    this.TryBuild();
+                    UnityEditor.SceneView.RepaintAll();
+                }
+#endif
+            }
         }
 
         // ── World grid ────────────────────────────────────────────────────────
