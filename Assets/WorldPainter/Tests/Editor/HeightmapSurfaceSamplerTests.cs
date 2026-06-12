@@ -2,7 +2,6 @@
 using NUnit.Framework;
 using UnityEngine;
 using WorldPainter;
-using WorldPainter;
 
 namespace WorldPainter.Tests
 {

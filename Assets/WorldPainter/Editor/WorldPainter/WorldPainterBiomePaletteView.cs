@@ -90,7 +90,7 @@ namespace WorldPainter.Editor
             int count = this.biomesProp?.arraySize ?? 0;
             for (int i = 0; i < count; ++i)
             {
-                var elem    = this.biomesProp.GetArrayElementAtIndex(i);
+                var elem    = this.biomesProp!.GetArrayElementAtIndex(i);
                 var preset  = elem.objectReferenceValue as BiomePreset;
                 int captured = i;
 

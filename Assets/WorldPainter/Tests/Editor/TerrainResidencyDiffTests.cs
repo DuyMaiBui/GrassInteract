@@ -104,7 +104,10 @@ namespace WorldPainter.Tests
 
             // It should NOT be in the load desired set.
             var desired = TerrainResidencyRing.ComputeDesired(camPos);
-            if (TerrainStreamingConfig.HYSTERESIS_TILES > 0)
+            // Read into a non-const local so the compiler does not fold the const
+            // comparison and flag the else branch as unreachable (CS0162).
+            int hysteresisTiles = TerrainStreamingConfig.HYSTERESIS_TILES;
+            if (hysteresisTiles > 0)
             {
                 Assert.IsFalse(desired.Contains(hyEdge),
                     "Hysteresis-edge tile should be outside load ring.");
