@@ -5,21 +5,21 @@ using UnityEngine;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Paint-target selector for unified <c>SurfaceLayers</c> grass variants. Lists the active
-    /// painter's GrassLayers + their variants; clicking one makes it the density brush's target
-    /// (sets <see cref="WorldPainterState"/> active layer = Meadow + the variant index, and selects
-    /// the Paint tool). Then activate the WorldPainter sculpt tool and paint — the stroke writes to
-    /// that variant's density map and rebuilds the scatter on release.
-    ///
-    /// Stop-gap until the SurfaceLayers inspector cards land (plan Phase 4).
+    /// Control panel for unified <c>SurfaceLayers</c> authoring + paint-target selection. Add/remove
+    /// splat &amp; grass layers, add grass variants, and click a variant to make it the density brush's
+    /// target (sets <see cref="WorldPainterState"/> active layer = Meadow + variant index + Paint tool).
+    /// Then activate the WorldPainter sculpt tool and paint. Editing per-layer fields (variant textures,
+    /// blade mesh, splat albedos) is done on each sub-asset's default inspector via the Select buttons.
     /// </summary>
     internal sealed class WorldPainterSurfacePaintWindow : EditorWindow
     {
-        [MenuItem("Tools/WorldPainter/Surface Layers/Paint Target Window")]
+        private Vector2 scroll;
+
+        [MenuItem("Tools/WorldPainter/Surface Layers/Control Panel")]
         private static void Open()
         {
-            var w = GetWindow<WorldPainterSurfacePaintWindow>("WP Surface Paint");
-            w.minSize = new Vector2(260f, 160f);
+            var w = GetWindow<WorldPainterSurfacePaintWindow>("WP Surface Layers");
+            w.minSize = new Vector2(300f, 220f);
         }
 
         private void OnInspectorUpdate() => this.Repaint();
@@ -29,7 +29,7 @@ namespace WorldPainter.Editor
             WorldPainter? painter = WorldPainterState.ActivePainter;
             if (painter == null)
             {
-                EditorGUILayout.HelpBox("Select a WorldPainter (it registers as the active painter).",
+                EditorGUILayout.HelpBox("Select a WorldPainter in the scene (it registers as the active painter).",
                     MessageType.Info);
                 return;
             }
@@ -41,49 +41,75 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            EditorGUILayout.LabelField("Grass variants — click to set the active paint target",
-                EditorStyles.boldLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Add Splat"))   WorldMapAssetLifecycle.AddSplatLayer(map, "Ground");
+                if (GUILayout.Button("Add Grass"))   WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass", 2);
+                if (GUILayout.Button("Create Demo")) WorldMapAssetLifecycle.CreateDemoSurfaceLayers(map);
+            }
+            EditorGUILayout.Space();
 
-            bool any = false;
+            this.scroll = EditorGUILayout.BeginScrollView(this.scroll);
+
+            WorldPainterLayer? toRemove = null;
             foreach (var sl in map.SurfaceLayers)
             {
-                if (sl is not GrassLayer g) continue;
-                any = true;
+                if (sl == null) continue;
 
-                EditorGUILayout.Space(2f);
-                EditorGUILayout.LabelField(g.DisplayName, EditorStyles.miniBoldLabel);
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
-                for (int i = 0; i < g.Palette.Count; i++)
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    bool active =
-                        WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
-                        WorldPainterState.ActiveLayerId == g.name &&
-                        WorldPainterState.ActiveGrassVariantIndex == i;
+                    EditorGUILayout.LabelField($"[{sl.Kind}] {sl.DisplayName}", EditorStyles.boldLabel);
+                    if (GUILayout.Button("Select", GUILayout.Width(58f))) Selection.activeObject = sl;
+                    if (GUILayout.Button("Remove", GUILayout.Width(62f))) toRemove = sl;
+                }
 
-                    string dot   = active ? "● " : "○ ";
-                    string vname = string.IsNullOrEmpty(g.Palette[i].name) ? $"Variant {i}" : g.Palette[i].name;
-                    if (GUILayout.Button($"  {dot}{vname}"))
+                if (sl is SplatLayer splat)
+                {
+                    if (GUILayout.Button("Edit TerrainLayerSet (assign albedos)"))
+                        Selection.activeObject = splat.LayerSet;
+                }
+                else if (sl is GrassLayer g)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
                     {
-                        WorldPainterState.ActiveGrassVariantIndex = i;
-                        WorldPainterState.SetActiveLayer(g.name, WorldPainterState.PaintLayerKind.Meadow);
-                        WorldPainterState.SetActiveBrushTool("density.paint");
+                        EditorGUILayout.LabelField($"Variants ({g.Palette.Count}) — click to paint:");
+                        if (GUILayout.Button("Add Variant", GUILayout.Width(90f)))
+                            WorldMapAssetLifecycle.AddGrassVariant(map, g, $"Variant{(char)('A' + g.PaletteCount)}", true);
+                    }
+
+                    for (int i = 0; i < g.Palette.Count; i++)
+                    {
+                        bool active =
+                            WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
+                            WorldPainterState.ActiveLayerId == g.name &&
+                            WorldPainterState.ActiveGrassVariantIndex == i;
+
+                        string dot   = active ? "● " : "○ ";
+                        string vname = string.IsNullOrEmpty(g.Palette[i].name) ? $"Variant {i}" : g.Palette[i].name;
+                        if (GUILayout.Button($"  {dot}{vname}"))
+                        {
+                            WorldPainterState.ActiveGrassVariantIndex = i;
+                            WorldPainterState.SetActiveLayer(g.name, WorldPainterState.PaintLayerKind.Meadow);
+                            WorldPainterState.SetActiveBrushTool("density.paint");
+                        }
                     }
                 }
+
+                EditorGUILayout.EndVertical();
             }
 
-            if (!any)
-            {
-                EditorGUILayout.HelpBox(
-                    "No GrassLayers in SurfaceLayers. Add one via " +
-                    "Tools/WorldPainter/Surface Layers/Add Grass Layer.", MessageType.Info);
-                return;
-            }
+            EditorGUILayout.EndScrollView();
+
+            if (toRemove != null)
+                WorldMapAssetLifecycle.RemoveSurfaceLayer(map, toRemove);
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "Activate the WorldPainter sculpt tool, then paint. The selected variant's density map " +
-                "receives the stroke (Paint adds, Erase removes); release rebuilds the scatter.",
-                MessageType.None);
+                "Grass: select a variant, activate the WorldPainter sculpt tool, then paint (Paint adds, " +
+                "Erase removes); release rebuilds the scatter. Splat: assign albedos to a Splat layer's " +
+                "TerrainLayerSet, then paint with the splat tool.", MessageType.None);
         }
     }
 }

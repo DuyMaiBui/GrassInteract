@@ -332,6 +332,15 @@ namespace WorldPainter.Editor
                     AssetDatabase.RemoveObjectFromAsset(mat);
                     Object.DestroyImmediate(mat, allowDestroyingAssets: true);
                 }
+
+                foreach (var lod in grass.Render.Lods)
+                {
+                    if (lod.mesh != null && AssetDatabase.GetAssetPath(lod.mesh) == mapPath)
+                    {
+                        AssetDatabase.RemoveObjectFromAsset(lod.mesh);
+                        Object.DestroyImmediate(lod.mesh, allowDestroyingAssets: true);
+                    }
+                }
             }
 
             map.UnregisterSurfaceLayer(layer);
@@ -339,6 +348,53 @@ namespace WorldPainter.Editor
             Object.DestroyImmediate(layer, allowDestroyingAssets: true);
             EditorUtility.SetDirty(map);
             AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Adds a <see cref="GrassLayer"/> with a procedural blade mesh + <paramref name="variantCount"/>
+        /// seeded variants — a fully renderable grass layer with zero art dependencies (demos / verification).
+        /// </summary>
+        public static GrassLayer AddGrassLayerWithBlades(WorldMapAsset map, string layerName, int variantCount)
+        {
+            GrassLayer layer = AddGrassLayer(map, layerName);
+            string mapPath = AssetDatabase.GetAssetPath(map);
+
+            Mesh blade = CreateBladeMesh();
+            AssetDatabase.AddObjectToAsset(blade, mapPath);
+            layer.EditorSetLods(new[] { new ScatterLod { mesh = blade, maxDistance = 64f } });
+
+            for (int i = 0; i < variantCount; i++)
+                AddGrassVariant(map, layer, $"Variant{(char)('A' + i)}", seedFullDensity: true);
+
+            EditorUtility.SetDirty(layer);
+            AssetDatabase.SaveAssets();
+            return layer;
+        }
+
+        /// <summary>
+        /// One-click demo: a splat layer (assign albedos to its TerrainLayerSet) + a grass layer with
+        /// procedural blades and 2 seeded variants. Renders immediately on a map that has tiles.
+        /// </summary>
+        public static void CreateDemoSurfaceLayers(WorldMapAsset map)
+        {
+            AddSplatLayer(map, "Ground");
+            AddGrassLayerWithBlades(map, "Meadow", variantCount: 2);
+        }
+
+        /// <summary>Procedural upright grass-blade quad (0.1m wide × 0.5m tall), up-facing normals.</summary>
+        private static Mesh CreateBladeMesh()
+        {
+            var mesh = new Mesh { name = "GrassBlade" };
+            mesh.vertices = new[]
+            {
+                new Vector3(-0.05f, 0f, 0f), new Vector3(0.05f, 0f, 0f),
+                new Vector3(-0.04f, 0.5f, 0f), new Vector3(0.04f, 0.5f, 0f),
+            };
+            mesh.uv        = new[] { new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f) };
+            mesh.normals   = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+            mesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         /// <summary>

@@ -26,7 +26,7 @@ namespace WorldPainter.Editor
                       "TerrainLayerSet sub-asset, then paint with the splat tool to blend.", layer.LayerSet);
         }
 
-        [MenuItem(ROOT + "Add Grass Layer (2 seeded variants)")]
+        [MenuItem(ROOT + "Add Grass Layer (blades + 2 variants)")]
         private static void AddGrassLayer()
         {
             if (Selection.activeObject is not WorldMapAsset map)
@@ -35,11 +35,23 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            GrassLayer layer = WorldMapAssetLifecycle.AddGrassLayer(map, "Grass");
-            WorldMapAssetLifecycle.AddGrassVariant(map, layer, "VariantA", seedFullDensity: true);
-            WorldMapAssetLifecycle.AddGrassVariant(map, layer, "VariantB", seedFullDensity: true);
-            Debug.Log($"[WorldPainter] Added '{layer.name}' with 2 seeded variants. Assign a blade Mesh " +
-                      "to its Render → LODs (and optional per-variant textures) to see grass scatter.", layer);
+            GrassLayer layer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass", variantCount: 2);
+            Debug.Log($"[WorldPainter] Added '{layer.name}' with a procedural blade mesh + 2 seeded variants. " +
+                      "Optionally assign per-variant _BaseMap textures; open the Control Panel to paint.", layer);
+        }
+
+        [MenuItem(ROOT + "Create Demo (splat + grass)")]
+        private static void CreateDemo()
+        {
+            if (Selection.activeObject is not WorldMapAsset map)
+            {
+                Debug.LogWarning("[WorldPainter] Select a WorldMapAsset first.");
+                return;
+            }
+
+            WorldMapAssetLifecycle.CreateDemoSurfaceLayers(map);
+            Debug.Log("[WorldPainter] Created demo SurfaceLayers: 1 splat (assign albedos to its TerrainLayerSet) " +
+                      "+ 1 grass (blades & 2 variants). Grass renders immediately if the map has tiles.", map);
         }
     }
 }

@@ -125,5 +125,12 @@ namespace WorldPainter
             this.render = new ScatterRenderConfig(
                 material, this.render.ShadowCastingMode, this.render.Lods, this.render.RenderCullDistance);
         }
+
+        /// <summary>Sets the shared LOD meshes (keeps material/shadow/cull). Editor lifecycle only.</summary>
+        internal void EditorSetLods(ScatterLod[] lods)
+        {
+            this.render = new ScatterRenderConfig(
+                this.render.Material, this.render.ShadowCastingMode, lods, this.render.RenderCullDistance);
+        }
     }
 }
