@@ -1,5 +1,6 @@
 #nullable enable
 using UnityEditor;
+using UnityEditor.EditorTools;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -58,6 +59,12 @@ namespace WorldPainter.Editor
             // Bind state
             WorldPainterState.ActivePainter = painter;
             WorldPainterAuthoring.ActivePainter = painter;
+
+            // Selecting a paintable layer/brush must enter paint mode: activate the sculpt
+            // EditorTool so the brush ring draws and strokes register. The tool's kernel then
+            // follows ActiveLayerKind (terrain height/splat vs scatter density/prop).
+            WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChanged;
+            WorldPainterState.ActiveLayerChanged += this.OnActiveLayerChanged;
 
             // Root
             var root = new VisualElement();
@@ -200,6 +207,8 @@ namespace WorldPainter.Editor
 
         private void OnDisable()
         {
+            WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChanged;
+
             if (WorldPainterState.ActivePainter == (WorldPainter)this.target)
             {
                 WorldPainterState.ActivePainter   = null;
@@ -209,6 +218,26 @@ namespace WorldPainter.Editor
 
             this.lodPreviewPanel?.Cleanup();
             this.previewCache?.Cleanup();
+        }
+
+        // ── Paint-mode activation ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Enters/exits paint mode when the active paint layer changes. Selecting a layer
+        /// (kind != None) activates the <see cref="WorldPainterSculptTool"/> so the brush
+        /// displays and painting works; deselecting (None) restores the previous tool.
+        /// </summary>
+        private void OnActiveLayerChanged(string layerId, WorldPainterState.PaintLayerKind kind)
+        {
+            if (kind != WorldPainterState.PaintLayerKind.None)
+            {
+                if (ToolManager.activeToolType != typeof(WorldPainterSculptTool))
+                    ToolManager.SetActiveTool(typeof(WorldPainterSculptTool));
+            }
+            else if (ToolManager.activeToolType == typeof(WorldPainterSculptTool))
+            {
+                ToolManager.RestorePreviousTool();
+            }
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

@@ -179,22 +179,64 @@ namespace WorldPainter.Editor
 
         private bool TryGetBrushWorldPoint(Ray ray, WorldPainter painter, out Vector3 worldPoint)
         {
+            // Primary: a real collider (play mode, scatter prop colliders, any pickable surface).
             if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity))
             {
                 worldPoint = hit.point; return true;
             }
+
+            // Edit-mode fallback: the GPU terrain is drawn via RenderMeshIndirect and has NO
+            // collider, so Physics.Raycast never hits it. Intersect the ray with the tile
+            // surface analytically. Tiles live in the WorldMapAsset (SSOT, P2+); the inline
+            // painter.Tiles list is empty under the map path and kept only for back-compat.
+            if (painter.Map != null && TryMapSurfaceHit(ray, painter.Map, out worldPoint))
+                return true;
+
             foreach (var entry in painter.Tiles)
             {
                 if (entry.tileAsset == null) continue;
-                var origin2d = TerrainWorldGrid.TileOriginWorld(entry.coord);
-                float midY   = (entry.tileAsset.minHeight + entry.tileAsset.maxHeight) * 0.5f;
-                var plane    = new Plane(Vector3.up, new Vector3(origin2d.x, midY, origin2d.y));
+                float midY = (entry.tileAsset.minHeight + entry.tileAsset.maxHeight) * 0.5f;
+                var plane  = new Plane(Vector3.up, new Vector3(0f, midY, 0f));
                 if (plane.Raycast(ray, out float dist) && dist > 0f && dist < 1e6f)
                 {
                     worldPoint = ray.GetPoint(dist); return true;
                 }
             }
             worldPoint = Vector3.zero;
+            return false;
+        }
+
+        /// <summary>
+        /// Analytic ray↔terrain-surface intersection for edit mode (no collider on the GPU
+        /// terrain). Two-pass: intersect a coarse mid-height plane to get an approximate XZ,
+        /// sample the real surface height there, then re-intersect at that height so the brush
+        /// sits on the terrain (exact for flat tiles, close for gentle slopes).
+        /// </summary>
+        private static bool TryMapSurfaceHit(Ray ray, WorldMapAsset map, out Vector3 worldPoint)
+        {
+            worldPoint = Vector3.zero;
+            foreach (var tile in map.EnumerateTiles())
+            {
+                if (tile == null) continue;
+                float midY = (tile.minHeight + tile.maxHeight) * 0.5f;
+                var coarse = new Plane(Vector3.up, new Vector3(0f, midY, 0f));
+                if (!coarse.Raycast(ray, out float d0) || d0 <= 0f || d0 >= 1e6f) continue;
+
+                Vector3    approx = ray.GetPoint(d0);
+                Vector2Int coord  = TerrainWorldGrid.WorldToTileCoord(approx.x, approx.z);
+                var surfaceTile   = map.GetTile(coord);
+                if (surfaceTile != null &&
+                    TerrainHeightSampleCpu.TrySampleWorld(surfaceTile, approx.x, approx.z, out float surfaceY))
+                {
+                    var surface = new Plane(Vector3.up, new Vector3(0f, surfaceY, 0f));
+                    if (surface.Raycast(ray, out float d1) && d1 > 0f && d1 < 1e6f)
+                    {
+                        worldPoint = ray.GetPoint(d1); return true;
+                    }
+                }
+
+                worldPoint = approx; return true; // coarse hit when off-tile / sample failed
+            }
             return false;
         }
 
