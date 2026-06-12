@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using WorldPainter;
 using UnityEditor;
 using UnityEngine;
@@ -22,6 +23,10 @@ namespace WorldPainter.Editor
             this.strokeTouchedCoords.Clear();
             this.rtCache.ReleaseAll();
             TerrainPaintTargetResolver.PinnedCoords.Clear();
+
+            // Register the neighbour map for seam sync (P6) — must be done before the
+            // first stamp so ApplySeamSync can find adjacent tiles at writeback time.
+            this.writeback.RegisterNeighbours(WorldPainterSculptTool.EnumerateTileEntries(painter));
 
             // Begin Unity Undo group — one Ctrl+Z per stroke.
             Undo.IncrementCurrentGroup();
@@ -202,6 +207,19 @@ namespace WorldPainter.Editor
             Vector2Int? primary = null;
             foreach (var c in this.strokeTouchedCoords) { primary = c; break; }
             WorldPainterState.LastStrokedCoord = primary;
+        }
+
+        /// <summary>
+        /// Enumerates all (coord, tile) pairs in the painter for seam-sync neighbour registration.
+        /// </summary>
+        private static IEnumerable<(Vector2Int coord, TerrainTileAsset tile)> EnumerateTileEntries(
+            WorldPainter painter)
+        {
+            foreach (var entry in painter.Tiles)
+            {
+                if (entry.tileAsset != null)
+                    yield return (entry.coord, entry.tileAsset!);
+            }
         }
 
     }

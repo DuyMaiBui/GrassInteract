@@ -38,6 +38,17 @@ namespace WorldPainter
                  "(0,0,0) = sample at the pivot (legacy behaviour).")]
         [SerializeField] private Vector3 anchorOffsetLocal = Vector3.zero;
 
+        // ── P7 Prop placement anchor config (layer-wide, no per-instance override) ──
+
+        [Tooltip("Pivot offset applied to every placed instance in local space (e.g. to align the base of the mesh to the ground).")]
+        [SerializeField] private Vector3 propPivotOffset = Vector3.zero;
+
+        [Tooltip("When true, each placed instance is snapped to the surface Y using the HeightmapSurfaceSampler.")]
+        [SerializeField] private bool propGroundSnap = true;
+
+        [Tooltip("When true, each placed instance is rotated to align its up-axis to the surface normal.")]
+        [SerializeField] private bool propAlignToNormal = false;
+
         // ── Instance-specific fields ───────────────────────────────────────────
 
         [Tooltip("Sub-asset holding authored per-instance records.")]
@@ -101,6 +112,27 @@ namespace WorldPainter
         /// <c>Vector3.zero</c> = sample at the pivot (legacy behaviour).
         /// </summary>
         public Vector3 AnchorOffsetLocal => this.anchorOffsetLocal;
+
+        // ── P7 Prop placement anchor config accessors ──────────────────────────
+
+        /// <summary>
+        /// Local-space pivot offset applied to every placed prop instance.
+        /// Use to shift the mesh pivot to the base of the prop (e.g. (0, -0.5, 0) if the mesh
+        /// is centred at its mid-height).
+        /// </summary>
+        public Vector3 PropPivotOffset => this.propPivotOffset;
+
+        /// <summary>
+        /// When true, each placed prop instance is snapped to the terrain surface Y via the
+        /// <see cref="HeightmapSurfaceSampler"/>. Disable to place at the raw stamp Y.
+        /// </summary>
+        public bool PropGroundSnap => this.propGroundSnap;
+
+        /// <summary>
+        /// When true, each placed prop instance's up-axis is aligned to the terrain surface
+        /// normal, so props tilt on slopes. Requires <see cref="PropGroundSnap"/> to be effective.
+        /// </summary>
+        public bool PropAlignToNormal => this.propAlignToNormal;
 
         // ── Abstract placement data accessors ──────────────────────────────────
 

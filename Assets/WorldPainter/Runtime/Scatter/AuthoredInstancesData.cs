@@ -348,7 +348,65 @@ namespace WorldPainter
             this.runtimeDirty = true;
         }
 
-        // â”€â”€ Object-ref helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── P7 per-tile TRS placement accessors ───────────────────────────────
+
+        /// <summary>
+        /// Appends a new <see cref="InstanceRecord"/> to the working list and updates the tile
+        /// bucket index for <paramref name="tileCoord"/> so the record is included in the tile's
+        /// (startIndex, count) range. Callers must call <see cref="PackBlob"/> before saving.
+        /// </summary>
+        public void AddRecordToTile(Vector2Int tileCoord, InstanceRecord record)
+        {
+            var list = this.WorkingList;
+            (int startIdx, int existingCount) = this.GetTileBucketRange(tileCoord);
+
+            if (startIdx < 0)
+            {
+                // No bucket yet — record starts a new contiguous run at the tail.
+                int newStart = list.Count;
+                list.Add(record);
+                this.RegisterTileBucket(tileCoord, newStart, 1);
+            }
+            else
+            {
+                // Bucket exists — append and expand the count.
+                list.Add(record);
+                this.RegisterTileBucket(tileCoord, startIdx, existingCount + 1);
+            }
+
+            this.runtimeDirty = true;
+        }
+
+        /// <summary>
+        /// Returns all <see cref="InstanceRecord"/>s for <paramref name="tileCoord"/>.
+        /// Returns an empty list when the tile has no bucket.
+        /// </summary>
+        public List<InstanceRecord> GetTileRecords(Vector2Int tileCoord)
+        {
+            (int startIdx, int count) = this.GetTileBucketRange(tileCoord);
+            var result = new List<InstanceRecord>(count > 0 ? count : 0);
+            if (startIdx < 0 || count <= 0) return result;
+            var list = this.WorkingList;
+            int end = Mathf.Min(startIdx + count, list.Count);
+            for (int i = startIdx; i < end; i++)
+                result.Add(list[i]);
+            return result;
+        }
+
+        /// <summary>
+        /// Overwrites the record at absolute working-list index <paramref name="idx"/>.
+        /// Returns false when the index is out of range.
+        /// Used by Transform-edit mode to write back a moved/rotated/scaled instance.
+        /// </summary>
+        public bool TryUpdateRecord(int idx, InstanceRecord updated)
+        {
+            if (idx < 0 || idx >= this.WorkingList.Count) return false;
+            this.WorkingList[idx] = updated;
+            this.runtimeDirty = true;
+            return true;
+        }
+
+        //â”€â”€ Object-ref helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         /// <summary>Returns the object at <paramref name="refIndex"/> in objectRefs, or null.</summary>
         public UnityEngine.Object? GetObjectRef(int refIndex)

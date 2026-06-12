@@ -44,19 +44,57 @@ namespace WorldPainter.Editor
             this.brushCompute.SetFloat("_Strength",        brush.strength);
             this.brushCompute.SetInt("_RTRes",             rtRes);
 
-            // Determine kernel by active layer type.
-            // Height → RaiseLower, Splat → PaintSplat, Grass → PaintDensity.
+            // Determine kernel by active layer (P5 SSOT: ActiveLayerKind / ActiveLayerId).
+            // Meadow → PaintDensity on the active density scatter layer.
+            // Splat  → PaintSplat on the active splat channel.
+            // Prop   → CPU prop stamp emitter (no GPU kernel).
+            // Height (default) → RaiseLower.
+            var layerKind = WorldPainterState.ActiveLayerKind;
+            var layerId   = WorldPainterState.ActiveLayerId;
+
+            // Legacy fallback: also check the older LayerType API so existing strokes
+            // that were started before the P5 API continue to work correctly.
             LayerType activeType = LayerType.Height;
             int splatChannel = -1;
             if (painter != null)
                 activeType = WorldPainterState.ActiveLayerType(painter, out splatChannel);
 
-            if (activeType == LayerType.Splat)
+            if (layerKind == WorldPainterState.PaintLayerKind.Splat || activeType == LayerType.Splat)
             {
-                this.DispatchSplatKernel(groups, splatChannel, splatRT);
+                // Prefer P5 channel resolution; fall back to legacy splatChannel.
+                int channel = splatChannel;
+                this.DispatchSplatKernel(groups, channel, splatRT);
             }
-            else if (activeType == LayerType.Grass && painter != null)
+            else if ((layerKind == WorldPainterState.PaintLayerKind.Meadow) && painter != null)
             {
+                // P5 path: find the DensityScatterLayer by ActiveLayerId.
+                DensityScatterLayer? scatterLayer = null;
+                foreach (var layer in painter.ScatterLayers)
+                {
+                    if (layer is DensityScatterLayer dl && dl.name == layerId)
+                    {
+                        scatterLayer = dl;
+                        break;
+                    }
+                }
+                if (scatterLayer == null)
+                {
+                    // Fallback: use ActiveScatterIndex (legacy).
+                    int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
+                    if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
+                        scatterLayer = painter.ScatterLayers[scatterIdx] as DensityScatterLayer;
+                }
+                if (scatterLayer != null)
+                {
+                    var dRT = this.GetOrCreateDensityRT(scatterLayer);
+                    if (dRT != null)
+                        this.DispatchDensityKernel(groups, dRT);
+                }
+            }
+            else if (activeType == LayerType.Grass && painter != null
+                     && layerKind == WorldPainterState.PaintLayerKind.None)
+            {
+                // Legacy path when P5 API hasn't been set (no palette card selected yet).
                 int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
                 if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
                 {
@@ -69,7 +107,8 @@ namespace WorldPainter.Editor
                     }
                 }
             }
-            else if (activeType == LayerType.Props && painter != null)
+            else if ((layerKind == WorldPainterState.PaintLayerKind.Prop
+                      || activeType == LayerType.Props) && painter != null)
             {
                 // Props use CPU spacing-stamp emitter (no GPU kernel).
                 int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);

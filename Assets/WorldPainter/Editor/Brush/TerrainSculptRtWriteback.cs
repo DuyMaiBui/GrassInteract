@@ -24,6 +24,11 @@ namespace WorldPainter.Editor
     ///
     /// Synchronous path: call <see cref="ExecuteSync"/> for tests or forced saves.
     /// NEVER call per-drag-sample to avoid editor stalls.
+    ///
+    /// Seam sync (P6): after every writeback the shared edge row/column between adjacent
+    /// tiles is copied so both tiles' edge texels are byte-identical. Uses the
+    /// <see cref="TerrainWorldGrid"/> 1-texel shared-edge convention.
+    /// Register neighbours via <see cref="RegisterNeighbours"/> before the stroke begins.
     /// </summary>
     public sealed class TerrainSculptRtWriteback : IDisposable
     {
@@ -48,6 +53,27 @@ namespace WorldPainter.Editor
 
         private readonly Dictionary<TerrainTileAsset, PendingReadback> pendingMap =
             new Dictionary<TerrainTileAsset, PendingReadback>();
+
+        // ── Neighbour registry (keyed by tile for seam sync) ──────────────────
+
+        /// <summary>
+        /// All tile assets in the current painter, keyed by coord.
+        /// Updated via <see cref="RegisterNeighbours"/> at stroke start.
+        /// Used by seam sync to find the adjacent tile for edge-copy.
+        /// </summary>
+        private readonly Dictionary<Vector2Int, TerrainTileAsset> neighbourMap =
+            new Dictionary<Vector2Int, TerrainTileAsset>();
+
+        /// <summary>
+        /// Register (or refresh) the full tile map so seam sync can find
+        /// adjacent tiles. Call once per stroke before the first stamp.
+        /// </summary>
+        public void RegisterNeighbours(IEnumerable<(Vector2Int coord, TerrainTileAsset tile)> tiles)
+        {
+            this.neighbourMap.Clear();
+            foreach (var (coord, tile) in tiles)
+                this.neighbourMap[coord] = tile;
+        }
 
         // ── Async public API ──────────────────────────────────────────────────
 
@@ -285,6 +311,10 @@ namespace WorldPainter.Editor
 
         private void FinalizeWriteback(TerrainTileAsset tile, TerrainTileGpuResources gpu)
         {
+            // Seam sync: copy the shared edge row/col so both adjacent tiles' boundary
+            // texels are byte-identical (TerrainWorldGrid 1-texel shared-edge convention).
+            this.ApplySeamSync(tile);
+
             // Re-upload to GPU for live preview.
             if (tile.IsHeightValid)
                 gpu.Upload(tile);
@@ -293,6 +323,176 @@ namespace WorldPainter.Editor
             EditorUtility.SetDirty(tile);
 #endif
             Debug.Log($"[TerrainSculptRtWriteback] Writeback complete for tile {tile.tileCoord}.");
+        }
+
+        // ── Seam sync ──────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Copies the shared edge row/column from <paramref name="sourceTile"/> into every
+        /// registered neighbour that shares that edge, making both tiles' boundary texels
+        /// byte-identical (TerrainWorldGrid 1-texel shared-edge convention).
+        ///
+        /// Height: last column (x = heightRes-1) is shared with neighbour (+1, 0).
+        ///         last row    (z = heightRes-1) is shared with neighbour (0, +1).
+        /// Splat : same edges on splatRes resolution.
+        ///
+        /// Density channels are NOT synced here — the R8 density map has its own
+        /// per-tile writeback pipeline via WorldPainterDensityEncoder.
+        /// </summary>
+        public void ApplySeamSync(TerrainTileAsset sourceTile)
+        {
+            if (sourceTile == null) return;
+
+            var coord = sourceTile.tileCoord;
+
+            // +X neighbour: copy right column of source → left column of neighbour.
+            var plusX = new Vector2Int(coord.x + 1, coord.y);
+            if (this.neighbourMap.TryGetValue(plusX, out var neighX) && neighX != null)
+            {
+                SyncHeightColumn(sourceTile, neighX, isRight: true);
+                SyncSplatColumn(sourceTile, neighX, isRight: true);
+            }
+
+            // -X neighbour: copy left column of source → right column of neighbour.
+            var minusX = new Vector2Int(coord.x - 1, coord.y);
+            if (this.neighbourMap.TryGetValue(minusX, out var neighMX) && neighMX != null)
+            {
+                SyncHeightColumn(sourceTile, neighMX, isRight: false);
+                SyncSplatColumn(sourceTile, neighMX, isRight: false);
+            }
+
+            // +Z neighbour: copy top row of source → bottom row of neighbour.
+            var plusZ = new Vector2Int(coord.x, coord.y + 1);
+            if (this.neighbourMap.TryGetValue(plusZ, out var neighZ) && neighZ != null)
+            {
+                SyncHeightRow(sourceTile, neighZ, isTop: true);
+                SyncSplatRow(sourceTile, neighZ, isTop: true);
+            }
+
+            // -Z neighbour: copy bottom row of source → top row of neighbour.
+            var minusZ = new Vector2Int(coord.x, coord.y - 1);
+            if (this.neighbourMap.TryGetValue(minusZ, out var neighMZ) && neighMZ != null)
+            {
+                SyncHeightRow(sourceTile, neighMZ, isTop: false);
+                SyncSplatRow(sourceTile, neighMZ, isTop: false);
+            }
+        }
+
+        // ── Height seam helpers ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Copies the right (isRight=true) or left (isRight=false) height column of
+        /// <paramref name="src"/> into the left (isRight=true) or right (isRight=false)
+        /// column of <paramref name="dst"/>.
+        ///
+        /// Both tiles use R16 LE (2 bytes per texel). Heights map 1:1 when resolutions match.
+        /// When resolutions differ the smaller resolution is resampled at integer texel boundaries.
+        /// </summary>
+        private static void SyncHeightColumn(TerrainTileAsset src, TerrainTileAsset dst, bool isRight)
+        {
+            if (!src.IsHeightValid || !dst.IsHeightValid) return;
+
+            int srcRes = src.heightRes;
+            int dstRes = dst.heightRes;
+            int srcCol = isRight ? srcRes - 1 : 0;
+            int dstCol = isRight ? 0         : dstRes - 1;
+
+            for (int dstRow = 0; dstRow < dstRes; ++dstRow)
+            {
+                int srcRow = (srcRes == dstRes)
+                    ? dstRow
+                    : Mathf.Clamp(Mathf.RoundToInt((float)dstRow / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
+
+                int srcIdx = srcRow * srcRes + srcCol;
+                int dstIdx = dstRow * dstRes + dstCol;
+
+                int srcByte = srcIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                int dstByte = dstIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
+
+                dst.heightData[dstByte]     = src.heightData[srcByte];
+                dst.heightData[dstByte + 1] = src.heightData[srcByte + 1];
+            }
+        }
+
+        /// <summary>Copies the top (isTop=true) or bottom (isTop=false) height row.</summary>
+        private static void SyncHeightRow(TerrainTileAsset src, TerrainTileAsset dst, bool isTop)
+        {
+            if (!src.IsHeightValid || !dst.IsHeightValid) return;
+
+            int srcRes = src.heightRes;
+            int dstRes = dst.heightRes;
+            int srcRow = isTop ? srcRes - 1 : 0;
+            int dstRow = isTop ? 0          : dstRes - 1;
+
+            for (int dstCol = 0; dstCol < dstRes; ++dstCol)
+            {
+                int srcCol = (srcRes == dstRes)
+                    ? dstCol
+                    : Mathf.Clamp(Mathf.RoundToInt((float)dstCol / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
+
+                int srcIdx = srcRow * srcRes + srcCol;
+                int dstIdx = dstRow * dstRes + dstCol;
+
+                int srcByte = srcIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                int dstByte = dstIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
+
+                dst.heightData[dstByte]     = src.heightData[srcByte];
+                dst.heightData[dstByte + 1] = src.heightData[srcByte + 1];
+            }
+        }
+
+        // ── Splat seam helpers ─────────────────────────────────────────────────
+
+        /// <summary>Copies right/left RGBA32 column of splat data between adjacent tiles.</summary>
+        private static void SyncSplatColumn(TerrainTileAsset src, TerrainTileAsset dst, bool isRight)
+        {
+            if (!src.IsSplatValid || !dst.IsSplatValid) return;
+
+            int srcRes = src.splatRes;
+            int dstRes = dst.splatRes;
+            int srcCol = isRight ? srcRes - 1 : 0;
+            int dstCol = isRight ? 0          : dstRes - 1;
+
+            for (int dstRow = 0; dstRow < dstRes; ++dstRow)
+            {
+                int srcRow = (srcRes == dstRes)
+                    ? dstRow
+                    : Mathf.Clamp(Mathf.RoundToInt((float)dstRow / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
+
+                int srcBase = (srcRow * srcRes + srcCol) * 4;
+                int dstBase = (dstRow * dstRes + dstCol) * 4;
+
+                dst.splatData[dstBase]     = src.splatData[srcBase];
+                dst.splatData[dstBase + 1] = src.splatData[srcBase + 1];
+                dst.splatData[dstBase + 2] = src.splatData[srcBase + 2];
+                dst.splatData[dstBase + 3] = src.splatData[srcBase + 3];
+            }
+        }
+
+        /// <summary>Copies top/bottom RGBA32 row of splat data between adjacent tiles.</summary>
+        private static void SyncSplatRow(TerrainTileAsset src, TerrainTileAsset dst, bool isTop)
+        {
+            if (!src.IsSplatValid || !dst.IsSplatValid) return;
+
+            int srcRes = src.splatRes;
+            int dstRes = dst.splatRes;
+            int srcRow = isTop ? srcRes - 1 : 0;
+            int dstRow = isTop ? 0          : dstRes - 1;
+
+            for (int dstCol = 0; dstCol < dstRes; ++dstCol)
+            {
+                int srcCol = (srcRes == dstRes)
+                    ? dstCol
+                    : Mathf.Clamp(Mathf.RoundToInt((float)dstCol / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
+
+                int srcBase = (srcRow * srcRes + srcCol) * 4;
+                int dstBase = (dstRow * dstRes + dstCol) * 4;
+
+                dst.splatData[dstBase]     = src.splatData[srcBase];
+                dst.splatData[dstBase + 1] = src.splatData[srcBase + 1];
+                dst.splatData[dstBase + 2] = src.splatData[srcBase + 2];
+                dst.splatData[dstBase + 3] = src.splatData[srcBase + 3];
+            }
         }
     }
 }
