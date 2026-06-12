@@ -404,7 +404,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 09262bad4a127b947a40b855ae745f82, type: 2}
   - {fileID: 11400000, guid: ecc968ffde0b5e64db03bb3ad5d24665, type: 2}
   cullCompute: {fileID: 7200000, guid: 0372c160c85ed5840b84dc4ff78748d9, type: 3}
-  patchMaterial: {fileID: 2100000, guid: 636a02ff0c963014d80572cc583a9520, type: 2}
+  patchMaterial: {fileID: 0}
   lodRangesM:
   - 32
   - 64
