@@ -5,9 +5,8 @@ using UnityEngine;
 namespace GpuTerrain.Editor
 {
     /// <summary>
-    /// Shared static authoring state for WorldPainter.
-    /// Ports the <see cref="TerrainSculptState"/> pattern so the Inspector
-    /// (<see cref="WorldPainterInspector"/>) and future EditorTool read from one SSOT.
+    /// Shared static authoring state for WorldPainter — the Inspector
+    /// (<see cref="WorldPainterInspector"/>) and the sculpt EditorTool read from one SSOT.
     ///
     /// Not persisted — defaults reset on domain reload (acceptable for editor tools).
     /// </summary>

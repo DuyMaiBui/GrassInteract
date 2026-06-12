@@ -216,56 +216,5 @@ namespace GpuTerrain.Tests
             Assert.AreEqual(0, results.Count, "No resident tiles → empty result");
         }
 
-        // ── TerrainSculptState mode→color mapping ─────────────────────────────
-
-        [Test]
-        public void ModeColor_RaiseIsGreen()
-        {
-            var c = TerrainSculptState.ModeColor(SculptMode.Raise);
-            Assert.Greater(c.g, c.r, "Raise should be green-dominant");
-            Assert.Greater(c.g, c.b);
-        }
-
-        [Test]
-        public void ModeColor_LowerIsRed()
-        {
-            var c = TerrainSculptState.ModeColor(SculptMode.Lower);
-            Assert.Greater(c.r, c.g, "Lower should be red-dominant");
-            Assert.Greater(c.r, c.b);
-        }
-
-        [Test]
-        public void ModeColor_SmoothIsCyan()
-        {
-            var c = TerrainSculptState.ModeColor(SculptMode.Smooth);
-            Assert.Greater(c.g, c.r, "Smooth should be cyan (green+blue dominant)");
-            Assert.Greater(c.b, c.r);
-        }
-
-        [Test]
-        public void ModeColor_FlattenIsYellow()
-        {
-            var c = TerrainSculptState.ModeColor(SculptMode.Flatten);
-            Assert.Greater(c.r, c.b, "Flatten should be yellow (red+green, low blue)");
-            Assert.Greater(c.g, c.b);
-        }
-
-        [Test]
-        public void ModeColor_PaintIsOrange()
-        {
-            var c = TerrainSculptState.ModeColor(SculptMode.Paint);
-            Assert.Greater(c.r, c.b, "Paint should be orange (red dominant, low blue)");
-            Assert.Greater(c.r, 0.5f);
-        }
-
-        [Test]
-        public void ModeColor_AllModesHaveAlpha()
-        {
-            foreach (SculptMode mode in System.Enum.GetValues(typeof(SculptMode)))
-            {
-                var c = TerrainSculptState.ModeColor(mode);
-                Assert.Greater(c.a, 0f, $"Mode {mode} should have non-zero alpha");
-            }
-        }
     }
 }

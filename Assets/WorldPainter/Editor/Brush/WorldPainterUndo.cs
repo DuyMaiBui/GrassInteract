@@ -18,8 +18,7 @@ namespace GpuTerrain.Editor
     ///   - Eviction: oldest-first (LinkedList head = oldest).
     ///   - One Unity Undo group per stroke → single Ctrl+Z reverts one stroke.
     ///
-    /// Extends <see cref="TerrainSculptUndo"/> pattern retargeted onto
-    /// <see cref="WorldPainter"/> tile refs (instead of <c>GpuTerrainRenderer</c> tiles).
+    /// Per-tile snapshot undo over <see cref="WorldPainter"/> tile refs.
     ///
     /// CPU byte arrays only — no GPU resources held.
     /// </summary>

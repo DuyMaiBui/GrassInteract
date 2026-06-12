@@ -10,9 +10,9 @@ namespace GpuTerrain.Editor
     /// <summary>
     /// Scene-view EditorTool for WorldPainter sculpt (Task 8).
     ///
-    /// Reuses the existing stroke plumbing (<see cref="TileRtCache"/>,
-    /// <see cref="TerrainBrushStroke"/>, <see cref="TerrainSculptRtWriteback"/>)
-    /// retargeted onto the <see cref="WorldPainter"/> tile refs.
+    /// Reuses the stroke plumbing (<see cref="TileRtCache"/>,
+    /// <see cref="WorldPainterStroke"/>, <see cref="TerrainSculptRtWriteback"/>)
+    /// on the <see cref="WorldPainter"/> tile refs.
     ///
     /// Spacing-stamping path: <see cref="WorldPainterStroke"/> interpolates the
     /// drag path and stamps every spacing metres.  The falloff LUT is uploaded
