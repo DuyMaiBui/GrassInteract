@@ -11,7 +11,6 @@ namespace WorldPainter
     /// <summary>
     /// WorldPainter partial — multi-tile GPU render submit logic.
     ///
-    /// Mirrors <see cref="GpuTerrainRenderer"/> exactly:
     ///   - Per-tile <see cref="GpuTerrainEngine"/> + <see cref="TerrainTileGpuResources"/> lists.
     ///   - <see cref="TryBuild"/> builds engines on demand; <see cref="DisposeEngines"/> tears down.
     ///   - OnEnable / OnDisable wire the RenderPipeline edit-mode hook.

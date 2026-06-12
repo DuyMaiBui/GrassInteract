@@ -69,9 +69,9 @@ namespace WorldPainter
 
             if (!HasEnabledConsumer())
                 Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' is active but no enabled " +
-                    $"{nameof(ScatterField)}/{nameof(GrassBendSimulator)} exists in the scene - nothing " +
-                    "reads this interactor, so no grass leans. Add a ScatterField " +
-                    "with at least one Grass-kind layer.", this);
+                    $"{nameof(WorldPainter)} exists in the scene - nothing " +
+                    "reads this interactor, so no grass leans. Add a WorldPainter " +
+                    "with at least one Grass-kind scatter layer.", this);
 
             if (this.Data.WorldRadius <= 0f)
                 Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has worldRadius=" +
@@ -82,13 +82,13 @@ namespace WorldPainter
                     $"{this.Data.Strength:0.###} (<= 0) - zero strength leaves no lean. Set it > 0.", this);
         }
 
-        // True when at least one enabled ScatterField
-        // exists — the field owns the GrassBendSimulator that is the sole consumer of the interactor registry.
+        // True when at least one enabled WorldPainter exists — WorldPainter owns the
+        // GrassBendSimulator that is the sole consumer of the interactor registry.
         private static bool HasEnabledConsumer()
         {
-            ScatterField[] fields = FindObjectsByType<ScatterField>(FindObjectsSortMode.None);
-            foreach (ScatterField f in fields)
-                if (f.isActiveAndEnabled)
+            WorldPainter[] painters = FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            foreach (WorldPainter p in painters)
+                if (p.isActiveAndEnabled)
                     return true;
             return false;
         }

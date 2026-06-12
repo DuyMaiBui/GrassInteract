@@ -6,7 +6,7 @@ namespace WorldPainter.Editor
     /// <summary>
     /// Custom Inspector for <see cref="TerrainTileAsset"/>.
     ///
-    /// All sculpt/paint UI has moved to <see cref="GpuTerrainRendererEditor"/>.
+    /// All sculpt/paint UI lives on the <see cref="WorldPainter"/> component.
     /// This inspector shows only a managed-by notice so users know where to go.
     /// </summary>
     [CustomEditor(typeof(TerrainTileAsset))]
@@ -15,7 +15,7 @@ namespace WorldPainter.Editor
         public override void OnInspectorGUI()
         {
             EditorGUILayout.HelpBox(
-                "Managed by GpuTerrainRenderer. Select the renderer to sculpt.",
+                "Managed by WorldPainter. Select the WorldPainter component to sculpt.",
                 MessageType.Info);
         }
     }

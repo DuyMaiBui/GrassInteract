@@ -36,7 +36,8 @@ namespace WorldPainter.Editor
 
         /// <summary>
         /// Returns an empty-state element shown when the painter has no tiles.
-        /// Includes a "Create 1×1 tile" button that calls TerrainValidationSceneBuilder.
+        /// Directs the user to assign a WorldMapAsset to begin painting.
+        /// (P4 factory will provide tile creation tooling.)
         /// </summary>
         public VisualElement BuildNoTilesEmptyState()
         {
@@ -50,17 +51,9 @@ namespace WorldPainter.Editor
             var textCol = new VisualElement();
             textCol.style.flexDirection = FlexDirection.Column;
 
-            var msg = new Label("No tiles loaded. Add tile entries to begin painting.");
+            var msg = new Label("No tiles loaded. Assign a WorldMapAsset to begin painting.");
             msg.AddToClassList("wp-coach-mark-text");
             textCol.Add(msg);
-
-            var btn = new Button(TerrainValidationSceneBuilder.CreateValidationScene)
-            {
-                text = "Create 1x1 tile",
-            };
-            btn.style.marginTop = 4;
-            btn.style.alignSelf = Align.FlexStart;
-            textCol.Add(btn);
 
             container.Add(textCol);
             return container;

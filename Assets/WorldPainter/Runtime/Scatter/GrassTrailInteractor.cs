@@ -146,13 +146,13 @@ namespace WorldPainter
             if (this.hasValidated) return;
             this.hasValidated = true;
 
-            ScatterField[] fields = FindObjectsByType<ScatterField>(FindObjectsSortMode.None);
+            WorldPainter[] painters = FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
             bool anyGpu = false;
-            foreach (var f in fields)
-                if (f.isActiveAndEnabled && f.ActiveTierName == "GPU") { anyGpu = true; break; }
+            foreach (var p in painters)
+                if (p.isActiveAndEnabled && p.ScatterActiveTierName == "GPU") { anyGpu = true; break; }
             if (!anyGpu)
                 Debug.LogWarning($"[{nameof(GrassTrailInteractor)}] '{this.name}' is active but no " +
-                    "GPU-tier ScatterField exists. GrassTrailInteractor is GPU-only - " +
+                    "GPU-tier WorldPainter exists. GrassTrailInteractor is GPU-only - " +
                     "this trail will have no visual effect.", this);
         }
 #endif

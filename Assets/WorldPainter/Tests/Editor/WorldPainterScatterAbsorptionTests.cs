@@ -61,9 +61,13 @@ namespace WorldPainter.Tests
                 out DensityScatterLayer densityLayer);
             painter.Map = mapAsset;
 
-            // Assert — ScatterField is NOT present.
-            Assert.IsNull(go.GetComponentInChildren<ScatterField>(),
-                "No ScatterField component must be present (absorption test).");
+            // Assert — WorldPainter is the sole MonoBehaviour on the test GO; no external
+            // scatter bridge component was added (ScatterField absorbed into WorldPainter in P2/P3).
+            var components = go.GetComponents<MonoBehaviour>();
+            Assert.AreEqual(1, components.Length,
+                "Only WorldPainter should be present — no external scatter bridge (absorption test).");
+            Assert.IsInstanceOf<WorldPainter>(components[0],
+                "The single MonoBehaviour must be WorldPainter.");
 
             // DensityMap is null → engine skips the layer and logs an error; we expect that.
             LogAssert.Expect(LogType.Error,

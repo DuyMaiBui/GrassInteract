@@ -1,9 +1,6 @@
 #nullable enable
-using System.Collections;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
-using UnityEngine.Rendering;
 using UnityEngine.UIElements;
 using WorldPainter;
 
@@ -109,10 +106,9 @@ namespace WorldPainter.Editor
             bladeLabel.AddToClassList("wp-layer-name");
             card.Add(bladeLabel);
 
-            // Schedule async tick via EditorApplication.update.
-            ScatterField? field = Object.FindFirstObjectByType<ScatterField>();
+            // Schedule async tick: read target instances from painter.ScatterLayers directly.
             bladeLabel.schedule
-                .Execute(() => this.TickBladeCount(bladeLabel, field))
+                .Execute(() => this.TickBladeCount(bladeLabel, painter))
                 .Every((long)(BLADE_TICK_SEC * 1000));
 
             return card;
@@ -157,23 +153,22 @@ namespace WorldPainter.Editor
 
         // ── Blade count async tick ────────────────────────────────────────────
 
-        private void TickBladeCount(Label label, ScatterField? field)
+        private void TickBladeCount(Label label, WorldPainter painter)
         {
             if (this.pendingReadback) return;
-            if (field == null)
-            {
-                if (this.cachedBladeCount < 0)
-                    label.text = "Blade count: (no ScatterField)";
-                return;
-            }
 
-            // Use the ScatterField's existing instance state as a lightweight proxy.
+            // Prefer map layers (the P2+ SSOT); fall back to inline ScatterLayers for
+            // any legacy scene that hasn't yet assigned a WorldMapAsset.
             // A true async GPU counter would require a running compute buffer; we
-            // read the layer count from the config as best-effort (design §6 note).
-            if (field.Config != null && field.Config.Layers.Count > 0)
+            // read target instances as best-effort (design §6 note).
+            System.Collections.Generic.IEnumerable<ScatterLayer>? layers =
+                (System.Collections.Generic.IEnumerable<ScatterLayer>?)painter.Map?.Layers
+                ?? painter.ScatterLayers;
+
+            if (layers != null)
             {
                 int total = 0;
-                foreach (ScatterLayer sl in field.Config.Layers)
+                foreach (ScatterLayer sl in layers)
                 {
                     if (sl is DensityScatterLayer dsl)
                         total += dsl.TargetInstances;
