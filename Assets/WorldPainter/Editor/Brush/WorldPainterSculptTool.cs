@@ -177,7 +177,7 @@ namespace WorldPainter.Editor
             {
                 var brush = WorldPainterState.Brush;
                 var previewColor = new Color(0.3f, 0.7f, 1.0f, 0.6f); // WorldPainter blue
-                TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, null);
+                TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape, s_heightFn);
                 HandleUtility.Repaint();
 
                 // Prop layer ghost preview (P4 task 3 — inline Handles, no WorldPainter.Editor dep).
@@ -207,6 +207,41 @@ namespace WorldPainter.Editor
             }
 
             this.DrawHud();
+        }
+
+        // ── Brush-disc terrain conform (restored from deleted TerrainSculptTool) ──
+
+        // Cached so the brush preview gets a stable delegate (no per-event allocation).
+        // Resolves the live ActivePainter each call so it always targets the current tiles.
+        private static readonly TerrainBrushPreview.HeightFn s_heightFn = SampleActivePainterHeight;
+
+        /// <summary>
+        /// Per-vertex terrain height query for the conforming brush disc. Resolves the tile
+        /// under (worldX, worldZ) on the active painter — map (SSOT) path first, falling back
+        /// to the inline Tiles list — then samples the SSOT CPU heightmap (matches the GPU VTF).
+        /// Returns false off-grid → the preview falls back to a flat disc at the hit height.
+        /// </summary>
+        private static bool SampleActivePainterHeight(float worldX, float worldZ, out float worldY)
+        {
+            worldY = 0f;
+            var painter = WorldPainterState.ActivePainter;
+            if (painter == null) return false;
+
+            Vector2Int coord = TerrainWorldGrid.WorldToTileCoord(worldX, worldZ);
+            TerrainTileAsset? tile = painter.Map != null
+                ? painter.Map.GetTile(coord)
+                : ResolveInlineTile(painter, coord);
+            if (tile == null) return false;
+
+            return TerrainHeightSampleCpu.TrySampleWorld(tile, worldX, worldZ, out worldY);
+        }
+
+        private static TerrainTileAsset? ResolveInlineTile(WorldPainter painter, Vector2Int coord)
+        {
+            foreach (var entry in painter.Tiles)
+                if (entry.coord == coord && entry.tileAsset != null)
+                    return entry.tileAsset;
+            return null;
         }
 
         // ── Prop ghost preview (P4 task 3, option A — Handles only) ──────────

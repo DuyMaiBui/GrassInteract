@@ -25,6 +25,9 @@
 /// When the LUT is absent or the kernel is in legacy mode, use the inline fallback below.
 Texture2D<float> _FalloffLUT;
 
+/// Brush footprint shape: 0 = Circle (Euclidean), 1 = Square (Chebyshev). Set every dispatch.
+int _BrushShape;
+
 // ── UV helpers ────────────────────────────────────────────────────────────────
 
 /// Convert integer dispatch thread ID to texel UV centre.
@@ -33,13 +36,22 @@ float2 TexelToUV_BM(uint2 id, int rtRes)
     return (float2(id) + 0.5f) / float(rtRes);
 }
 
+// Per-texel normalized-distance metric. Circle = Euclidean length; Square = Chebyshev
+// (max of |du.x|,|du.y|), which yields square iso-contours through the SAME falloff curve.
+float BrushDist_BM(float2 du)
+{
+    if (_BrushShape == 1)
+        return max(abs(du.x), abs(du.y)); // Chebyshev → square
+    return length(du);                    // Euclidean → circle
+}
+
 // ── Legacy inline falloff (used if LUT path is disabled) ─────────────────────
 // Cubic smoothstep on (1-t): stays near 1 in centre, drops to 0 at edge.
 // This MUST match TerrainBrushMathTests.BrushFalloff (the CPU reference).
 
 float BrushFalloffInline(float2 texelUV, float2 centerUV, float radiusUV)
 {
-    float dist = length(texelUV - centerUV);
+    float dist = BrushDist_BM(texelUV - centerUV);
     float t    = saturate(dist / max(radiusUV, 0.0001f));
     float inv  = 1.0f - t;
     return inv * inv * (3.0f - 2.0f * inv);
@@ -49,7 +61,7 @@ float BrushFalloffInline(float2 texelUV, float2 centerUV, float radiusUV)
 
 float BrushFalloffLUT(float2 texelUV, float2 centerUV, float radiusUV)
 {
-    float dist    = length(texelUV - centerUV);
+    float dist    = BrushDist_BM(texelUV - centerUV);
     float normDist = saturate(dist / max(radiusUV, 0.0001f));
     // Sample LUT: U = normDist mapped to [0..255]/256, V = 0.
     // Use Load to avoid sampler state requirements across all platforms.

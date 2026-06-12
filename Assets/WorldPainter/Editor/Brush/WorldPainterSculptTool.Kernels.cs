@@ -43,6 +43,7 @@ namespace WorldPainter.Editor
             this.brushCompute.SetFloat("_BrushRadiusUV",  radiusUV);
             this.brushCompute.SetFloat("_Strength",        brush.strength);
             this.brushCompute.SetInt("_RTRes",             rtRes);
+            this.brushCompute.SetInt("_BrushShape",        (int)brush.shape);
 
             // Determine kernel by active layer (P5 SSOT: ActiveLayerKind / ActiveLayerId).
             // Meadow → PaintDensity on the active density scatter layer.

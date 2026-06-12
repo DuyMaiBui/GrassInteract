@@ -66,6 +66,9 @@ namespace WorldPainter.Editor
             // Height / Splat / Density mode toggle
             dock.Add(this.BuildModeToggle());
 
+            // Shape toggle (Circle / Square)
+            dock.Add(this.BuildShapeToggle());
+
             // Size
             dock.Add(this.BuildSlider("Size (m)", 0.5f, 256f,
                 () => brush.size,
@@ -125,6 +128,38 @@ namespace WorldPainter.Editor
 
                 // Highlight the currently active mode.
                 if (WorldPainterState.ActiveLayerKind == kinds[i])
+                    btn.AddToClassList("wp-mode-btn--active");
+
+                row.Add(btn);
+            }
+
+            return row;
+        }
+
+        // ── Shape toggle (Circle / Square) ────────────────────────────────────
+        private VisualElement BuildShapeToggle()
+        {
+            var row = new VisualElement();
+            row.AddToClassList("wp-mode-toggle-row");
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.marginBottom  = 4;
+
+            var shapes = new[] { "Circle", "Square" };
+            var values = new[] { BrushShape.Circle, BrushShape.Square };
+
+            for (int i = 0; i < shapes.Length; i++)
+            {
+                int capturedIdx = i;
+                var btn = new Button(() =>
+                {
+                    WorldPainterState.Brush.shape = values[capturedIdx];
+                    WorldPainterState.RaiseBrushFalloffDirty(); // nudge repaint/preview refresh
+                });
+                btn.text = shapes[i];
+                btn.AddToClassList("wp-mode-btn");
+                btn.style.flexGrow = 1;
+
+                if (WorldPainterState.Brush.shape == values[i])
                     btn.AddToClassList("wp-mode-btn--active");
 
                 row.Add(btn);

@@ -81,6 +81,60 @@ namespace WorldPainter.Tests
             Assert.AreEqual(f1, f3, 0.0001f, "Horizontal/vertical falloff should be equal");
         }
 
+        // ── Square parity (CPU mirror of BrushMask.hlsl BrushDist_BM) ────────
+
+        // CPU mirror of BrushMask.hlsl BrushDist_BM + falloff, shape-aware.
+        // Circle = Euclidean; Square = Chebyshev max(|dx|,|dy|). Same falloff curve.
+        private static float BrushFalloffShaped(
+            Vector2 texelUV, Vector2 centerUV, float radiusUV, BrushShape shape)
+        {
+            Vector2 du = texelUV - centerUV;
+            float dist = shape == BrushShape.Square
+                ? Mathf.Max(Mathf.Abs(du.x), Mathf.Abs(du.y)) // Chebyshev → square
+                : du.magnitude;                                // Euclidean → circle
+            float t   = Mathf.Clamp01(dist / Mathf.Max(radiusUV, 0.0001f));
+            float inv = 1f - t;
+            return inv * inv * (3f - 2f * inv);
+        }
+
+        [Test]
+        public void Falloff_Square_OnAxis_MatchesCircle()
+        {
+            // Along a cardinal axis, |du| == max(|dx|,|dy|), so Square and Circle agree exactly.
+            var center = new Vector2(0.5f, 0.5f);
+            float radius = 0.2f;
+            var p = new Vector2(0.5f + 0.1f, 0.5f); // on the +X axis, dy = 0
+            float circle = BrushFalloffShaped(p, center, radius, BrushShape.Circle);
+            float square = BrushFalloffShaped(p, center, radius, BrushShape.Square);
+            Assert.AreEqual(circle, square, 0.0001f, "On-axis, square must equal circle.");
+        }
+
+        [Test]
+        public void Falloff_Square_Diagonal_StaysInsideWhereCircleFallsOff()
+        {
+            // At a diagonal point just outside the circle radius but inside the square half-extent,
+            // Chebyshev keeps weight > 0 while Euclidean has already reached 0.
+            var center = new Vector2(0.5f, 0.5f);
+            float radius = 0.2f;
+            // dx = dy = 0.18 → Euclidean dist ≈ 0.2546 (> radius → 0); Chebyshev dist = 0.18 (< radius).
+            var p = new Vector2(0.5f + 0.18f, 0.5f + 0.18f);
+            float circle = BrushFalloffShaped(p, center, radius, BrushShape.Circle);
+            float square = BrushFalloffShaped(p, center, radius, BrushShape.Square);
+            Assert.AreEqual(0f, circle, 0.0001f, "Diagonal corner is outside the circle.");
+            Assert.Greater(square, 0f, "Diagonal corner is inside the square half-extent.");
+        }
+
+        [Test]
+        public void Falloff_Square_AtCorner_IsZeroAtHalfExtent()
+        {
+            // Exactly at the square edge along an axis → t=1 → falloff 0 (same boundary rule as circle).
+            var center = new Vector2(0.5f, 0.5f);
+            float radius = 0.2f;
+            var edge = new Vector2(0.5f + radius, 0.5f);
+            float f = BrushFalloffShaped(edge, center, radius, BrushShape.Square);
+            Assert.AreEqual(0f, f, 0.0001f);
+        }
+
         // ── Affected-texel set ────────────────────────────────────────────────
 
         /// <summary>Count texels with falloff > 0 for a given brush config.</summary>

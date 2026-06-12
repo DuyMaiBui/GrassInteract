@@ -76,6 +76,7 @@ namespace WorldPainter.Editor
             brushCompute.SetVector("_BrushCenterUV", centerUV);
             brushCompute.SetFloat("_BrushRadiusUV",  radiusUV);
             brushCompute.SetInt("_RTRes",             rtRes);
+            brushCompute.SetInt("_BrushShape",        (int)WorldPainterState.Brush.shape);
 
             // ── Channel 1: Height ─────────────────────────────────────────────
             if (preset.HeightEnabled && !mute.HasFlag(BiomeChannelMask.Height))

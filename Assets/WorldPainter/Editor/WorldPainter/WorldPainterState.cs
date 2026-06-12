@@ -230,6 +230,13 @@ namespace WorldPainter.Editor
 
     // ── BrushSettings ─────────────────────────────────────────────────────────
 
+    /// <summary>Brush footprint shape. Drives both the editor preview AND the GPU stamp mask.</summary>
+    public enum BrushShape
+    {
+        Circle = 0,
+        Square = 1,
+    }
+
     /// <summary>
     /// Unified brush parameters shared across all layer types.
     /// Design §5.1 SSOT — one vocabulary, one set of controls.
@@ -260,6 +267,9 @@ namespace WorldPainter.Editor
         [Tooltip("Flow: accumulated deposit per stamp [0..1].")]
         [UnityEngine.Range(0f, 1f)]
         public float flow = DEFAULT_FLOW;
+
+        [Tooltip("Brush footprint shape — circle (Euclidean falloff) or square (Chebyshev falloff).")]
+        public BrushShape shape = BrushShape.Circle;
 
         /// <summary>Returns a <see cref="BrushSettings"/> instance initialised to smart defaults.</summary>
         public static BrushSettings Default => new BrushSettings();
