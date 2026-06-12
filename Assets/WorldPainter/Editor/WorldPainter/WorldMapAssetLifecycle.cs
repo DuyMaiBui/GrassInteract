@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -213,6 +214,154 @@ namespace WorldPainter.Editor
 
             EditorUtility.SetDirty(map);
             AssetDatabase.SaveAssets();
+        }
+
+        // ── Surface layer lifecycle (unified SplatLayer + GrassLayer) ─────────
+
+        /// <summary>
+        /// Adds a <see cref="SplatLayer"/> to <see cref="WorldMapAsset.SurfaceLayers"/> and creates
+        /// its <see cref="TerrainLayerSet"/> palette sub-asset, wiring it to BOTH the layer and the
+        /// map-level splatSet that <c>GpuTerrainEngine</c> binds. Assign albedo textures on the set.
+        /// </summary>
+        public static SplatLayer AddSplatLayer(WorldMapAsset map, string layerName)
+        {
+            string mapPath = AssetDatabase.GetAssetPath(map);
+
+            var layer = ScriptableObject.CreateInstance<SplatLayer>();
+            layer.name = $"Splat_{layerName}";
+            AssetDatabase.AddObjectToAsset(layer, mapPath);
+
+            var set = ScriptableObject.CreateInstance<TerrainLayerSet>();
+            set.name = $"{layer.name}_LayerSet";
+            AssetDatabase.AddObjectToAsset(set, mapPath);
+            layer.SetLayerSet(set);
+            map.SetSplatSet(set);
+
+            map.RegisterSurfaceLayer(layer);
+            EditorUtility.SetDirty(map);
+            EditorUtility.SetDirty(layer);
+            AssetDatabase.SaveAssets();
+            return layer;
+        }
+
+        /// <summary>
+        /// Adds a <see cref="GrassLayer"/> to <see cref="WorldMapAsset.SurfaceLayers"/> with a default
+        /// grass material. Assign a blade mesh to its Render LODs and call <see cref="AddGrassVariant"/>
+        /// per texture variant.
+        /// </summary>
+        public static GrassLayer AddGrassLayer(WorldMapAsset map, string layerName)
+        {
+            string mapPath = AssetDatabase.GetAssetPath(map);
+
+            var layer = ScriptableObject.CreateInstance<GrassLayer>();
+            layer.name = $"Grass_{layerName}";
+            AssetDatabase.AddObjectToAsset(layer, mapPath);
+
+            Material? material = CreateGrassMaterial(layer.name);
+            if (material != null)
+            {
+                AssetDatabase.AddObjectToAsset(material, mapPath);
+                layer.EditorSetMaterial(material);
+            }
+
+            map.RegisterSurfaceLayer(layer);
+            EditorUtility.SetDirty(map);
+            EditorUtility.SetDirty(layer);
+            AssetDatabase.SaveAssets();
+            return layer;
+        }
+
+        /// <summary>
+        /// Appends a variant (texture + own density map sub-asset) to a <see cref="GrassLayer"/>.
+        /// <paramref name="seedFullDensity"/> fills the density map so the variant scatters across the
+        /// whole field immediately (visual verification before paint-routing exists).
+        /// </summary>
+        public static void AddGrassVariant(WorldMapAsset map, GrassLayer layer, string variantName,
+            bool seedFullDensity = false)
+        {
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            int index = layer.PaletteCount;
+
+            Texture2D density = CreateDensityMap($"{layer.name}#{index}", seedFullDensity);
+            AssetDatabase.AddObjectToAsset(density, mapPath);
+
+            var variants = new List<GrassVariant>(layer.EditorPalette)
+            {
+                new GrassVariant { name = variantName, texture = null, densityMap = density },
+            };
+            layer.EditorSetPalette(variants.ToArray());
+
+            EditorUtility.SetDirty(map);
+            EditorUtility.SetDirty(layer);
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Removes a unified surface layer and its owned sub-assets (TerrainLayerSet for splat;
+        /// per-variant density maps + material for grass).
+        /// </summary>
+        public static void RemoveSurfaceLayer(WorldMapAsset map, WorldPainterLayer layer)
+        {
+            string mapPath = AssetDatabase.GetAssetPath(map);
+
+            if (layer is SplatLayer splat)
+            {
+                TerrainLayerSet? set = splat.LayerSet;
+                if (set != null && AssetDatabase.GetAssetPath(set) == mapPath)
+                {
+                    if (map.SplatSet == set) map.SetSplatSet(null);
+                    AssetDatabase.RemoveObjectFromAsset(set);
+                    Object.DestroyImmediate(set, allowDestroyingAssets: true);
+                }
+            }
+            else if (layer is GrassLayer grass)
+            {
+                foreach (var v in grass.Palette)
+                {
+                    if (v.densityMap != null &&
+                        AssetDatabase.GetAssetPath(v.densityMap) == mapPath)
+                    {
+                        AssetDatabase.RemoveObjectFromAsset(v.densityMap);
+                        Object.DestroyImmediate(v.densityMap, allowDestroyingAssets: true);
+                    }
+                }
+
+                Material? mat = grass.Render.Material;
+                if (mat != null && AssetDatabase.GetAssetPath(mat) == mapPath)
+                {
+                    AssetDatabase.RemoveObjectFromAsset(mat);
+                    Object.DestroyImmediate(mat, allowDestroyingAssets: true);
+                }
+            }
+
+            map.UnregisterSurfaceLayer(layer);
+            AssetDatabase.RemoveObjectFromAsset(layer);
+            Object.DestroyImmediate(layer, allowDestroyingAssets: true);
+            EditorUtility.SetDirty(map);
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Density-map sub-asset for a grass variant. <paramref name="seedFull"/> fills the R channel
+        /// (full density) so the variant scatters everywhere until per-variant paint-routing lands.
+        /// </summary>
+        private static Texture2D CreateDensityMap(string baseName, bool seedFull)
+        {
+            int res = WorldMapGrid.DENSITY_RES;
+            var tex = new Texture2D(res, res, TextureFormat.RGBA32, mipChain: false, linear: true)
+            {
+                name       = $"{baseName}_Density",
+                wrapMode   = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+
+            var pixels = new Color[res * res];
+            if (seedFull)
+                for (int i = 0; i < pixels.Length; i++)
+                    pixels[i] = new Color(1f, 0f, 0f, 1f);
+            tex.SetPixels(pixels);
+            tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            return tex;
         }
 
         // ── Density-map sub-asset factory ─────────────────────────────────────

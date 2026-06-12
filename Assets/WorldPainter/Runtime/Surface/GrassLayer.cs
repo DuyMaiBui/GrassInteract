@@ -110,5 +110,20 @@ namespace WorldPainter
 
         /// <summary>Read-only palette of grass variants.</summary>
         public IReadOnlyList<GrassVariant> Palette => this.palette;
+
+        // ── Editor authoring setters (used by WorldMapAssetLifecycle) ──────────
+
+        /// <summary>The mutable palette array. Editor lifecycle only.</summary>
+        internal GrassVariant[] EditorPalette => this.palette;
+
+        /// <summary>Replaces the palette. Editor lifecycle only.</summary>
+        internal void EditorSetPalette(GrassVariant[] variants) => this.palette = variants;
+
+        /// <summary>Sets the shared render material (keeps LODs/shadow/cull). Editor lifecycle only.</summary>
+        internal void EditorSetMaterial(Material material)
+        {
+            this.render = new ScatterRenderConfig(
+                material, this.render.ShadowCastingMode, this.render.Lods, this.render.RenderCullDistance);
+        }
     }
 }

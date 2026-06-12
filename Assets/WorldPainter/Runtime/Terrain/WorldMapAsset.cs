@@ -252,6 +252,12 @@ namespace WorldPainter
             this.surfaceLayers.Remove(layer);
         }
 
+        /// <summary>
+        /// Assigns the map-level splat texture set (the one GpuTerrainEngine binds). Called by
+        /// <see cref="WorldMapAssetLifecycle"/> when a <c>SplatLayer</c> is added/removed.
+        /// </summary>
+        internal void SetSplatSet(TerrainLayerSet? set) => this.splatSet = set;
+
         // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private void RebuildDict()
