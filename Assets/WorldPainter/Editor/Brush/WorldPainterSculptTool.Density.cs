@@ -19,29 +19,28 @@ namespace WorldPainter.Editor
     {
         // ── Density RT management ─────────────────────────────────────────────
 
-        internal RenderTexture? GetOrCreateDensityRT(DensityScatterLayer layer)
+        internal RenderTexture? GetOrCreateDensityRT(Texture2D densityMap)
         {
-            // Reuse existing RT if the same layer is still active.
-            if (this.densityRT != null && ReferenceEquals(this.activeDensityLayer, layer))
+            // Reuse existing RT if the same density target is still active.
+            if (this.densityRT != null && ReferenceEquals(this.activeDensityMap, densityMap))
                 return this.densityRT;
 
-            // New layer or first touch — release old RT and allocate fresh.
+            // New target or first touch — release old RT and allocate fresh.
             this.ReleaseDensityRT();
 
             int res = TerrainSculptConfig.BRUSH_RT_RES;
             var rt = new RenderTexture(res, res, 0, RenderTextureFormat.RFloat)
             {
-                name = $"WorldPainterDensityRT_{layer.name}",
+                name = $"WorldPainterDensityRT_{densityMap.name}",
                 enableRandomWrite = true,
             };
             rt.Create();
 
             // Seed from the committed density map so edits continue from the saved state.
-            if (layer.DensityMap != null)
-                Graphics.Blit(layer.DensityMap, rt);
+            Graphics.Blit(densityMap, rt);
 
-            this.densityRT          = rt;
-            this.activeDensityLayer = layer;
+            this.densityRT        = rt;
+            this.activeDensityMap = densityMap;
             return rt;
         }
 
@@ -54,7 +53,7 @@ namespace WorldPainter.Editor
                 Object.DestroyImmediate(this.densityRT);
                 this.densityRT = null;
             }
-            this.activeDensityLayer = null;
+            this.activeDensityMap = null;
         }
     }
 }

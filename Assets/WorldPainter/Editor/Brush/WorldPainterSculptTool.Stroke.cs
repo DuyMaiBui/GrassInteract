@@ -132,8 +132,8 @@ namespace WorldPainter.Editor
             }
 
             // Flush density encoder on mouse-up (synchronous final persist).
-            if (this.activeDensityLayer != null && this.densityRT != null)
-                this.densityEncoder.ExecuteSync(this.activeDensityLayer, this.densityRT);
+            if (this.activeDensityMap != null && this.densityRT != null)
+                this.densityEncoder.ExecuteSync(this.activeDensityMap, this.densityRT);
 
             this.ReleaseDensityRT();
 

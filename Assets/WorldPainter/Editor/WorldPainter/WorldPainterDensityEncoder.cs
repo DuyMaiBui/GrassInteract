@@ -7,69 +7,33 @@ using WorldPainter;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Encodes a density RenderTexture into the bytes of a <see cref="DensityScatterLayer"/>'s
-    /// <c>densityMap</c> (<see cref="Texture2D"/>) and persists the asset.
+    /// Encodes a density RenderTexture into a target density <see cref="Texture2D"/> and persists it.
+    /// The target is either a legacy <see cref="DensityScatterLayer"/>'s <c>densityMap</c> or a unified
+    /// <c>GrassVariant.densityMap</c> — both are plain RGBA/R textures, so the encoder is target-typed.
     ///
     /// Sits on the same throttled 0.15s pipeline as <see cref="TerrainSculptRtWriteback"/>:
-    /// call <see cref="RequestAsync"/> during drag, <see cref="ExecuteSync"/> on mouse-up.
-    ///
-    /// The encoder is a separate class (not embedded in TerrainSculptRtWriteback) so the
-    /// density payload remains opt-in — tiles without a density layer pay zero cost.
+    /// call <see cref="RequestAsync(Texture2D, RenderTexture)"/> during drag, <see cref="ExecuteSync(Texture2D, RenderTexture)"/> on mouse-up.
     /// </summary>
     internal sealed class WorldPainterDensityEncoder
     {
-        // ── Constants ─────────────────────────────────────────────────────────
+        // ── Pending state (coalesced per target; last RT wins) ────────────────
 
-        private const int SMOOTH_KERNEL_HALF = 3;
+        private Texture2D?     pendingTarget;
+        private RenderTexture? pendingRT;
 
-        // ── Pending state (coalesced per layer, mirrors TerrainSculptRtWriteback pattern) ──
+        // ── Public API (Texture2D target) ─────────────────────────────────────
 
-        private DensityScatterLayer? pendingLayer;
-        private RenderTexture?       pendingRT;
-
-        // ── Public API ────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Queue an async density readback. Coalesces repeated calls; last RT wins.
-        /// Call <see cref="Tick"/> from EditorApplication.update to drain.
-        /// </summary>
-        public void RequestAsync(DensityScatterLayer layer, RenderTexture densityRT)
+        /// <summary>Queue an async density readback into <paramref name="target"/>. Last call wins.</summary>
+        public void RequestAsync(Texture2D target, RenderTexture densityRT)
         {
-            this.pendingLayer = layer;
-            this.pendingRT    = densityRT;
+            this.pendingTarget = target;
+            this.pendingRT     = densityRT;
         }
 
-        /// <summary>
-        /// Drain the pending async request (issue AsyncGPUReadback).
-        /// Mirrors TerrainSculptRtWriteback.Tick — call from the same OnEditorUpdate hook.
-        /// </summary>
-        public void Tick()
+        /// <summary>Synchronous encode: reads RT pixels on the CPU immediately. Use on mouse-up.</summary>
+        public void ExecuteSync(Texture2D target, RenderTexture densityRT)
         {
-            if (this.pendingLayer == null || this.pendingRT == null) return;
-
-            var layer = this.pendingLayer;
-            var rt    = this.pendingRT;
-            this.pendingLayer = null;
-            this.pendingRT    = null;
-
-            if (layer == null || rt == null) return;
-
-            AsyncGPUReadback.Request(rt, 0, request =>
-            {
-                if (request.hasError || layer == null) return;
-                var raw = request.GetData<float>();
-                WriteToLayer(layer, raw, rt.width, rt.height);
-            });
-        }
-
-        /// <summary>
-        /// Synchronous encode: reads RT pixels on the CPU immediately.
-        /// Use on mouse-up or for forced saves — slower than async.
-        /// </summary>
-        public void ExecuteSync(DensityScatterLayer layer, RenderTexture densityRT)
-        {
-            if (layer == null) return;
-            if (densityRT == null) return;
+            if (target == null || densityRT == null) return;
 
             var prevActive = RenderTexture.active;
             RenderTexture.active = densityRT;
@@ -82,32 +46,62 @@ namespace WorldPainter.Editor
             Color[] pixels = tmp.GetPixels();
             Object.DestroyImmediate(tmp);
 
-            WriteCpuPixelsToLayer(layer, pixels, densityRT.width, densityRT.height);
+            WriteCpuPixelsToTarget(target, pixels, densityRT.width, densityRT.height);
+        }
+
+        // ── Back-compat overloads (DensityScatterLayer → its DensityMap) ──────
+
+        /// <summary>Legacy overload: routes to the layer's <see cref="DensityScatterLayer.DensityMap"/>.</summary>
+        public void RequestAsync(DensityScatterLayer layer, RenderTexture densityRT)
+        {
+            if (layer != null && layer.DensityMap != null)
+                this.RequestAsync(layer.DensityMap, densityRT);
+        }
+
+        /// <summary>Legacy overload: routes to the layer's <see cref="DensityScatterLayer.DensityMap"/>.</summary>
+        public void ExecuteSync(DensityScatterLayer layer, RenderTexture densityRT)
+        {
+            if (layer != null && layer.DensityMap != null)
+                this.ExecuteSync(layer.DensityMap, densityRT);
+        }
+
+        // ── Drain ─────────────────────────────────────────────────────────────
+
+        /// <summary>Drain the pending async request (issue AsyncGPUReadback). Call from OnEditorUpdate.</summary>
+        public void Tick()
+        {
+            if (this.pendingTarget == null || this.pendingRT == null) return;
+
+            var target = this.pendingTarget;
+            var rt     = this.pendingRT;
+            this.pendingTarget = null;
+            this.pendingRT     = null;
+
+            if (target == null || rt == null) return;
+
+            AsyncGPUReadback.Request(rt, 0, request =>
+            {
+                if (request.hasError || target == null) return;
+                var raw = request.GetData<float>();
+                WriteToTarget(target, raw, rt.width, rt.height);
+            });
         }
 
         /// <summary>Cancel any queued async request (call before ExecuteSync on mouse-up).</summary>
         public void CancelPending()
         {
-            this.pendingLayer = null;
-            this.pendingRT    = null;
+            this.pendingTarget = null;
+            this.pendingRT     = null;
         }
 
         // ── Private helpers ───────────────────────────────────────────────────
 
-        private static void WriteToLayer(
-            DensityScatterLayer layer,
-            Unity.Collections.NativeArray<float> raw,
-            int rtW, int rtH)
+        private static void WriteToTarget(
+            Texture2D map, Unity.Collections.NativeArray<float> raw, int rtW, int rtH)
         {
-            Texture2D? map = layer.DensityMap;
-            if (map == null) return;
-
-            int mapW = map.width;
-            int mapH = map.height;
-
+            int mapW = map.width, mapH = map.height;
             var pixels = new Color[mapW * mapH];
             for (int y = 0; y < mapH; ++y)
-            {
                 for (int x = 0; x < mapW; ++x)
                 {
                     int rtX = Mathf.Clamp(Mathf.RoundToInt((float)x / (mapW - 1) * (rtW - 1)), 0, rtW - 1);
@@ -115,23 +109,15 @@ namespace WorldPainter.Editor
                     float v = raw[rtY * rtW + rtX];
                     pixels[y * mapW + x] = new Color(v, v, v, 1f);
                 }
-            }
-
-            ApplyAndPersist(layer, map, pixels);
+            ApplyAndPersist(map, pixels);
         }
 
-        private static void WriteCpuPixelsToLayer(
-            DensityScatterLayer layer, Color[] rtPixels, int rtW, int rtH)
+        private static void WriteCpuPixelsToTarget(
+            Texture2D map, Color[] rtPixels, int rtW, int rtH)
         {
-            Texture2D? map = layer.DensityMap;
-            if (map == null) return;
-
-            int mapW = map.width;
-            int mapH = map.height;
-
+            int mapW = map.width, mapH = map.height;
             var pixels = new Color[mapW * mapH];
             for (int y = 0; y < mapH; ++y)
-            {
                 for (int x = 0; x < mapW; ++x)
                 {
                     int rtX = Mathf.Clamp(Mathf.RoundToInt((float)x / (mapW - 1) * (rtW - 1)), 0, rtW - 1);
@@ -139,19 +125,14 @@ namespace WorldPainter.Editor
                     float v = rtPixels[rtY * rtW + rtX].r;
                     pixels[y * mapW + x] = new Color(v, v, v, 1f);
                 }
-            }
-
-            ApplyAndPersist(layer, map, pixels);
+            ApplyAndPersist(map, pixels);
         }
 
-        private static void ApplyAndPersist(
-            DensityScatterLayer layer, Texture2D map, Color[] pixels)
+        private static void ApplyAndPersist(Texture2D map, Color[] pixels)
         {
             map.SetPixels(pixels);
             map.Apply(false);
             EditorUtility.SetDirty(map);
-            EditorUtility.SetDirty(layer);
-            Debug.Log($"[WorldPainterDensityEncoder] Density written to layer '{layer.name}'.");
         }
     }
 }

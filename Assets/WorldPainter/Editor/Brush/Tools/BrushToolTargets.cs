@@ -1,4 +1,5 @@
 #nullable enable
+using UnityEngine;
 using WorldPainter;
 
 namespace WorldPainter.Editor
@@ -23,6 +24,45 @@ namespace WorldPainter.Editor
             if (idx >= 0 && idx < painter.ScatterLayers.Count)
                 return painter.ScatterLayers[idx] as DensityScatterLayer;
 
+            return null;
+        }
+
+        /// <summary>
+        /// The density <see cref="Texture2D"/> the brush should paint: the active unified GrassLayer
+        /// variant's map (SurfaceLayers) when one is selected, else the legacy DensityScatterLayer's map.
+        /// </summary>
+        public static Texture2D? ResolveDensityTarget(WorldPainter painter)
+        {
+            Texture2D? variantMap = ResolveActiveGrassVariantDensity(painter);
+            if (variantMap != null) return variantMap;
+            return ResolveDensityLayer(painter)?.DensityMap;
+        }
+
+        /// <summary>
+        /// The active unified GrassLayer variant's density map, or null when no grass variant is
+        /// selected. Active iff <see cref="WorldPainterState.ActiveLayerKind"/> is Meadow and the
+        /// active id names a <see cref="GrassLayer"/> in <c>map.SurfaceLayers</c>.
+        /// </summary>
+        public static Texture2D? ResolveActiveGrassVariantDensity(WorldPainter painter)
+        {
+            if (WorldPainterState.ActiveLayerKind != WorldPainterState.PaintLayerKind.Meadow)
+                return null;
+
+            WorldMapAsset? map = painter.Map;
+            if (map == null) return null;
+
+            string id = WorldPainterState.ActiveLayerId;
+            int vi    = WorldPainterState.ActiveGrassVariantIndex;
+
+            foreach (var sl in map.SurfaceLayers)
+            {
+                if (sl is GrassLayer g && g.name == id)
+                {
+                    if (vi >= 0 && vi < g.Palette.Count)
+                        return g.Palette[vi].densityMap;
+                    return null;
+                }
+            }
             return null;
         }
 

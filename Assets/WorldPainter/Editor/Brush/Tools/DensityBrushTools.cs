@@ -35,10 +35,12 @@ namespace WorldPainter.Editor
     {
         public static void Run(in BrushToolContext ctx, int mode)
         {
-            var layer = BrushToolTargets.ResolveDensityLayer(ctx.Painter);
-            if (layer == null) return;
+            // Target = the active GrassLayer variant's density map (unified SurfaceLayers) if one is
+            // selected, else the legacy DensityScatterLayer's density map.
+            var target = BrushToolTargets.ResolveDensityTarget(ctx.Painter);
+            if (target == null) return;
 
-            var dRT = ctx.Tool.GetOrCreateDensityRT(layer);
+            var dRT = ctx.Tool.GetOrCreateDensityRT(target);
             if (dRT == null) return;
 
             int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
@@ -47,9 +49,9 @@ namespace WorldPainter.Editor
             ctx.Compute.SetInt("_DensityMode", mode);
             ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
 
-            // Queue throttled async writeback to the density layer (matches legacy dispatch).
-            if (ctx.Tool.activeDensityLayer != null)
-                ctx.Tool.densityEncoder.RequestAsync(ctx.Tool.activeDensityLayer, dRT);
+            // Queue throttled async writeback to the density target (matches legacy dispatch).
+            if (ctx.Tool.activeDensityMap != null)
+                ctx.Tool.densityEncoder.RequestAsync(ctx.Tool.activeDensityMap, dRT);
         }
     }
 }

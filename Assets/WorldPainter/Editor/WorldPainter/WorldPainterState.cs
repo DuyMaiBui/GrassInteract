@@ -256,6 +256,15 @@ namespace WorldPainter.Editor
         /// </summary>
         public static int ActiveBiomeIndex { get; set; } = -1;
 
+        // ── Active grass variant (unified SurfaceLayers paint) ────────────────
+
+        /// <summary>
+        /// Index of the active grass variant within the active GrassLayer (unified SurfaceLayers).
+        /// -1 = no variant. Set together with <see cref="SetActiveLayer"/>(grassLayer.name, Meadow)
+        /// by the surface-paint selector; the density brush routes its stroke to this variant's map.
+        /// </summary>
+        public static int ActiveGrassVariantIndex { get; set; } = -1;
+
         // ── Stroke tracking ───────────────────────────────────────────────────
 
         /// <summary>
@@ -285,6 +294,7 @@ namespace WorldPainter.Editor
             ActivePainter    = null;
             ActiveLayerIndex = -1;
             ActiveBiomeIndex = -1;
+            ActiveGrassVariantIndex = -1;
             ActiveLayerId    = string.Empty;
             ActiveLayerKind  = PaintLayerKind.None;
             ActiveBrushToolId  = string.Empty;

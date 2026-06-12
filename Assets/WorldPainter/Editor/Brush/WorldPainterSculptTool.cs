@@ -40,7 +40,7 @@ namespace WorldPainter.Editor
         // Allocated on first Grass-layer stamp; released on TeardownActiveStroke.
 
         internal RenderTexture?        densityRT          = null;
-        internal DensityScatterLayer?  activeDensityLayer = null;
+        internal Texture2D?            activeDensityMap   = null;
 
         // ── Prop stamp emitter (P4 task 2) ────────────────────────────────────
 
