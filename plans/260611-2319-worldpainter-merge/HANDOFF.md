@@ -1,6 +1,19 @@
 # Handoff — WorldPainter merge (in progress)
 
-## Status: P3–P8b COMPLETE + green (279 tests). P8c (splits) + P9 (rename) + P10 remaining.
+## Status: ✅ COMPLETE — P3–P10 done, 279 green, PUSHED (origin/plan/gpu-terrain-cdlod @ 03b0f50).
+
+### Final outcome
+- **Merge DONE**: one `WorldPainter` assembly set (`WorldPainter`/`.Editor`/`.Tests`); GpuTerrain + GrassInteract gone (assemblies, folders, namespaces, shader names all WorldPainter).
+- **P9 rename DONE**: namespaces GpuTerrain/GrassInteract → WorldPainter (word-boundary, type names preserved; class WorldPainter type==namespace collision fixed by unqualifying 5 scatter refs — class NOT renamed per user choice). SC2 = 0 old namespaces.
+- **P8c PARTIAL (judicious)**: the 3 genuinely-oversized new editor files split into partials (Stroke 349→208, Undo 269→211, Mutations 256→206). Remaining editor files 222–247 lines left as cohesive single-responsibility (soft-exception, splitting would scatter). Frozen SSOT runtime engines (InstancedPropEngine 687, GrassGpuEngine 684, ScatterField 607, etc.) + test suites are OUT OF SCOPE (frozen / pre-existing).
+- **SCs**: SC1 (3 asmdefs)✓ SC2 (0 old ns)✓ SC3 (279 green)✓ SC4 (deletes done, old trees gone)✓ SC6 (Editor asmdef Editor-only)✓ SC7 (P3 git renames, GUIDs preserved)✓. SC5 partial (see P8c). SC8 (coach-marks "Create 1×1 tile" via Tools/WorldPainter menu → gitignored Generated/) — builder retargeted, NOT Play-mode-smoke-tested (agents kept out of Play mode).
+
+### Remaining OPTIONAL follow-ups (not blocking)
+1. Split the 6 borderline editor files (WorldPainterSculptTool.cs 247, WorldPainterLayerStackView.cs 246, WorldPainterBrushDock.cs 243, WorldPainterLodPreviewPanel.cs 231, WorldPainterMigration.cs 230, WorldPainterBiomePaletteView.cs 222) IF clean seams exist.
+2. Hands-on editor pass: confirm sculpt/splat/grass/prop/biome strokes, brush preview, coach-marks "Create 1×1 tile" button (SC8) — agents were kept out of Play mode; only math/logic unit-tested.
+3. Open the PR for plan/gpu-terrain-cdlod.
+
+### (historical continuation notes below — superseded by the COMPLETE status above)
 
 ### P8a (`bee3525`) + P8b (`194790f`) done — 279/279 green
 - P8a: deleted the dead sculpt-mode island (TerrainBrushStroke/SculptMode, TerrainSculptState/ModeColor, TerrainSculptUndo). WorldPainterSculptTool uses a fixed preview color + LayerType, so SculptMode/ModeColor were dead. Dropped 6 ModeColor + 11 TerrainSculptUndoTests (296→279). _pending-delete folder gone.
