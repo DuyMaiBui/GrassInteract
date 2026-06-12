@@ -5,7 +5,7 @@ keywords: [experience, level, explanation, format, eli5, junior, senior, god]
 argument-hint: "[0-5]"
 effort: low
 tools: [Read, Edit, Write, AskUserQuestion]
-version: 2.17.0
+version: 2.17.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

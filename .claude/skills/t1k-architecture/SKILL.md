@@ -4,7 +4,7 @@ description: "Design and review agentic systems against Claude Code architecture
 keywords: [architecture, agent loop, prompt cache, fork agent, subagent, MCP, tool interface, hooks, memory system, agent SDK, claude-code, design canon, review checklist]
 argument-hint: "[design or review topic]"
 effort: medium
-version: 2.14.0
+version: 2.14.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

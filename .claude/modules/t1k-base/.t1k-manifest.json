@@ -1,9 +1,9 @@
 {
   "module": "t1k-base",
-  "version": "2.17.0",
+  "version": "2.17.1",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-11T05:09:08.737Z",
+  "generatedAt": "2026-06-12T02:48:13.692Z",
   "files": {
     "skills": [
       "t1k-ask/SKILL.md",
@@ -189,5 +189,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:03343740da08fc0ac165e0a1636d64f94d1a3afb650f5e82a344647aa2a486d7"
+  "checksum": "sha256:d15d55ef3d5487fc44a4b33aaba91d5a65c05b463cadc55e74338988e1ca84d8"
 }

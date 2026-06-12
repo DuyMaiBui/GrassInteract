@@ -4,7 +4,7 @@ description: "Activate when stuck after 3+ fix attempts. Breaks complexity spira
 keywords: [stuck, blocked, spiral, complexity, unblock, systematic, breakthrough]
 argument-hint: "[problem description]"
 effort: medium
-version: 2.14.0
+version: 2.14.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

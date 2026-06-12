@@ -4,7 +4,7 @@ description: "Save and resume session context for handoffs between sessions or d
 keywords: [handoff, session, resume, transfer, context, save, restore]
 argument-hint: "save|resume|list [date-slug|--global]"
 effort: medium
-version: 2.14.0
+version: 2.14.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
