@@ -7,15 +7,17 @@ using UnityEngine.UIElements;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// SceneView overlay for tile-topology editing. Two modes, switched by a panel toggle:
+    /// SceneView overlay for tile-topology editing. The panel has an Off / Add / Remove mode
+    /// selector (mutually exclusive buttons):
     ///
+    ///   • Off: overlay draws nothing and intercepts no clicks (sculpting unaffected).
     ///   • Add (default): translucent green "+" ghost quads at every open N/E/S/W neighbour
     ///     edge of existing tiles. Click → <see cref="WorldMapAssetLifecycle.AddTile"/>.
     ///     Shift-click → add + select the new tile for sculpting.
-    ///   • Remove (toggle on): existing tiles drawn as translucent red "X" ghost quads.
+    ///   • Remove: existing tiles drawn as translucent red "X" ghost quads.
     ///     Click → confirm dialog → <see cref="WorldMapAssetLifecycle.RemoveTile"/>.
     ///
-    /// Remove is gated behind the toggle (off by default) so a delete-click can never hijack a
+    /// Add and Remove are explicit modes (never both at once) so a delete-click can never hijack a
     /// sculpt-click on an existing tile. Uses <see cref="WorldMapAsset.HasOpenNeighbor"/> (P1 API).
     /// </summary>
     // NOTE: overlay id is intentionally NEW ("wp-tile-editor", not the old "wp-neighbor-grow").
@@ -40,7 +42,15 @@ namespace WorldPainter.Editor
         private const float DRAW_Y = 0.05f;
 
         private bool sceneGuiRegistered;
-        private bool removeMode;
+
+        private enum TileEditMode { Off, Add, Remove }
+
+        // Active mode. Off = draw nothing / intercept nothing. Defaults to Add so the green
+        // grow-ghosts show by default (preserves prior behaviour).
+        private TileEditMode mode = TileEditMode.Add;
+
+        // Mode buttons kept so the active-highlight refreshes on click.
+        private readonly System.Collections.Generic.Dictionary<TileEditMode, Button> modeButtons = new();
 
         // ── Overlay lifecycle ─────────────────────────────────────────────────
 
@@ -54,23 +64,25 @@ namespace WorldPainter.Editor
             }
 
             var root = new VisualElement();
-            root.style.minWidth = 190;
+            root.style.minWidth = 200;
 
-            var hint = new Label("Green ghost = add tile.\nRemove mode: red tile = click to delete.");
+            var hint = new Label("Add: green '+' edges → click to create.\n" +
+                                 "Remove: red 'X' tiles → click to delete.");
             hint.style.marginBottom = 6;
             hint.style.whiteSpace = WhiteSpace.Normal;
             root.Add(hint);
 
-            var removeToggle = new Toggle("Remove mode") { value = this.removeMode };
-            removeToggle.tooltip = "When on, existing tiles become clickable to delete (with confirmation). " +
-                                   "Add-ghosts are hidden while this is on.";
-            removeToggle.RegisterValueChangedCallback(evt =>
-            {
-                this.removeMode = evt.newValue;
-                SceneView.RepaintAll();
-            });
-            root.Add(removeToggle);
+            // Mode selector — Off / Add / Remove (mutually exclusive).
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
 
+            this.modeButtons.Clear();
+            this.AddModeButton(row, TileEditMode.Off,    "Off");
+            this.AddModeButton(row, TileEditMode.Add,    "Add");
+            this.AddModeButton(row, TileEditMode.Remove, "Remove");
+            root.Add(row);
+
+            this.RefreshModeButtons();
             return root;
         }
 
@@ -81,6 +93,43 @@ namespace WorldPainter.Editor
                 SceneView.duringSceneGui -= this.OnSceneGUI;
                 this.displayedChanged    -= this.OnDisplayedChanged;
                 this.sceneGuiRegistered   = false;
+            }
+        }
+
+        // ── Mode selector ───────────────────────────────────────────────────────
+
+        private void AddModeButton(VisualElement row, TileEditMode m, string label)
+        {
+            var btn = new Button(() =>
+            {
+                this.mode = m;
+                this.RefreshModeButtons();
+                SceneView.RepaintAll();
+            }) { text = label };
+            btn.style.flexGrow    = 1;
+            btn.style.marginRight = (m == TileEditMode.Remove) ? 0 : 2;
+            this.modeButtons[m] = btn;
+            row.Add(btn);
+        }
+
+        private void RefreshModeButtons()
+        {
+            foreach (var kv in this.modeButtons)
+            {
+                bool active = kv.Key == this.mode;
+                var btn = kv.Value;
+                if (active)
+                {
+                    btn.style.backgroundColor         = new Color(0.24f, 0.37f, 0.58f);
+                    btn.style.color                   = Color.white;
+                    btn.style.unityFontStyleAndWeight = FontStyle.Bold;
+                }
+                else
+                {
+                    btn.style.backgroundColor         = StyleKeyword.Null;
+                    btn.style.color                   = StyleKeyword.Null;
+                    btn.style.unityFontStyleAndWeight = StyleKeyword.Null;
+                }
             }
         }
 
@@ -97,10 +146,16 @@ namespace WorldPainter.Editor
             float tileSize = map.Grid.tileSizeM;
             Event e = Event.current;
 
-            if (this.removeMode)
-                this.DrawAndHandleRemove(sceneView, painter, map, tileSize, e);
-            else
-                this.DrawAndHandleAdd(sceneView, painter, map, tileSize, e);
+            switch (this.mode)
+            {
+                case TileEditMode.Add:
+                    this.DrawAndHandleAdd(sceneView, painter, map, tileSize, e);
+                    break;
+                case TileEditMode.Remove:
+                    this.DrawAndHandleRemove(sceneView, painter, map, tileSize, e);
+                    break;
+                // TileEditMode.Off → draw nothing, intercept nothing.
+            }
         }
 
         // ── Add (grow) ──────────────────────────────────────────────────────────
