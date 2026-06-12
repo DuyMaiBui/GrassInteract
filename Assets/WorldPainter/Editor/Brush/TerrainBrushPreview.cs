@@ -5,204 +5,141 @@ using UnityEngine;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// World-space brush cursor for terrain sculpt strokes.
+    /// World-space brush decal cursor for terrain sculpt strokes.
     ///
-    /// The cursor is a plain hidden <see cref="GameObject"/> with a <see cref="MeshRenderer"/> —
-    /// a normal 3D object in the world. Its transform is moved to the hit point each frame and
-    /// scaled by <see cref="HandleUtility.GetHandleSize"/> so it holds a constant ON-SCREEN size
-    /// regardless of how near the scene-view camera is (no perspective inflation when you zoom in).
-    /// The cursor size is still proportional to the brush radius. The decal shader draws it over
-    /// the terrain (ZTest Always).
+    /// Mirrors the WorldPainter <c>ScatterBrushPreview</c> pattern:
+    /// — The tool pushes brush state each frame via <see cref="Set"/>.
+    /// — Actual drawing happens from <see cref="SceneView.duringSceneGui"/> during
+    ///   <see cref="EventType.Repaint"/> (so DrawMeshNow renders in world space, not
+    ///   in the Scene-view corner like it would from OnToolGUI).
+    /// — Auto-hides when <see cref="Set"/> stops being called (freshness timeout).
     ///
-    /// The tool pushes brush state via <see cref="Set"/> while hovering a surface; the object is
-    /// hidden again when <see cref="Set"/> stops being called (freshness timeout).
+    /// Geometry: a TESSELLATED radial disc, not a flat quad. Every repaint each vertex
+    /// samples the terrain height (via the <see cref="HeightFn"/> the tool supplies) so
+    /// the decal HUGS the surface instead of clipping through ridges / floating over dips.
+    /// Falls back to the hit-point height for verts that resolve off-tile.
+    ///
+    /// Visual: translucent filled disc + bright rim + center dot, tinted by sculpt mode.
     /// </summary>
     [InitializeOnLoad]
     internal static class TerrainBrushPreview
     {
-        /// <summary>Retained for call-site compatibility; the flat quad does not use it.</summary>
+        /// <summary>
+        /// Per-vertex terrain height query. Returns true + world Y when (wx,wz) is on a
+        /// loaded tile. Supplied by the sculpt tool so the disc can conform to the surface.
+        /// </summary>
         internal delegate bool HeightFn(float worldX, float worldZ, out float worldY);
 
         // ── Constants ─────────────────────────────────────────────────────────
 
-        private const float  MAX_HIT_SQR       = 1e12f;
-        private const double FRESH_SECONDS     = 0.25;
-        private const int    TEX_SIZE          = 64;
-        private const string DECAL_SHADER      = "WorldPainter/BrushDecal";
-        // Maps brush radius → on-screen cursor size (in HandleUtility.GetHandleSize units).
-        // Tuned so the default 12 m brush shows a comfortably visible cursor.
-        private const float  SCREEN_SIZE_K     = 0.125f;
+        // Lift the conformed disc above the surface so it isn't occluded by the GPU-rendered
+        // terrain. The rendered mesh (CDLOD morph + skirts) can dip below the CPU heightmap the
+        // disc samples — worse at coarse LOD — so a flat 5 cm wasn't enough. Lift scales with
+        // brush radius (bigger brush ⇒ coarser surrounding LOD ⇒ larger dip), with a floor.
+        private const float  Y_OFFSET_MIN      = 0.15f; // metres (floor for small brushes)
+        private const float  Y_OFFSET_FRACTION = 0.15f; // × brushRadius
+        // Reject hover points farther than 1e6 m from origin (|p|² > 1e12) — anything larger is a
+        // degenerate fallback-plane pick, not a real terrain hit.
+        private const float  MAX_HIT_SQR   = 1e12f;
+        private const int    DISC_TEX_SIZE = 64;
+        private const double FRESH_SECONDS = 0.25;
+        private const string DECAL_SHADER  = "WorldPainter/BrushDecal"; // ZTest Always → draws over terrain
 
-        // ── Cached scene object + resources ───────────────────────────────────
+        // Disc tessellation — enough rings/segments to follow terrain curvature smoothly.
+        private const int RINGS    = 10;
+        private const int SEGMENTS = 48;
 
-        private static GameObject?   previewGo;
-        private static MeshRenderer? previewRenderer;
-        private static Material?     material;
-        private static Mesh?         quadMesh;
-        private static Texture2D?    discTexture;
-        private static bool          warnLogged;
+        // ── Cached resources ──────────────────────────────────────────────────
+
+        private static Mesh?      discMesh;
+        private static Material?  discMaterial;
+        private static Texture2D? discTexture;
+        private static bool       warnLogged;
+
+        // Unit-circle XZ offset (range [-0.5,0.5]) per disc vertex, parallel to the mesh
+        // vertex array. Reused each repaint to compute conformed world positions (no alloc).
+        private static Vector2[]? unitOffsets;
+        private static Vector3[]? worldVerts;
 
         // ── Brush state (pushed by tool) ──────────────────────────────────────
 
-        private static double lastSetTime = -1000d;
+        private static Vector3   hitPoint;
+        private static float     brushRadius;
+        private static Color     tintColor;
+        private static HeightFn? heightAt;
+        private static double    lastSetTime = -1000d;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
         static TerrainBrushPreview()
         {
-            EditorApplication.update += OnEditorUpdate;
+            SceneView.duringSceneGui += OnSceneGui;
             AssemblyReloadEvents.beforeAssemblyReload += Cleanup;
         }
 
         private static void Cleanup()
         {
-            EditorApplication.update -= OnEditorUpdate;
+            SceneView.duringSceneGui -= OnSceneGui;
             AssemblyReloadEvents.beforeAssemblyReload -= Cleanup;
             DestroyResources();
-        }
-
-        // Hide the cursor object once the brush stops hovering (Set went stale).
-        private static void OnEditorUpdate()
-        {
-            if (previewGo == null) return;
-            bool fresh = EditorApplication.timeSinceStartup - lastSetTime <= FRESH_SECONDS;
-            if (previewGo.activeSelf != fresh)
-                previewGo.SetActive(fresh);
         }
 
         // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Pushes the current brush state. Call from the sculpt tool's <c>OnToolGUI</c> each event
-        /// the brush hovers a surface. <paramref name="radius"/> is the brush radius in world-space
-        /// metres. <paramref name="height"/> is retained for compatibility and unused.
+        /// Pushes the current brush state. Call from <c>TerrainSculptTool.OnToolGUI</c>
+        /// every event the brush is hovering a surface. <paramref name="height"/> lets the
+        /// disc conform to the terrain; pass null to fall back to a flat disc at the hit point.
         /// </summary>
         internal static void Set(Vector3 worldPoint, float radius, Color tint, HeightFn? height)
         {
+            hitPoint    = worldPoint;
+            brushRadius = radius;
+            tintColor   = tint;
+            heightAt    = height;
             lastSetTime = EditorApplication.timeSinceStartup;
+        }
 
-            if (!IsFinite(worldPoint) || worldPoint.sqrMagnitude > MAX_HIT_SQR ||
-                !IsFinite(radius) || radius <= 0f)
+        // ── Scene draw ────────────────────────────────────────────────────────
+
+        private static void OnSceneGui(SceneView sceneView)
+        {
+            if (EditorApplication.timeSinceStartup - lastSetTime > FRESH_SECONDS) return;
+            if (Event.current.type != EventType.Repaint) return;
+
+            EnsureResources();
+            if (discMaterial == null || discMesh == null ||
+                unitOffsets == null || worldVerts == null) return;
+
+            // Guard against an invalid hover point (e.g. fallback-plane ray nearly parallel to
+            // the plane → astronomical dist → huge worldPoint). Baking that into mesh verts would
+            // trip Unity's "abnormal mesh bounds" warning. Skip the draw instead.
+            if (!IsFinite(hitPoint) || hitPoint.sqrMagnitude > MAX_HIT_SQR ||
+                !IsFinite(brushRadius) || brushRadius <= 0f)
                 return;
 
-            if (!EnsureResources()) return;
-
-            // Sit exactly on the raycast hit point. No Y lift is needed: the BrushDecal shader
-            // draws with ZTest Always (over the terrain), so occlusion can't happen — and a lift
-            // would parallax-shift the cursor away from the real point when viewed at an angle.
-            Vector3 center = worldPoint;
-
-            // Constant ON-SCREEN size, independent of how near the scene-view camera is.
-            // HandleUtility.GetHandleSize(center) returns the world length that maps to a fixed
-            // screen size at that point — it grows with camera distance, exactly cancelling the
-            // perspective shrink, so the cursor holds the same pixel size at any zoom. Still
-            // proportional to the brush radius so a bigger brush shows a bigger cursor.
-            float diameter = HandleUtility.GetHandleSize(center) * radius * SCREEN_SIZE_K;
-
-            previewGo!.transform.position   = center;
-            previewGo.transform.rotation    = Quaternion.identity;
-            previewGo.transform.localScale  = new Vector3(diameter, 1f, diameter);
-
-            material!.color = tint;
-            previewGo.SetActive(true);
-
-            // Nudge the scene view to repaint so the cursor tracks smoothly.
-            SceneView.RepaintAll();
-        }
-
-        // ── Resource setup ────────────────────────────────────────────────────
-
-        private static bool EnsureResources()
-        {
-            if (previewGo != null && material != null) return true;
-            if (warnLogged) return false;
-
-            Shader? shader = Shader.Find(DECAL_SHADER);
-            if (shader == null)
+            // Conform every vertex to the terrain surface (XZ from the unit disc, Y sampled).
+            float diameter = brushRadius * 2f;
+            float lift = Mathf.Max(Y_OFFSET_MIN, brushRadius * Y_OFFSET_FRACTION);
+            for (int i = 0; i < unitOffsets.Length; ++i)
             {
-                warnLogged = true;
-                Debug.LogWarning($"[TerrainBrushPreview] Shader '{DECAL_SHADER}' not found.");
-                return false;
+                float wx = hitPoint.x + unitOffsets[i].x * diameter;
+                float wz = hitPoint.z + unitOffsets[i].y * diameter;
+                float wy = heightAt != null && heightAt(wx, wz, out float sampled)
+                    ? sampled
+                    : hitPoint.y; // off-tile (or no sampler) → flat fallback at hit height
+                worldVerts[i] = new Vector3(wx, wy + lift, wz);
             }
+            discMesh.SetVertices(worldVerts);
+            discMesh.RecalculateBounds();
 
-            quadMesh ??= CreateFlatQuad();
-            discTexture ??= CreateDiscTexture();
+            discMaterial.mainTexture = EnsureDiscTexture();
+            discMaterial.color       = tintColor;
+            discMaterial.SetPass(0);
+            // World positions are baked into the mesh → draw with identity transform.
+            Graphics.DrawMeshNow(discMesh, Matrix4x4.identity);
 
-            material = new Material(shader)
-            {
-                name = "TerrainBrushDecalMat", hideFlags = HideFlags.HideAndDontSave,
-            };
-            material.mainTexture = discTexture;
-
-            previewGo = new GameObject("WorldPainterBrushPreview")
-            {
-                hideFlags = HideFlags.HideAndDontSave,
-            };
-            var mf = previewGo.AddComponent<MeshFilter>();
-            mf.sharedMesh = quadMesh;
-            previewRenderer = previewGo.AddComponent<MeshRenderer>();
-            previewRenderer.sharedMaterial   = material;
-            previewRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            previewRenderer.receiveShadows    = false;
-            previewGo.SetActive(false);
-            return true;
-        }
-
-        /// <summary>A unit quad (1×1) in the XZ plane, +Y normal, UV 0..1. Double-sided shader.</summary>
-        private static Mesh CreateFlatQuad()
-        {
-            var mesh = new Mesh { name = "BrushQuad", hideFlags = HideFlags.HideAndDontSave };
-            mesh.SetVertices(new[]
-            {
-                new Vector3(-0.5f, 0f, -0.5f), new Vector3(0.5f, 0f, -0.5f),
-                new Vector3( 0.5f, 0f,  0.5f), new Vector3(-0.5f, 0f,  0.5f),
-            });
-            mesh.SetUVs(0, new[]
-            {
-                new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(1f, 1f), new Vector2(0f, 1f),
-            });
-            mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
-            mesh.RecalculateBounds();
-            return mesh;
-        }
-
-        /// <summary>Radial brush texture: translucent fill, bright rim, center dot.</summary>
-        private static Texture2D CreateDiscTexture()
-        {
-            const int N = TEX_SIZE;
-            var tex = new Texture2D(N, N, TextureFormat.RGBA32, false)
-            {
-                name = "TerrainBrushDisc", hideFlags = HideFlags.HideAndDontSave,
-                wrapMode = TextureWrapMode.Clamp,
-            };
-            var px = new Color[N * N];
-            for (int y = 0; y < N; ++y)
-            for (int x = 0; x < N; ++x)
-            {
-                float u    = (x + 0.5f) / N - 0.5f;
-                float v    = (y + 0.5f) / N - 0.5f;
-                float dist = Mathf.Sqrt(u * u + v * v) * 2f;
-                float fill = Mathf.Clamp01(1f - Mathf.SmoothStep(0.6f, 0.8f, dist)) * 0.3f;
-                float rim  = Mathf.Clamp01(Mathf.SmoothStep(0.78f, 0.82f, dist) -
-                                           Mathf.SmoothStep(0.96f, 1.0f, dist));
-                float dot  = Mathf.Clamp01(1f - dist / 0.08f);
-                float alpha = Mathf.Clamp01(fill + rim + dot * 0.8f);
-                px[y * N + x] = new Color(1f, 1f, 1f, alpha);
-            }
-            tex.SetPixels(px);
-            tex.Apply(false, true);
-            return tex;
-        }
-
-        private static void DestroyResources()
-        {
-            if (previewGo   != null) { Object.DestroyImmediate(previewGo);   previewGo   = null; }
-            if (material    != null) { Object.DestroyImmediate(material);    material    = null; }
-            if (quadMesh    != null) { Object.DestroyImmediate(quadMesh);    quadMesh    = null; }
-            if (discTexture != null) { Object.DestroyImmediate(discTexture); discTexture = null; }
-            previewRenderer = null;
-            warnLogged      = false;
+            sceneView.Repaint();
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -211,5 +148,142 @@ namespace WorldPainter.Editor
 
         private static bool IsFinite(Vector3 v) =>
             IsFinite(v.x) && IsFinite(v.y) && IsFinite(v.z);
+
+        private static void EnsureResources()
+        {
+            discMesh ??= CreateUnitDisc(RINGS, SEGMENTS);
+            if (discMaterial == null && !warnLogged)
+                discMaterial = CreateMaterial();
+        }
+
+        /// <summary>
+        /// Builds a tessellated radial disc in the XZ plane (unit circle, radius 0.5,
+        /// Y=0). UV.xy = (0.5 + x, 0.5 + z) so the disc texture (fill/rim/center-dot)
+        /// maps the same as the old quad. Populates <see cref="unitOffsets"/> +
+        /// <see cref="worldVerts"/> so the repaint loop can conform vertices to terrain.
+        /// </summary>
+        internal static Mesh CreateUnitDisc(int rings, int segments)
+        {
+            rings    = Mathf.Max(1, rings);
+            segments = Mathf.Max(3, segments);
+
+            int vertCount = 1 + rings * segments; // center + ring vertices
+            var positions = new Vector3[vertCount];
+            var uvs       = new Vector2[vertCount];
+            var offsets   = new Vector2[vertCount];
+
+            // Center vertex.
+            positions[0] = Vector3.zero;
+            uvs[0]       = new Vector2(0.5f, 0.5f);
+            offsets[0]   = Vector2.zero;
+
+            int v = 1;
+            for (int r = 1; r <= rings; ++r)
+            {
+                float radius = 0.5f * (r / (float)rings);
+                for (int s = 0; s < segments; ++s)
+                {
+                    float ang = (s / (float)segments) * Mathf.PI * 2f;
+                    float x = Mathf.Cos(ang) * radius;
+                    float z = Mathf.Sin(ang) * radius;
+                    positions[v] = new Vector3(x, 0f, z);
+                    uvs[v]       = new Vector2(0.5f + x, 0.5f + z);
+                    offsets[v]   = new Vector2(x, z);
+                    ++v;
+                }
+            }
+
+            var tris = new System.Collections.Generic.List<int>(rings * segments * 6);
+            // Inner fan: center → ring 1.
+            for (int s = 0; s < segments; ++s)
+            {
+                int a = 1 + s;
+                int b = 1 + (s + 1) % segments;
+                tris.Add(0); tris.Add(a); tris.Add(b);
+            }
+            // Ring strips: ring r → ring r+1.
+            for (int r = 1; r < rings; ++r)
+            {
+                int inner = 1 + (r - 1) * segments;
+                int outer = 1 + r * segments;
+                for (int s = 0; s < segments; ++s)
+                {
+                    int sn  = (s + 1) % segments;
+                    int i0  = inner + s;
+                    int i1  = inner + sn;
+                    int o0  = outer + s;
+                    int o1  = outer + sn;
+                    tris.Add(i0); tris.Add(o0); tris.Add(o1);
+                    tris.Add(i0); tris.Add(o1); tris.Add(i1);
+                }
+            }
+
+            var mesh = new Mesh { name = "TerrainBrushDecalDisc", hideFlags = HideFlags.HideAndDontSave };
+            mesh.SetVertices(positions);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+
+            unitOffsets = offsets;
+            worldVerts  = new Vector3[vertCount];
+            return mesh;
+        }
+
+        private static Material? CreateMaterial()
+        {
+            Shader? shader = Shader.Find(DECAL_SHADER);
+            if (shader == null)
+            {
+                warnLogged = true;
+                Debug.LogWarning($"[TerrainBrushPreview] Shader '{DECAL_SHADER}' not found.");
+                return null;
+            }
+            // Cull/ZTest/Blend are baked into the shader pass (ZTest Always → draws over terrain).
+            return new Material(shader) { name = "TerrainBrushDecalMat",
+                                          hideFlags = HideFlags.HideAndDontSave };
+        }
+
+        private static Texture2D EnsureDiscTexture()
+        {
+            if (discTexture != null) return discTexture;
+
+            const int N = DISC_TEX_SIZE;
+            var tex = new Texture2D(N, N, TextureFormat.RGBA32, false)
+            {
+                name = "TerrainBrushDisc", hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            var px = new Color[N * N];
+            for (int y = 0; y < N; ++y)
+            {
+                for (int x = 0; x < N; ++x)
+                {
+                    float u    = (x + 0.5f) / N - 0.5f;
+                    float v    = (y + 0.5f) / N - 0.5f;
+                    float dist = Mathf.Sqrt(u * u + v * v) * 2f;
+                    // Translucent fill in inner 80%; sharp bright rim at 80-100%.
+                    float fill = Mathf.Clamp01(1f - Mathf.SmoothStep(0.6f, 0.8f, dist)) * 0.3f;
+                    float rim  = Mathf.Clamp01(Mathf.SmoothStep(0.78f, 0.82f, dist) -
+                                               Mathf.SmoothStep(0.96f, 1.0f, dist));
+                    float dot  = Mathf.Clamp01(1f - dist / 0.08f);
+                    float alpha = Mathf.Clamp01(fill + rim + dot * 0.8f);
+                    px[y * N + x] = new Color(1f, 1f, 1f, alpha);
+                }
+            }
+            tex.SetPixels(px);
+            tex.Apply(false, true);
+            discTexture = tex;
+            return tex;
+        }
+
+        private static void DestroyResources()
+        {
+            if (discMesh      != null) { Object.DestroyImmediate(discMesh);      discMesh      = null; }
+            if (discMaterial  != null) { Object.DestroyImmediate(discMaterial);  discMaterial  = null; }
+            if (discTexture   != null) { Object.DestroyImmediate(discTexture);   discTexture   = null; }
+            unitOffsets = null;
+            worldVerts  = null;
+            warnLogged  = false;
+        }
     }
 }
