@@ -1,6 +1,19 @@
 # Handoff — WorldPainter merge (in progress)
 
-## Status: P3–P5 COMPLETE + green. P6–P10 remaining.
+## Status: P3–P6 COMPLETE + green. P7–P10 remaining.
+
+### P6 done (commit `1053c16`)
+Deleted the 4 superseded old terrain TOOLS: `GpuTerrainRendererEditor(.Sculpt)` + `TerrainSculptTool(.Stroke)`. Rescued shared KEEP utils `TerrainSculptConfig` + `TerrainBrushPreview` from `_pending-delete` → `Editor/Brush/`. 301 green.
+
+### CRITICAL findings for P7/P8 (discovered via ref-check — do NOT re-derive)
+- **`TerrainBrushPreview` is KEEP** (used by `WorldPainterSculptTool.cs:180` `.Set(...)`). NOT deletable.
+- **`TerrainSculptConfig` is KEEP** (constants `BRUSH_RT_RES`/`THREAD_GROUP_SIZE`/`KERNEL_*`/`MAX_SPLAT_LAYERS` used across `WorldPainterSculptTool.*`, `TileRtCache`, `WorldPainterSculptTool.Density`).
+- **`GpuTerrainRenderer` is KEEP runtime** (only the old *Editor* was deletable). Used by `TerrainValidationSceneBuilder.cs:235` (AddComponent) + `WorldPainterMigration`. P8 consolidation (§3.3) decides whether `WorldPainter.Render` folds it in.
+- **P8 island** still in `_pending-delete/`: `TerrainBrushStroke.cs` (defines the shared `SculptMode` enum!), `TerrainSculptState.cs` (`ModeColor` + uses `TerrainSculptUndo`), `TerrainSculptUndo.cs`. These are a parallel-impl of the WorldPainter sculpt system, kept alive ONLY by `TerrainBrushMathTests`' 6 `ModeColor`/`SculptMode` cases. `WorldPainterState` has NO `ModeColor`/`SculptMode` equivalent (uses `LayerType`+`BrushSettings`). **P8 plan:** migrate `SculptMode`+`ModeColor` into a KEEP home (e.g. `WorldPainterState` or keep a slimmed `TerrainSculptState`), repoint the 6 ModeColor tests, THEN delete the island.
+- **`WorldPainterUndoTests` already fully mirrors `TerrainSculptUndoTests`** (11 cases, +memory-cap) against the KEEP `WorldPainterUndo` → **drop `TerrainSculptUndoTests` in P8** (zero coverage loss; documented).
+- **`DensityBrushMathTests` is a 15-test STRADDLE** (the P7 blocker): KEEP = `GrassFieldSpace`(4) + `WorldPainterDensityEncoder` round-trip(1, GPU-gated). P7-delete refs = `DensityPaintGPU.ComputeStampPositions`(5) + `DensityPaintGPU` GPUPaintSmoke(1, GPU-gated) + `DensityMapFactory.ReadbackToPixels`(1, GPU-gated) + `ScatterBrushPreview.ComputeDecalRotation`(3). **Before deleting `DensityPaintGPU`/`DensityMapFactory`/`ScatterBrushPreview` (P7): port `ComputeStampPositions` stamp-math into the KEEP WorldPainter stamping path (E3) + repoint the 5 tests; decide per-test on the GPU-gated ones (GPUPaintSmoke/ReadbackToPixels) and the 3 `ComputeDecalRotation` cases — migrate to KEEP equivalent or drop-with-justification. Split the KEEP halves of this test file out so they survive.** Run a full ref-check on every P7 scatter-authoring target vs KEEP runtime/editor first (some like `ScatterBrushPreview`/`DensityMapFactory` may be referenced by KEEP WorldPainter code, not just the test).
+
+### Original status header (still accurate for P3-P5):
 
 **Branch:** `plan/gpu-terrain-cdlod` (not pushed yet). Working tree clean after each phase commit.
 
