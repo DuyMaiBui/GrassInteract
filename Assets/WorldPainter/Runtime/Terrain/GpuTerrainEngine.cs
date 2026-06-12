@@ -43,6 +43,10 @@ namespace WorldPainter
         // Also resolves MINOR-2: TILE_SIZE_M is no longer a hardcoded literal in the shader.
         private static readonly int ID_TileOriginWS       = Shader.PropertyToID("_TileOriginWS");
         private static readonly int ID_TileSizeM          = Shader.PropertyToID("_TileSizeM");
+        // Splat blend bindings (property names are SSOT in TerrainShadingConfig).
+        private static readonly int ID_SplatTex           = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_SPLAT_TEX);
+        private static readonly int ID_LayerAlbedoArray   = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_LAYER_ARRAY);
+        private static readonly int ID_LayerTiling        = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_LAYER_TILING);
 
         // ── Injected ──────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -185,6 +189,11 @@ namespace WorldPainter
             if (gpuRes.HeightTexture != null)
                 this.patchMaterial.SetTexture(ID_HeightTex, gpuRes.HeightTexture);
 
+            // Per-tile splat-weight RGBA map. The map-level albedo array (_LayerAlbedoArray)
+            // is bound separately via BindSplatLayers (it is shared across all tiles).
+            if (gpuRes.SplatTexture != null)
+                this.patchMaterial.SetTexture(ID_SplatTex, gpuRes.SplatTexture);
+
             // B1 fix + MINOR-2: bind tile-local UV uniforms.
             // origin is already computed above; pass it as a Vector4 for SetVector
             // (shader reads it as float2 — x,y components used; zw ignored).
@@ -194,6 +203,22 @@ namespace WorldPainter
 
             this.cullCmd = new CommandBuffer { name = "GpuTerrainEngine.Cull" };
             this.isBuilt = true;
+        }
+
+        // ── Splat layer binding ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Binds the map-level splat albedo array + tiling onto this tile's material clone.
+        /// Call AFTER <see cref="Build"/> (the clone is created there). The array is map-level
+        /// (shared across tiles) and owned by <see cref="TerrainLayerSetBinder"/> — this engine
+        /// only references it. Null array → leave the material's existing albedo binding untouched.
+        /// </summary>
+        internal void BindSplatLayers(Texture2DArray? layerArray, float layerTiling)
+        {
+            if (this.patchMaterial == null) return;
+            this.patchMaterial.SetFloat(ID_LayerTiling, layerTiling);
+            if (layerArray != null)
+                this.patchMaterial.SetTexture(ID_LayerAlbedoArray, layerArray);
         }
 
         // ── Step ─────────────────────────────────────────────────────────────
