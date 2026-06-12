@@ -11,13 +11,13 @@ namespace WorldPainter
     /// and drives a per-tile LateUpdate submit scheduler guarded by residency/visibility early-outs.
     ///
     /// Render engine logic lives in WorldPainter.Render.cs (partial).
+    /// Scatter orchestration lives in WorldPainter.Scatter.cs (partial, P2).
     /// All brush/preview/authoring code lives in <c>WorldPainter.Authoring.cs</c> under
     /// <c>#if UNITY_EDITOR</c> — this file SHIPS in player builds.
     ///
-    /// P3a wiring: LateUpdate drives <see cref="ScatterField"/> per scatter layer and wires
-    /// <see cref="HeightmapSurfaceSampler"/> grounding internally (replacing the external
-    /// <c>GpuTerrainScatterGround</c> bridge). Interface <see cref="ISurfaceSampler"/> is
-    /// UNCHANGED; <c>HeightmapSurfaceSamplerTests</c> remain green.
+    /// P2 wiring: LateUpdate → SubmitTerrain + StepScatter + SubmitScatter. Scatter engines are
+    /// built directly from the referenced <see cref="WorldMapAsset"/>; no <c>ScatterField</c>
+    /// or <c>GpuTerrainScatterGround</c> component is needed. ISurfaceSampler seam is unchanged.
     ///
     /// P4 wiring: per-prop-layer <see cref="WorldPainterImpostorLod"/> + chunk-cull early-out.
     /// </summary>
@@ -26,12 +26,6 @@ namespace WorldPainter
     [AddComponentMenu("WorldPainter/World Painter")]
     public sealed partial class WorldPainter : MonoBehaviour
     {
-        // ── Scatter grounding ─────────────────────────────────────────────────
-
-        // Cached sampler wired into any co-located ScatterField (replaces GpuTerrainScatterGround).
-        private HeightmapSurfaceSampler? heightmapSampler;
-        private ScatterField? cachedScatterField;
-
         // ── Prop layer impostor LOD (P4) ──────────────────────────────────────
 
         private readonly List<WorldPainterImpostorLod> propImpostorLods = new();
@@ -43,52 +37,9 @@ namespace WorldPainter
             if (!Application.isPlaying) return;
             if (!this.IsBuilt) this.TryBuild();
             this.SubmitTerrain(null);
-            this.DriveScatterField();
+            this.StepScatter(Time.deltaTime);
+            this.SubmitScatter(null);
             this.DrivePropLayers();
-        }
-
-        // ── Scatter field wiring ──────────────────────────────────────────────
-
-        /// <summary>
-        /// Drives the co-located <see cref="ScatterField"/> (if any) per scatter layer and
-        /// wires <see cref="HeightmapSurfaceSampler"/> grounding internally.
-        /// Replaces the external <c>GpuTerrainScatterGround</c> bridge component; the
-        /// <see cref="ISurfaceSampler"/> seam and <c>HeightmapSurfaceSamplerTests</c> are unchanged.
-        /// </summary>
-        private void DriveScatterField()
-        {
-            // Resolve a co-located ScatterField (same GameObject or children).
-            if (this.cachedScatterField == null)
-                this.cachedScatterField = this.GetComponentInChildren<ScatterField>();
-
-            ScatterField? field = this.cachedScatterField;
-            if (field == null) return;
-
-            // Build HeightmapSurfaceSampler from the first resident tile (single-tile / demo mode).
-            if (this.heightmapSampler == null && this.tiles != null)
-            {
-                TerrainTileAsset? firstTile = null;
-                for (int i = 0; i < this.tiles.Count; i++)
-                {
-                    if (this.tiles[i].tileAsset != null && this.tiles[i].tileAsset!.IsHeightValid)
-                    {
-                        firstTile = this.tiles[i].tileAsset;
-                        break;
-                    }
-                }
-
-                if (firstTile != null)
-                {
-                    this.heightmapSampler = new HeightmapSurfaceSampler(firstTile);
-                    // Wire into ScatterField — only if no other external sampler is set
-                    // so we don't trample a user-supplied override.
-                    if (field.ExternalSampler == null)
-                    {
-                        field.ExternalSampler = this.heightmapSampler;
-                        field.Rebuild();
-                    }
-                }
-            }
         }
 
         // ── Prop layer driving (P4) ───────────────────────────────────────────
@@ -147,8 +98,12 @@ namespace WorldPainter
 
         /// <summary>
         /// Returns true when at least one tile is resident and ready to submit.
+        /// Checks the map container (P2) first, then the legacy inline tiles list.
         /// </summary>
-        private bool IsResidencyReady() =>
-            this.tiles != null && this.tiles.Count > 0;
+        private bool IsResidencyReady()
+        {
+            if (this.map != null) return this.map.TileCount > 0;
+            return this.tiles != null && this.tiles.Count > 0;
+        }
     }
 }

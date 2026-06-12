@@ -94,10 +94,20 @@ namespace WorldPainter
             this.DisposeEngines();
 
             if (!this.ResolveInfra()) return;
-            if (this.tiles == null) return;
 
-            for (int i = 0; i < this.tiles.Count; i++)
-                this.BuildOneTile(i);
+            // P2: when a WorldMapAsset container is assigned, iterate its tiles.
+            if (this.map != null)
+            {
+                foreach (TerrainTileAsset tile in this.map.EnumerateTiles())
+                    this.BuildOneTileAsset(tile);
+            }
+            else
+            {
+                // Legacy inline tiles list (P3 removes this path once map is mandatory).
+                if (this.tiles == null) return;
+                for (int i = 0; i < this.tiles.Count; i++)
+                    this.BuildOneTile(i);
+            }
 
             this.IsBuilt = this.engines.Count > 0;
             if (this.IsBuilt)
@@ -121,6 +131,53 @@ namespace WorldPainter
                 return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// Builds one terrain engine from a <see cref="TerrainTileAsset"/> directly.
+        /// Used by the P2 map-container path (<see cref="TryBuild"/> when <c>map</c> is set).
+        /// </summary>
+        private void BuildOneTileAsset(TerrainTileAsset? tile)
+        {
+            if (tile == null) return;
+
+            if (!tile.IsHeightValid)
+            {
+                Debug.LogWarning($"[WorldPainter] Tile '{tile.name}' ({tile.tileCoord}) " +
+                    "heightData invalid — skipping.");
+                return;
+            }
+
+            if (this.coordToIndex.ContainsKey(tile.tileCoord))
+            {
+                Debug.LogError($"[WorldPainter] Duplicate tileCoord {tile.tileCoord} " +
+                    "in WorldMapAsset — skipping to avoid coord map collision.");
+                return;
+            }
+
+            var gpu = new TerrainTileGpuResources();
+            gpu.Upload(tile);
+
+            var engine = new GpuTerrainEngine(this.cullCompute!, this.patchMaterial!);
+            engine.Build(tile, gpu, this.lodRangesM);
+
+            bool ok = engine.SelfTest(out string msg);
+            Debug.Log($"[WorldPainter] Tile {tile.tileCoord}: {msg}");
+            if (!ok)
+            {
+                Debug.LogError($"[WorldPainter] Tile {tile.tileCoord} SelfTest failed — skipped.");
+                engine.Dispose();
+                gpu.Dispose();
+                return;
+            }
+
+            int idx = this.engines.Count;
+            this.engines.Add(engine);
+            this.gpuResources.Add(gpu);
+            this.coordToIndex[tile.tileCoord] = idx;
+
+            Debug.Assert(this.engines.Count == this.gpuResources.Count,
+                "[WorldPainter] engines/gpuResources list desync after BuildOneTileAsset.");
         }
 
         private void BuildOneTile(int tileIndex)

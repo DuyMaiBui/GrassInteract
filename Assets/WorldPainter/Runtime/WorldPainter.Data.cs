@@ -64,6 +64,24 @@ namespace WorldPainter
         /// <summary>Hard cap on splat layers — one RGBA32 channel per layer.</summary>
         public const int MAX_SPLAT_LAYERS = 4;
 
+        // ── WorldMapAsset container (P2 — SSOT for tiles + layers) ───────────
+
+        [Header("Map Container (P2)")]
+        [Tooltip("The WorldMapAsset that owns all tiles and scatter layer defs. " +
+                 "When assigned, tiles + layers are read from this container rather than " +
+                 "the inline lists below (which remain for backwards-compat until P3 removes them).")]
+        [SerializeField] private WorldMapAsset? map;
+
+        /// <summary>
+        /// The referenced WorldMapAsset container. When non-null, scatter and terrain
+        /// reads go through this asset's APIs (GetTile / EnumerateTiles / Layers).
+        /// </summary>
+        public WorldMapAsset? Map
+        {
+            get => this.map;
+            set => this.map = value;
+        }
+
         // ── World grid ────────────────────────────────────────────────────────
 
         [Header("World Grid")]
