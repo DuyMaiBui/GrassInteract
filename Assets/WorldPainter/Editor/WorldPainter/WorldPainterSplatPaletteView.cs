@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -6,34 +7,44 @@ using UnityEngine.UIElements;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Swatch palette row that shows all registered splat layers as clickable
-    /// albedo thumbnails.  Add (≤4) and remove buttons maintain the
-    /// <see cref="WorldPainter.SplatLayers"/> list via <see cref="SerializedObject"/>
-    /// so all mutations go through the Unity Undo system.
+    /// Three-section layer palette: SPLAT / MEADOW / PROP.
     ///
-    /// The 5th add is blocked with a surfaced <see cref="Debug.LogError"/> message
-    /// (errors-over-fallbacks rule; see WorldPainter.MAX_SPLAT_LAYERS).
+    /// Each section has its own header + "+" button and a row of clickable layer chips.
+    ///   Splat   — albedo thumbnails via AssetPreview; sets ActiveLayerKind.Splat.
+    ///   Meadow  — LOD0 mesh thumbnails via WorldPainterPreviewCache; sets ActiveLayerKind.Meadow.
+    ///   Prop    — LOD0 mesh thumbnails via WorldPainterPreviewCache; sets ActiveLayerKind.Prop.
+    ///             The prop *placement behavior* is P7; this file ships the list + activation shell.
     ///
-    /// Design §4.1 — Phase 2 palette swatch row.
+    /// Clicking a chip calls <see cref="WorldPainterState.SetActiveLayer"/> and never modifies
+    /// <c>UnityEditor.Selection</c> (design §5 contract).
+    ///
+    /// Design §5 Phase 5 — 3-section palette (core + section partials split for 200-line limit).
     /// </summary>
-    internal sealed class WorldPainterSplatPaletteView
+    internal sealed partial class WorldPainterSplatPaletteView
     {
         // ── Deps ──────────────────────────────────────────────────────────────
 
-        private readonly SerializedObject serializedObject;
-        private readonly WorldPainter painter;
-        private SerializedProperty splatLayersProp;
+        private readonly SerializedObject     serializedObject;
+        private readonly WorldPainter         painter;
+        private readonly WorldPainterPreviewCache previewCache;
+        private          SerializedProperty   splatLayersProp;
 
-        // ── UI ────────────────────────────────────────────────────────────────
+        // ── UI roots (one per section) ────────────────────────────────────────
 
-        private VisualElement? swatchRow;
+        private VisualElement? splatSwatchRow;
+        private VisualElement? meadowSwatchRow;
+        private VisualElement? propSwatchRow;
 
         // ── Ctor ──────────────────────────────────────────────────────────────
 
-        public WorldPainterSplatPaletteView(SerializedObject so, WorldPainter painter)
+        public WorldPainterSplatPaletteView(
+            SerializedObject so,
+            WorldPainter painter,
+            WorldPainterPreviewCache previewCache)
         {
             this.serializedObject = so;
             this.painter          = painter;
+            this.previewCache     = previewCache;
             this.splatLayersProp  = so.FindProperty("splatLayers")!;
         }
 
@@ -44,70 +55,36 @@ namespace WorldPainter.Editor
             var root = new VisualElement();
             root.AddToClassList("wp-palette-root");
 
-            var header = new VisualElement();
-            header.AddToClassList("wp-stack-header");
+            root.Add(this.BuildSplatSection());
+            root.Add(this.BuildMeadowSection());
+            root.Add(this.BuildPropSection());
 
-            var title = new Label("SPLAT PALETTE");
-            title.AddToClassList("wp-stack-title");
-            header.Add(title);
-
-            var addBtn = new Button(this.TryAddLayer) { text = "+ Layer" };
-            addBtn.AddToClassList("wp-add-btn");
-            header.Add(addBtn);
-
-            root.Add(header);
-
-            this.swatchRow = new VisualElement();
-            this.swatchRow.AddToClassList("wp-palette-swatch-row");
-            root.Add(this.swatchRow);
-
-            this.RefreshSwatches();
             return root;
         }
 
-        // ── Swatch rendering ──────────────────────────────────────────────────
+        // ── Refresh all sections (after selection change) ─────────────────────
 
-        internal void RefreshSwatches()
+        private void RefreshAll()
         {
-            if (this.swatchRow == null) return;
-
-            this.serializedObject.Update();
-            this.swatchRow.Clear();
-
-            for (int i = 0; i < this.splatLayersProp.arraySize; i++)
-            {
-                var elem     = this.splatLayersProp.GetArrayElementAtIndex(i);
-                var albedoP  = elem.FindPropertyRelative("albedo");
-                var nameProp = elem.FindPropertyRelative("name");
-
-                Texture2D? albedo = albedoP?.objectReferenceValue as Texture2D;
-                Texture2D? thumb  = (albedo != null)
-                    ? (AssetPreview.GetAssetPreview(albedo) ?? albedo)
-                    : null;
-
-                string label = nameProp?.stringValue ?? $"S{i}";
-                int captured = i;
-
-                var chip = this.BuildSwatchChip(i, label, thumb,
-                    onRemove: () => this.RemoveLayer(captured));
-                this.swatchRow.Add(chip);
-            }
+            this.RefreshSplatSwatches();
+            this.RefreshMeadowSwatches();
+            this.RefreshPropSwatches();
         }
 
-        // ── Swatch chip ───────────────────────────────────────────────────────
+        // ── Shared chip builder ───────────────────────────────────────────────
 
-        private VisualElement BuildSwatchChip(
-            int index,
+        private VisualElement BuildChip(
+            bool isActive,
             string label,
             Texture2D? thumb,
+            System.Action onSelect,
             System.Action onRemove)
         {
             var chip = new VisualElement();
             chip.AddToClassList("wp-palette-chip");
-            if (index == WorldPainterState.ActiveLayerIndex - 1)
+            if (isActive)
                 chip.AddToClassList("wp-palette-chip--active");
 
-            // Albedo thumbnail
             var swatch = new VisualElement();
             swatch.AddToClassList("wp-splat-swatch");
             swatch.style.width  = new StyleLength(40f);
@@ -116,65 +93,40 @@ namespace WorldPainter.Editor
                 swatch.style.backgroundImage = new StyleBackground(thumb);
             chip.Add(swatch);
 
-            // Name label
             var nameLabel = new Label(label);
             nameLabel.AddToClassList("wp-layer-name");
             chip.Add(nameLabel);
 
-            // Remove button
             var removeBtn = new Button(onRemove) { text = "✕" };
             removeBtn.AddToClassList("wp-remove-btn");
             chip.Add(removeBtn);
 
-            // Click to select
-            int captured = index;
-            chip.RegisterCallback<ClickEvent>(_ =>
+            chip.RegisterCallback<ClickEvent>(evt =>
             {
-                // +1 because display index 0 = Height (synthetic), splat starts at 1
-                WorldPainterState.ActiveLayerIndex = captured + 1;
-                this.RefreshSwatches();
+                // Only trigger select on direct chip click, not the remove button.
+                if (evt.target is Button) return;
+                onSelect();
             });
 
             return chip;
         }
 
-        // ── Mutations ─────────────────────────────────────────────────────────
+        // ── Section header builder ────────────────────────────────────────────
 
-        private void TryAddLayer()
+        private static VisualElement BuildSectionHeader(string title, System.Action onAdd)
         {
-            if (this.splatLayersProp.arraySize >= WorldPainter.MAX_SPLAT_LAYERS)
-            {
-                Debug.LogError(
-                    $"[WorldPainter] Cannot add splat layer: RGBA32 splat RT supports " +
-                    $"at most {WorldPainter.MAX_SPLAT_LAYERS} layers. Remove one first.");
-                return;
-            }
+            var header = new VisualElement();
+            header.AddToClassList("wp-stack-header");
 
-            Undo.RecordObject(this.painter, "Add Splat Layer (Palette)");
+            var titleLabel = new Label(title);
+            titleLabel.AddToClassList("wp-stack-title");
+            header.Add(titleLabel);
 
-            int newIdx = this.splatLayersProp.arraySize;
-            this.splatLayersProp.InsertArrayElementAtIndex(newIdx);
+            var addBtn = new Button(onAdd) { text = "+ Layer" };
+            addBtn.AddToClassList("wp-add-btn");
+            header.Add(addBtn);
 
-            var elem     = this.splatLayersProp.GetArrayElementAtIndex(newIdx);
-            var nameProp = elem.FindPropertyRelative("name");
-            if (nameProp != null)
-                nameProp.stringValue = $"Splat {newIdx}";
-
-            this.serializedObject.ApplyModifiedProperties();
-            this.RefreshSwatches();
-        }
-
-        private void RemoveLayer(int index)
-        {
-            if (index < 0 || index >= this.splatLayersProp.arraySize) return;
-
-            Undo.RecordObject(this.painter, "Remove Splat Layer (Palette)");
-            this.splatLayersProp.DeleteArrayElementAtIndex(index);
-            this.serializedObject.ApplyModifiedProperties();
-
-            WorldPainterState.ActiveLayerIndex =
-                Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
-            this.RefreshSwatches();
+            return header;
         }
     }
 }

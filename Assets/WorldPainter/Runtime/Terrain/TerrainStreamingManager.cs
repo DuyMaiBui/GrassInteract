@@ -93,6 +93,68 @@ namespace WorldPainter
             this.tileIndex[asset.tileCoord] = asset;
         }
 
+        /// <summary>
+        /// P8: Register all tiles referenced by <paramref name="manifest"/> into the
+        /// streaming index using Editor <c>AssetDatabase</c> loads (in-Editor path) or the
+        /// already-loaded <see cref="tileRegistry"/> entries (runtime path).
+        ///
+        /// In player builds, tiles must be pre-loaded (e.g. via Addressables) and
+        /// registered individually via <see cref="RegisterTile"/> before this is called.
+        /// This method handles the Editor-Play shortcut: it loads each baked standalone
+        /// asset by path via AssetDatabase and registers it directly.
+        ///
+        /// Safe to call multiple times — already-registered coords are overwritten with
+        /// the same reference (idempotent).
+        /// </summary>
+        /// <param name="manifest">Bake manifest produced by <c>WorldMapBaker.BakeAll</c>.</param>
+        public void RegisterFromManifest(TileBakeManifest manifest)
+        {
+            if (manifest == null) return;
+
+            int registered = 0;
+            foreach (var entry in manifest.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.assetPath)) continue;
+
+                // In Editor (including Editor Play): load the asset directly.
+                // In player builds: asset must already be in tileRegistry (pre-loaded).
+                TerrainTileAsset? asset = this.ResolveManifestEntry(entry.assetPath);
+                if (asset == null)
+                {
+                    Debug.LogWarning($"[TerrainStreamingManager] Manifest entry {entry.coord} " +
+                        $"points to '{entry.assetPath}' but asset could not be resolved. " +
+                        "Pre-load baked tiles via Addressables in player builds.");
+                    continue;
+                }
+
+                this.tileIndex[entry.coord] = asset;
+                registered++;
+            }
+
+            Debug.Log($"[TerrainStreamingManager] Registered {registered} tile(s) from manifest.");
+        }
+
+        /// <summary>
+        /// Resolves a manifest asset path to a <see cref="TerrainTileAsset"/> reference.
+        /// Editor path: AssetDatabase load. Runtime path: search the inspector tileRegistry.
+        /// </summary>
+        private TerrainTileAsset? ResolveManifestEntry(string assetPath)
+        {
+#if UNITY_EDITOR
+            return UnityEditor.AssetDatabase.LoadAssetAtPath<TerrainTileAsset>(assetPath);
+#else
+            // In player builds, the caller must pre-load baked tiles and push them into
+            // tileRegistry (or call RegisterTile individually). We search the registry
+            // as a best-effort fallback by path-derived name.
+            foreach (var asset in this.tileRegistry)
+            {
+                if (asset != null && asset.name == System.IO.Path.GetFileNameWithoutExtension(assetPath))
+                    return asset;
+            }
+            return null;
+#endif
+        }
+
         // ── Core tick ─────────────────────────────────────────────────────────
 
         private void Tick(Camera cam, Vector3 camPos)

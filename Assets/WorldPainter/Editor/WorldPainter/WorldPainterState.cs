@@ -115,6 +115,74 @@ namespace WorldPainter.Editor
         /// </summary>
         public static BrushSettings Brush { get; } = BrushSettings.Default;
 
+        // ── Active paint-layer (P5 SSOT — consumed by P6 brush dispatch + P7 prop placement) ──
+
+        /// <summary>
+        /// Discriminates the section a selected paint layer belongs to.
+        /// P6 (brush dispatch) and P7 (prop placement) both key off this.
+        /// </summary>
+        public enum PaintLayerKind
+        {
+            /// <summary>No layer is selected (default).</summary>
+            None,
+            /// <summary>A splat (terrain-texture) layer is active.</summary>
+            Splat,
+            /// <summary>A meadow/density scatter layer is active.</summary>
+            Meadow,
+            /// <summary>A prop/instance scatter layer is active.</summary>
+            Prop,
+        }
+
+        /// <summary>
+        /// The string ID of the currently selected paint layer.
+        /// For Splat: the splat layer's name. For Meadow/Prop: the <see cref="ScatterLayer.name"/>
+        /// (i.e. the sub-asset name including the "Layer_" prefix produced by
+        /// <see cref="WorldMapAssetLifecycle.LayerSubAssetName"/>).
+        /// Empty string when <see cref="ActiveLayerKind"/> is <see cref="PaintLayerKind.None"/>.
+        /// </summary>
+        public static string ActiveLayerId { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// The kind of the currently selected paint layer.
+        /// <see cref="PaintLayerKind.None"/> when no layer is selected.
+        /// </summary>
+        public static PaintLayerKind ActiveLayerKind { get; private set; } = PaintLayerKind.None;
+
+        /// <summary>
+        /// Fired after <see cref="SetActiveLayer"/> changes the active paint layer.
+        /// Subscribers receive the new (id, kind) pair.
+        ///
+        /// Canonical consumers:
+        ///   P6 — brush dispatch reads this to know which density channel to stamp.
+        ///   P7 — prop placement reads this to know which instance layer to stamp.
+        ///
+        /// Contract: NEVER changes <c>Selection.activeObject</c> or <c>Selection.activeGameObject</c>.
+        /// Clicking a palette square sets this state only; it never selects a tile or any Unity object.
+        /// </summary>
+        public static event System.Action<string, PaintLayerKind>? ActiveLayerChanged;
+
+        /// <summary>
+        /// Sets the active paint layer to (<paramref name="layerId"/>, <paramref name="kind"/>)
+        /// and fires <see cref="ActiveLayerChanged"/> if the value changed.
+        ///
+        /// Pass <c>id = ""</c> and <c>kind = PaintLayerKind.None</c> to deselect.
+        ///
+        /// This method NEVER modifies <c>UnityEditor.Selection</c>.
+        /// </summary>
+        /// <param name="layerId">
+        /// The layer's string ID. For scatter layers this is the sub-asset name
+        /// (e.g. <c>"Layer_Meadow"</c>). For splat layers this is the splat entry's name field.
+        /// </param>
+        /// <param name="kind">The palette section this layer belongs to.</param>
+        public static void SetActiveLayer(string layerId, PaintLayerKind kind)
+        {
+            bool changed = ActiveLayerId != layerId || ActiveLayerKind != kind;
+            ActiveLayerId   = layerId;
+            ActiveLayerKind = kind;
+            if (changed)
+                ActiveLayerChanged?.Invoke(layerId, kind);
+        }
+
         // ── Active biome (P5) ─────────────────────────────────────────────────
 
         /// <summary>
@@ -152,6 +220,9 @@ namespace WorldPainter.Editor
             ActivePainter    = null;
             ActiveLayerIndex = -1;
             ActiveBiomeIndex = -1;
+            ActiveLayerId    = string.Empty;
+            ActiveLayerKind  = PaintLayerKind.None;
+            ActiveLayerChanged = null;
             BrushFalloffDirty = null;
             ResetLastStroked();
         }

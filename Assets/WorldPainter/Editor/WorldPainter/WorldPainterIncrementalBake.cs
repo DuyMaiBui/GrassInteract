@@ -17,6 +17,11 @@ namespace WorldPainter.Editor
     ///   3. Re-bake a temporary ChunkedInstanceBuffer for just those records.
     ///   4. Patch the parent buffer's CPU arrays for the affected chunk range.
     ///
+    /// P8 extension: after a prop stamp, if a bake manifest + output folder are
+    /// configured, the dirty tile(s) overlapped by the brush are re-baked as standalone
+    /// assets via <see cref="WorldMapBaker.BakeTile"/> so the streaming layer stays
+    /// in sync without requiring a full bake.
+    ///
     /// Invariants (tested by ChunkedInstanceBufferTests):
     ///   - ChunkRange.start + ChunkRange.count never exceeds TotalInstances.
     ///   - SortedToAuthored remains a valid permutation of [0, TotalInstances).
@@ -37,6 +42,12 @@ namespace WorldPainter.Editor
         ///
         /// If <paramref name="buffer"/> has never been baked, falls back to a full bake.
         /// The supplied <paramref name="buffer"/> is replaced in-place.
+        ///
+        /// P8 extension: when <paramref name="map"/>, <paramref name="bakeManifest"/>, and
+        /// <paramref name="bakeOutputFolder"/> are all non-null, the tile(s) overlapped by
+        /// the stamp brush are re-baked as standalone assets via
+        /// <see cref="WorldMapBaker.BakeTile"/> — keeping the streaming layer in sync without
+        /// a full bake.
         /// </summary>
         /// <param name="layer">Source layer holding authored records.</param>
         /// <param name="buffer">Target buffer (modified in place).</param>
@@ -44,18 +55,25 @@ namespace WorldPainter.Editor
         /// <param name="stampPos">World-space centre of the current stamp.</param>
         /// <param name="brushRadius">Brush radius in metres.</param>
         /// <param name="meshBounds">Bounds for AABB inflation.</param>
+        /// <param name="map">Map container — required for P8 incremental tile bake. Nullable.</param>
+        /// <param name="bakeManifest">Existing bake manifest to update. Nullable.</param>
+        /// <param name="bakeOutputFolder">Bake output folder path. Nullable.</param>
         public void BakeIncremental(
             InstanceScatterLayer  layer,
             ChunkedInstanceBuffer buffer,
             Vector3               fieldOrigin,
             Vector3               stampPos,
             float                 brushRadius,
-            Bounds                meshBounds)
+            Bounds                meshBounds,
+            WorldMapAsset?        map               = null,
+            TileBakeManifest?     bakeManifest      = null,
+            string?               bakeOutputFolder  = null)
         {
             // If buffer not yet baked, do a full bake.
             if (buffer.TotalInstances == 0 || buffer.Instances == null)
             {
                 this.BakeFull(layer, buffer, fieldOrigin, meshBounds);
+                this.EmitDirtyTiles(map, bakeManifest, bakeOutputFolder, stampPos, brushRadius);
                 return;
             }
 
@@ -76,6 +94,62 @@ namespace WorldPainter.Editor
             Debug.Log($"[WorldPainterIncrementalBake] Rebuilt buffer: " +
                 $"{buffer.TotalInstances} instances, {affected.Count} affected chunk(s), " +
                 $"chunkSize={chunkSize}m");
+
+            // P8: emit per-tile baked assets for tiles overlapped by this stamp.
+            this.EmitDirtyTiles(map, bakeManifest, bakeOutputFolder, stampPos, brushRadius);
+        }
+
+        // ── P8 incremental tile bake emit ─────────────────────────────────────
+
+        /// <summary>
+        /// Re-bakes the tile(s) overlapped by the brush stamp when all three of
+        /// <paramref name="map"/>, <paramref name="bakeManifest"/>, and
+        /// <paramref name="bakeOutputFolder"/> are non-null.
+        /// No-ops silently when any required argument is null or empty.
+        /// </summary>
+        private void EmitDirtyTiles(
+            WorldMapAsset?    map,
+            TileBakeManifest? bakeManifest,
+            string?           bakeOutputFolder,
+            Vector3           stampPos,
+            float             brushRadius)
+        {
+            if (map == null || bakeManifest == null ||
+                string.IsNullOrEmpty(bakeOutputFolder))
+                return;
+
+            // Determine which tile coords the brush circle overlaps.
+            var dirtyCoords = ComputeDirtyTileCoords(stampPos, brushRadius);
+            int rebaked = 0;
+            foreach (Vector2Int coord in dirtyCoords)
+            {
+                if (WorldMapBaker.BakeTile(map, coord, bakeOutputFolder!, bakeManifest))
+                    rebaked++;
+            }
+
+            if (rebaked > 0)
+                Debug.Log($"[WorldPainterIncrementalBake] Emitted {rebaked} dirty tile(s) " +
+                    $"to '{bakeOutputFolder}'.");
+        }
+
+        /// <summary>
+        /// Returns the set of tile coords whose bounding square overlaps the brush circle
+        /// centred at <paramref name="stampPos"/> with radius <paramref name="brushRadius"/>.
+        /// </summary>
+        private static HashSet<Vector2Int> ComputeDirtyTileCoords(
+            Vector3 stampPos, float brushRadius)
+        {
+            float tileSize = TerrainWorldGrid.TILE_SIZE_M;
+            int txMin = Mathf.FloorToInt((stampPos.x - brushRadius) / tileSize);
+            int txMax = Mathf.FloorToInt((stampPos.x + brushRadius) / tileSize);
+            int tzMin = Mathf.FloorToInt((stampPos.z - brushRadius) / tileSize);
+            int tzMax = Mathf.FloorToInt((stampPos.z + brushRadius) / tileSize);
+
+            var result = new HashSet<Vector2Int>();
+            for (int tz = tzMin; tz <= tzMax; tz++)
+                for (int tx = txMin; tx <= txMax; tx++)
+                    result.Add(new Vector2Int(tx, tz));
+            return result;
         }
 
         /// <summary>

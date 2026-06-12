@@ -62,6 +62,10 @@ namespace WorldPainter.Editor
             ScatterLayer? rawLayer = scatterLayers[scatterIndex];
             if (rawLayer == null) return null;
 
+            // Also accept layers sourced from WorldMapAsset (P5 palette path).
+            // Falls through to the same card construction below.
+
+
             var card = new VisualElement();
             card.AddToClassList("wp-splat-card");
 
@@ -112,6 +116,58 @@ namespace WorldPainter.Editor
                 .Every((long)(BLADE_TICK_SEC * 1000));
 
             return card;
+        }
+
+        // ── Build overload for map-sourced layers (P5 palette) ────────────────
+
+        /// <summary>
+        /// Builds and returns the UIElements card directly from a <see cref="DensityScatterLayer"/>
+        /// sourced from <see cref="WorldMapAsset.Layers"/> (not the legacy ScatterLayers list).
+        /// Returns null when <paramref name="layer"/> is null.
+        /// </summary>
+        public VisualElement? BuildForMapLayer(DensityScatterLayer? layer)
+        {
+            if (layer == null) return null;
+
+            var card = new VisualElement();
+            card.AddToClassList("wp-splat-card");
+
+            var nameBanner = new Label($"Meadow: {layer.name}");
+            nameBanner.AddToClassList("wp-layer-name");
+            card.Add(nameBanner);
+
+            ScatterLayer captured = layer;
+            var previewContainer = new IMGUIContainer(() => this.lodPreview.Draw(captured));
+            previewContainer.style.height = 240f;
+            card.Add(previewContainer);
+
+            SerializedObject so = new SerializedObject(layer);
+            var rulerContainer = new IMGUIContainer(() =>
+            {
+                EditorGUILayout.LabelField("LOD Bands", EditorStyles.boldLabel);
+                this.lodRuler.Draw(captured, so);
+            });
+            rulerContainer.style.height = 80f;
+            card.Add(rulerContainer);
+
+            var so2 = new SerializedObject(layer);
+            card.Add(this.BuildDensityControls(layer, so2));
+
+            var bladeLabel = new Label("Blade count: —");
+            bladeLabel.AddToClassList("wp-layer-name");
+            card.Add(bladeLabel);
+
+            bladeLabel.schedule
+                .Execute(() => this.TickBladeCountForLayer(bladeLabel, layer))
+                .Every((long)(BLADE_TICK_SEC * 1000));
+
+            return card;
+        }
+
+        private void TickBladeCountForLayer(Label label, DensityScatterLayer layer)
+        {
+            if (this.pendingReadback) return;
+            label.text = $"Blade count: ~{layer.TargetInstances:N0} (target)";
         }
 
         // ── Density controls ──────────────────────────────────────────────────

@@ -100,20 +100,37 @@ namespace WorldPainter.Editor
             var emptyTilesState = this.coachMarks.BuildNoTilesEmptyState();
             var emptyStackState = this.coachMarks.BuildEmptyStackState();
 
+            // ── P4: "Create World Map" button (shown only when no map is assigned) ──
+            var createMapBtn = new Button(() =>
+            {
+                WorldMapAssetFactory.CreateAndAssign(painter);
+            })
+            {
+                text    = "Create World Map",
+                tooltip = "Creates a new WorldMapAsset with a first tile at (0,0) and assigns it to this WorldPainter.",
+            };
+            createMapBtn.style.marginTop    = 4;
+            createMapBtn.style.marginBottom = 4;
+            createMapBtn.style.alignSelf    = Align.FlexStart;
+
             // Show/hide based on content (200ms poll).
             root.schedule.Execute(() =>
             {
-                bool noTiles = painter.Tiles.Count == 0;
+                bool noTiles = painter.Map == null && painter.Tiles.Count == 0;
                 bool noLayers = painter.SplatLayers.Count == 0 &&
                                 painter.ScatterLayers.Count == 0 &&
                                 painter.Biomes.Count == 0;
+                bool hasNoMap = painter.Map == null;
                 emptyTilesState.style.display = noTiles
+                    ? DisplayStyle.Flex : DisplayStyle.None;
+                createMapBtn.style.display = hasNoMap
                     ? DisplayStyle.Flex : DisplayStyle.None;
                 emptyStackState.style.display = (!noTiles && noLayers)
                     ? DisplayStyle.Flex : DisplayStyle.None;
             }).Every(200);
 
             root.Add(emptyTilesState);
+            root.Add(createMapBtn);
             root.Add(emptyStackState);
 
             // ── Filter chips (All / Height / Splat / Grass / Props) ───────────

@@ -95,6 +95,47 @@ namespace WorldPainter
             toEvict.AddRange(this.scratchEvict);
         }
 
+        // ── Proximity helpers (P8 baked-tile tests) ──────────────────────────
+
+        /// <summary>
+        /// Returns a snapshot of the resident tile coords that fall within
+        /// <paramref name="radius"/> tiles (Chebyshev) of <paramref name="cameraTile"/>.
+        ///
+        /// Used by tests to verify include/evict behaviour when simulating camera movement
+        /// across baked tiles.
+        /// </summary>
+        public List<Vector2Int> GetResidentWithinRadius(Vector2Int cameraTile, int radius)
+        {
+            var result = new List<Vector2Int>();
+            foreach (Vector2Int coord in this.residents.Keys)
+            {
+                int dx = Math.Abs(coord.x - cameraTile.x);
+                int dz = Math.Abs(coord.y - cameraTile.y);
+                if (Math.Max(dx, dz) <= radius)
+                    result.Add(coord);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns a snapshot of the resident tile coords that fall outside
+        /// <paramref name="radius"/> tiles (Chebyshev) of <paramref name="cameraTile"/>.
+        ///
+        /// Used by tests to verify eviction candidates after a simulated camera move.
+        /// </summary>
+        public List<Vector2Int> GetResidentBeyondRadius(Vector2Int cameraTile, int radius)
+        {
+            var result = new List<Vector2Int>();
+            foreach (Vector2Int coord in this.residents.Keys)
+            {
+                int dx = Math.Abs(coord.x - cameraTile.x);
+                int dz = Math.Abs(coord.y - cameraTile.y);
+                if (Math.Max(dx, dz) > radius)
+                    result.Add(coord);
+            }
+            return result;
+        }
+
         // ── Mutate ────────────────────────────────────────────────────────────
 
         /// <summary>

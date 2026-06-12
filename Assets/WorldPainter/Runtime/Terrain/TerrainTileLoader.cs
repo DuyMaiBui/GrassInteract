@@ -182,5 +182,45 @@ namespace WorldPainter
             lock (this.pendingLock)
                 this.pendingQueue.Enqueue(new PendingCallback(coord, asset, gen, onComplete));
         }
+
+        // ── P8: baked standalone tile loading ─────────────────────────────────
+
+        /// <summary>
+        /// P8 overload: enqueue loading of a standalone baked <see cref="TerrainTileAsset"/>
+        /// that lives at <paramref name="bakedAsset"/> (already resolved by the caller via
+        /// <c>AssetDatabase.LoadAssetAtPath</c> or Addressables).
+        ///
+        /// Functionally identical to <see cref="Enqueue"/>: the async simulation posts the
+        /// callback on the thread pool. A real Addressables integration replaces the ThreadPool
+        /// call with <c>Addressables.LoadAssetAsync&lt;TerrainTileAsset&gt;(key).Completed</c>.
+        ///
+        /// The key distinction from the container sub-asset path is that the caller must
+        /// pre-resolve the asset reference before calling this method — the loader does not
+        /// perform any AssetDatabase or Addressables lookup internally.
+        /// </summary>
+        public void EnqueueBaked(
+            Vector2Int       coord,
+            TerrainTileAsset bakedAsset,
+            Action<Vector2Int, TerrainTileAsset, int> onComplete)
+        {
+            // Delegate to the same Enqueue path — the data contract is identical.
+            this.Enqueue(coord, bakedAsset, onComplete);
+        }
+
+        /// <summary>
+        /// Synchronous baked-tile fixture path for EditMode tests: directly enqueues a
+        /// baked standalone tile callback without the thread pool.
+        ///
+        /// Mirrors <see cref="EnqueueDirect"/> but documents the baked-tile semantic so
+        /// test readers can distinguish baked-standalone from container-sub-asset paths.
+        /// </summary>
+        internal void EnqueueBakedDirect(
+            Vector2Int       coord,
+            TerrainTileAsset bakedAsset,
+            Action<Vector2Int, TerrainTileAsset, int> onComplete)
+        {
+            this.EnqueueDirect(coord, bakedAsset, onComplete);
+        }
     }
 }
+
