@@ -8,8 +8,7 @@ namespace WorldPainter.Editor
 {
     /// <summary>
     /// Detail card shown when a Grass scatter layer row is selected in the layer stack.
-    /// Displays: density slider, slope range, align-normal toggle, jitter, and a live
-    /// blade-count label (async GPU readback on a 0.15s tick, never per-frame CPU recount).
+    /// Displays: density slider, slope range, align-normal toggle, and jitter.
     ///
     /// LOD0 orbit preview and LOD band ruler are rendered via IMGUI containers wrapping
     /// <see cref="WorldPainterLodPreviewPanel"/> and <see cref="WorldPainterLodBandRuler"/>.
@@ -18,21 +17,11 @@ namespace WorldPainter.Editor
     /// </summary>
     internal sealed class WorldPainterScatterLayerCard
     {
-        // ── Constants ─────────────────────────────────────────────────────────
-
-        private const float BLADE_TICK_SEC = 0.15f;
-
         // ── Deps ──────────────────────────────────────────────────────────────
 
         private readonly WorldPainterLodPreviewPanel lodPreview;
         private readonly WorldPainterLodBandRuler    lodRuler;
         private readonly WorldPainterPreviewCache    previewCache;
-
-        // ── Blade count state ─────────────────────────────────────────────────
-
-        private double lastBladeTickTime;
-        private int    cachedBladeCount = -1;
-        private bool   pendingReadback;
 
         // ── Ctor ──────────────────────────────────────────────────────────────
 
@@ -96,6 +85,9 @@ namespace WorldPainter.Editor
             rulerContainer.style.height = 80f;
             card.Add(rulerContainer);
 
+            // ── Manual LOD assignment (shown only when LOD0 is unassigned) ───
+            card.Add(BuildLodAssignmentField(capturedLayer));
+
             // ── Density/slope controls (DensityScatterLayer only) ────────────
 
             if (rawLayer is DensityScatterLayer densityLayer)
@@ -103,17 +95,6 @@ namespace WorldPainter.Editor
                 var so2 = new SerializedObject(densityLayer);
                 card.Add(this.BuildDensityControls(densityLayer, so2));
             }
-
-            // ── Live blade count ──────────────────────────────────────────────
-
-            var bladeLabel = new Label("Blade count: —");
-            bladeLabel.AddToClassList("wp-layer-name");
-            card.Add(bladeLabel);
-
-            // Schedule async tick: read target instances from painter.ScatterLayers directly.
-            bladeLabel.schedule
-                .Execute(() => this.TickBladeCount(bladeLabel, painter))
-                .Every((long)(BLADE_TICK_SEC * 1000));
 
             return card;
         }
@@ -150,24 +131,53 @@ namespace WorldPainter.Editor
             rulerContainer.style.height = 80f;
             card.Add(rulerContainer);
 
+            // ── Manual LOD assignment (shown only when LOD0 is unassigned) ───
+            card.Add(BuildLodAssignmentField(layer));
+
             var so2 = new SerializedObject(layer);
             card.Add(this.BuildDensityControls(layer, so2));
-
-            var bladeLabel = new Label("Blade count: —");
-            bladeLabel.AddToClassList("wp-layer-name");
-            card.Add(bladeLabel);
-
-            bladeLabel.schedule
-                .Execute(() => this.TickBladeCountForLayer(bladeLabel, layer))
-                .Every((long)(BLADE_TICK_SEC * 1000));
 
             return card;
         }
 
-        private void TickBladeCountForLayer(Label label, DensityScatterLayer layer)
+        // ── Manual LOD assignment ─────────────────────────────────────────────
+
+        /// <summary>
+        /// IMGUI field that lets the user manually assign LOD meshes from inside the
+        /// card. Renders ONLY while the layer's LOD0 mesh is unassigned — once a LOD0
+        /// mesh is present the read-only preview/ruler take over and this collapses to
+        /// zero height. New layers are created with an empty <c>render.lods</c> array,
+        /// so this is what the user sees immediately after adding a scatter layer.
+        /// </summary>
+        private static VisualElement BuildLodAssignmentField(ScatterLayer layer)
         {
-            if (this.pendingReadback) return;
-            label.text = $"Blade count: ~{layer.TargetInstances:N0} (target)";
+            var so = new SerializedObject(layer);
+            return new IMGUIContainer(() =>
+            {
+                Mesh[] lodMeshes = layer.Render.LodMeshes;
+                bool hasLod0 = lodMeshes.Length > 0 && lodMeshes[0] != null;
+                if (hasLod0) return; // LOD0 assigned — nothing to surface.
+
+                so.Update();
+                var lodsProp = so.FindProperty("render")?.FindPropertyRelative("lods");
+                if (lodsProp == null) return;
+
+                EditorGUILayout.HelpBox(
+                    "This layer has no LOD0 mesh and will not render. " +
+                    "Assign at least one LOD mesh below.", MessageType.Warning);
+
+                // Empty array → offer a one-click slot so the mesh field appears at once.
+                if (lodsProp.arraySize == 0)
+                {
+                    if (GUILayout.Button("Add LOD0 Slot"))
+                        lodsProp.InsertArrayElementAtIndex(0);
+                }
+
+                EditorGUILayout.PropertyField(lodsProp, new GUIContent("LOD Meshes"), true);
+
+                if (so.ApplyModifiedProperties())
+                    EditorUtility.SetDirty(layer);
+            });
         }
 
         // ── Density controls ──────────────────────────────────────────────────
@@ -205,36 +215,6 @@ namespace WorldPainter.Editor
             });
             controls.style.height = 110f;
             return controls;
-        }
-
-        // ── Blade count async tick ────────────────────────────────────────────
-
-        private void TickBladeCount(Label label, WorldPainter painter)
-        {
-            if (this.pendingReadback) return;
-
-            // Prefer map layers (the P2+ SSOT); fall back to inline ScatterLayers for
-            // any legacy scene that hasn't yet assigned a WorldMapAsset.
-            // A true async GPU counter would require a running compute buffer; we
-            // read target instances as best-effort (design §6 note).
-            System.Collections.Generic.IEnumerable<ScatterLayer>? layers =
-                (System.Collections.Generic.IEnumerable<ScatterLayer>?)painter.Map?.Layers
-                ?? painter.ScatterLayers;
-
-            if (layers != null)
-            {
-                int total = 0;
-                foreach (ScatterLayer sl in layers)
-                {
-                    if (sl is DensityScatterLayer dsl)
-                        total += dsl.TargetInstances;
-                }
-                this.cachedBladeCount = total;
-            }
-
-            label.text = this.cachedBladeCount >= 0
-                ? $"Blade count: ~{this.cachedBladeCount:N0} (target)"
-                : "Blade count: —";
         }
     }
 }

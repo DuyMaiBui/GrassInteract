@@ -144,6 +144,10 @@ namespace WorldPainter.Editor
             this.filterChips = new WorldPainterFilterChips();
             root.Add(this.filterChips.Build());
 
+            // ── Brush dock (constant — sits directly under the layer filter) ──
+            this.brushDock = new WorldPainterBrushDock();
+            root.Add(this.brushDock.Build());
+
             // ── Layer stack ───────────────────────────────────────────────────
             this.layerStack = new WorldPainterLayerStackView(
                 this.serializedObject,
@@ -163,9 +167,9 @@ namespace WorldPainter.Editor
             this.propCard = new WorldPainterPropLayerCard();
 
             // Scatter layer card area — refreshed when active layer index changes.
+            // Mounted at the very bottom (below the footer readout strip) further down.
             var cardArea = new VisualElement();
             cardArea.AddToClassList("wp-splat-card");
-            root.Add(cardArea);
 
             root.schedule.Execute(() =>
             {
@@ -192,13 +196,12 @@ namespace WorldPainter.Editor
                 }
             }).Every(200);
 
-            // Brush dock (constant — never moves between layer selections)
-            this.brushDock = new WorldPainterBrushDock();
-            root.Add(this.brushDock.Build());
-
             // ── P6 Footer zone: live readout strip ────────────────────────────
             this.readoutStrip = new WorldPainterLiveReadoutStrip();
             root.Add(this.readoutStrip.Build(painter));
+
+            // ── Active-layer detail card (bottom-most) ────────────────────────
+            root.Add(cardArea);
 
             return root;
         }
