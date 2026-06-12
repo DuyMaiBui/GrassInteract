@@ -25,8 +25,6 @@ namespace WorldPainter.Editor
 
         // ── Constants ─────────────────────────────────────────────────────────
 
-        private const float  Y_OFFSET_MIN      = 0.15f; // metres (floor for small brushes)
-        private const float  Y_OFFSET_FRACTION = 0.15f; // × brushRadius
         private const float  MAX_HIT_SQR       = 1e12f;
         private const double FRESH_SECONDS     = 0.25;
         private const int    TEX_SIZE          = 64;
@@ -89,8 +87,10 @@ namespace WorldPainter.Editor
 
             if (!EnsureResources()) return;
 
-            float   lift   = Mathf.Max(Y_OFFSET_MIN, radius * Y_OFFSET_FRACTION);
-            Vector3 center = new Vector3(worldPoint.x, worldPoint.y + lift, worldPoint.z);
+            // Sit exactly on the raycast hit point. No Y lift is needed: the BrushDecal shader
+            // draws with ZTest Always (over the terrain), so occlusion can't happen — and a lift
+            // would parallax-shift the cursor away from the real point when viewed at an angle.
+            Vector3 center = worldPoint;
 
             // Constant ON-SCREEN size, independent of how near the scene-view camera is.
             // HandleUtility.GetHandleSize(center) returns the world length that maps to a fixed
