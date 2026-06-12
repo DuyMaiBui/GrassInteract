@@ -2,7 +2,7 @@
 
 **Branch:** `feat/worldpainter-ssot-consolidation`
 **Created:** 2026-06-13
-**Status:** Phase 0 — in progress
+**Status:** Phase 0 ✅ DONE (commit `f9207e3`, 378/378 tests green) — Phase 1 next
 
 ## Goal
 
@@ -56,7 +56,7 @@ via **one RGBA control texture per tile** (no separate per-texture control maps)
 
 ## Phases
 
-### Phase 0 — Unified data model (additive)
+### Phase 0 — Unified data model (additive) ✅ DONE (f9207e3)
 - `WorldPainterLayer` abstract SO (kind, palette, shared config).
 - `SplatLayer : WorldPainterLayer` — palette `{ albedo, normal, tiling }` ≤4.
 - `GrassLayer : WorldPainterLayer` — shared scatter config + palette `{ texture }` ≤4.
