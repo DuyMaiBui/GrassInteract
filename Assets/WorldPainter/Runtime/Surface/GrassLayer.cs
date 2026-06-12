@@ -18,6 +18,10 @@ namespace WorldPainter
 
         [Tooltip("Albedo (_BaseMap) override applied to the shared material for this variant.")]
         public Texture2D? texture;
+
+        [Tooltip("This variant's own field-level R-channel density map (painted independently). " +
+                 "Created/assigned by the editor lifecycle; null = variant not yet authored (skipped).")]
+        public Texture2D? densityMap;
     }
 
     /// <summary>

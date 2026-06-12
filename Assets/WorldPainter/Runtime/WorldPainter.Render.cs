@@ -83,6 +83,7 @@ namespace WorldPainter
 #endif
             this.DisposeEngines();
             this.DisposeScatterEngines();
+            this.DisposeSurfaceLayers();
             this.editScatterBuilt = false;
         }
 
@@ -98,9 +99,11 @@ namespace WorldPainter
             if (!this.editScatterBuilt)
             {
                 this.RebuildScatter();
+                this.RebuildSurfaceLayers();
                 this.editScatterBuilt = true;
             }
             this.SubmitScatter(cam);
+            this.SubmitSurfaceLayers(cam);
         }
 
         /// <summary>
@@ -111,6 +114,7 @@ namespace WorldPainter
         internal void RebuildScatterPreview()
         {
             this.RebuildScatter();
+            this.RebuildSurfaceLayers();
             this.editScatterBuilt = true;
         }
 
