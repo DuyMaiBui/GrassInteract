@@ -1,6 +1,19 @@
 # Handoff — WorldPainter merge (in progress)
 
-## Status: P3–P6 COMPLETE + green. P7–P10 remaining.
+## Status: P3–P7 COMPLETE + green (296 tests). P8–P10 remaining.
+
+### P7 done (commit `4fc1d2a`) — 296/296 green
+Deleted ALL scatter authoring (ScatterStudio + DensityPaint* + Scatter* editors) + both demo scenes (GrassInteractDemo + TerrainValidation + assets). KEEP: ScatterField/GrassScatter runtime + TerrainValidationSceneBuilder. Ported `DensityPaintGPU.ComputeStampPositions` → new `WorldPainterStampMath` (Editor/Brush, KEEP); repointed its 5 tests. Dropped 5 GPU/decal tests of deleted code (documented). 301→296.
+
+### P8 remaining work (consolidation + SOLID + reorg) — DETAILED
+1. **Parallel-island delete** (`_pending-delete/` now holds ONLY `TerrainBrushStroke.cs`, `TerrainSculptState.cs`, `TerrainSculptUndo.cs`): migrate the shared `SculptMode` enum (defined in `TerrainBrushStroke.cs`) + `TerrainSculptState.ModeColor` into a KEEP home (`WorldPainterState` has NO equivalent — add `SculptMode`+`ModeColor` there, OR keep a slimmed mode-only file). Repoint the 6 `ModeColor`/`SculptMode` cases in `TerrainBrushMathTests` (lines ~219-266). Then **drop `TerrainSculptUndoTests`** (11 cases, fully redundant — `WorldPainterUndoTests` already mirrors them vs KEEP `WorldPainterUndo`). Then `git rm` the 3 island files. Net test delta: -11 (TerrainSculptUndoTests) → ~285; verify ModeColor cases survive repointed.
+2. **GpuTerrainRenderer consolidation** (§3.3): `WorldPainter.Render.cs` "mirrors GpuTerrainRenderer". Decide keep-both-with-delegation vs fold-in. Consumers: `WorldPainter.Render`, `TerrainTileAssetEditor`, `TerrainValidationSceneBuilder` (AddComponent), `WorldPainterMigration`. ALSO fix the DEAD hardcoded path in `GpuTerrainRenderer.cs:117` `AssetDatabase.LoadAssetAtPath<Material>("Assets/GpuTerrain/Materials/TerrainPatch.mat")` — that material does NOT exist anywhere (pre-existing missing-asset LogError, NOT a regression); update/remove the path.
+3. **Oversized-file splits** (plan §3.4): `WorldPainterSculptTool.Stroke.cs` (349), `WorldPainterUndo.cs` (269), `WorldPainterLayerStackView.Mutations.cs` (256), `WorldPainterSculptTool.cs` (247), `WorldPainterLayerStackView.cs` (246), `WorldPainterBrushDock.cs` (243), `WorldPainterLodPreviewPanel.cs` (231), `WorldPainterMigration.cs` (230), `WorldPainterBiomePaletteView.cs` (222), borderline 212s.
+4. **Re-home leftover KEEP assets + kill old trees**: `Assets/GrassInteract/Meshes/*` (GrassBlade_LOD0-2, ScatterPropRock meshes — referenced-by-GUID KEEP runtime assets) → move under `Assets/WorldPainter/` (git mv + meta). `Assets/GrassInteract/README.md`+`MIGRATION.md` → move or delete. Then the OLD `Assets/GpuTerrain/` + `Assets/GrassInteract/` trees are empty shells (stray dirs + folder `.meta`s, incl `GpuTerrain/Editor/WorldPainter`, `*/Shaders`, `*/Demo`) — remove them (P10 also covers stray-meta cleanup). `TerrainValidationSceneBuilder` generator path retarget (E5/P8): currently writes under `Assets/GpuTerrain/Demo` — retarget to new tree.
+
+### P9 (atomic namespace rewrite) — `GpuTerrain`/`GpuTerrain.Editor`/`GpuTerrain.Tests`/`GrassInteract`/`GrassInteract.Editor`/`GrassInteract.Tests` → `WorldPainter`/`WorldPainter.Editor`/`WorldPainter.Tests` across ALL surviving .cs (`namespace` decls + `using` stmts). Single batch, verify ONCE (long reload). Update asmdef `rootNamespace` (already set). SC2 = zero `GpuTerrain`/`GrassInteract` namespace/using remain. Note: shader names like `"GpuTerrain/BrushDecal"` (in TerrainBrushPreview `Shader.Find`) + `"Hidden/..."` are SHADER paths, not C# namespaces — decide whether to rename shader decls too (cosmetic).
+
+### P10 — full-suite verify + SC checks (SC2 namespaces, SC5 ≤200 lines, SC6 player-build authoring-isolation, SC7 git renames, SC8 coach-marks "Create 1×1 tile" smoke) + push. NOT pushed yet.
 
 ### P6 done (commit `1053c16`)
 Deleted the 4 superseded old terrain TOOLS: `GpuTerrainRendererEditor(.Sculpt)` + `TerrainSculptTool(.Stroke)`. Rescued shared KEEP utils `TerrainSculptConfig` + `TerrainBrushPreview` from `_pending-delete` → `Editor/Brush/`. 301 green.
