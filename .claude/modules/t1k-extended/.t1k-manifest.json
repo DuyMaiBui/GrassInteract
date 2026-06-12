@@ -1,9 +1,9 @@
 {
   "module": "t1k-extended",
-  "version": "2.14.2",
+  "version": "2.14.3",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-12T03:32:12.236Z",
+  "generatedAt": "2026-06-12T07:03:09.194Z",
   "files": {
     "skills": [
       "t1k-architecture/SKILL.md",
@@ -162,7 +162,10 @@
       "teammate-cleanup-after-done.md"
     ],
     "fragments": [],
-    "other": []
+    "other": [
+      "scripts/resolve-env.py",
+      "scripts/resolve_env.py"
+    ]
   },
-  "checksum": "sha256:3e155d3c73d6c9ae291e8f220a55570b06e2ddb70475ae4435eca722c87e41b8"
+  "checksum": "sha256:374f35c6b739c3dcf2055f9f6fc04c062800655e072ab64cd4ac379b7e8ccb01"
 }

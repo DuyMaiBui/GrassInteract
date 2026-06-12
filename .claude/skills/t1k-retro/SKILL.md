@@ -8,7 +8,7 @@ effort: medium
 metadata:
   author: claudekit
   ported-from: ck:retro
-version: 2.14.2
+version: 2.14.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

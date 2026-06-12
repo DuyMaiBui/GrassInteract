@@ -4,7 +4,7 @@ description: "Display TheOneKit usage guide with live registry state. Use for 'w
 keywords: [help, usage, guide, commands, agents, registry, list]
 effort: low
 argument-hint: "(no arguments)"
-version: 2.17.2
+version: 2.17.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

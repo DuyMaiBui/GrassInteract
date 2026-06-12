@@ -4,7 +4,7 @@ description: "Generate exhaustive edge cases across 12 dimensions before impleme
 keywords: [edge-cases, scenarios, boundary, testing, what-could-go-wrong, exhaustive]
 argument-hint: "<topic|--file path> [--dimensions 1,2,4] [--for-tests]"
 effort: medium
-version: 2.14.2
+version: 2.14.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

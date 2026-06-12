@@ -4,7 +4,7 @@ description: "Validate TheOneKit registry integrity across 20+ checks. Use for '
 keywords: [validate, health, integrity, check, registry, broken, diagnose]
 argument-hint: "[fix]"
 effort: medium
-version: 2.17.2
+version: 2.17.3
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
