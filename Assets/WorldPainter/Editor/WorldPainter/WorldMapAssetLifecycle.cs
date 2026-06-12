@@ -60,6 +60,13 @@ namespace WorldPainter.Editor
             tile.name      = TileSubAssetName(coord);
             tile.tileCoord = coord;
 
+            // Seed a valid flat tile (zero-filled = flat at minHeight). Without this the tile's
+            // heightData stays Array.Empty<byte>(), so TerrainTileAsset.IsHeightValid is false and
+            // WorldPainter.BuildOneTileAsset silently skips it — the tile never renders.
+            // splatData is left empty (optional in TerrainTileGpuResources.Upload; lazily
+            // allocated by the splat brush on first paint).
+            tile.heightData = new byte[tile.ExpectedHeightBytes];
+
             string mapPath = AssetDatabase.GetAssetPath(map);
             AssetDatabase.AddObjectToAsset(tile, mapPath);
 

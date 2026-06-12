@@ -252,6 +252,21 @@ namespace WorldPainter.Tests
         }
 
         [Test]
+        public void AddTile_SeedsValidFlatHeightData_SoTileRenders()
+        {
+            var map  = this.LoadMap();
+            var tile = WorldMapAssetLifecycle.AddTile(map, Vector2Int.zero);
+
+            // Regression: a freshly created tile must have valid (flat, zero-filled) heightData.
+            // Without it IsHeightValid is false and WorldPainter.BuildOneTileAsset silently skips
+            // the tile, so nothing renders in Scene/Game view.
+            Assert.IsTrue(tile.IsHeightValid,
+                "Freshly added tile must be height-valid so it renders.");
+            Assert.AreEqual(tile.ExpectedHeightBytes, tile.heightData.Length,
+                "heightData should be seeded to ExpectedHeightBytes (flat at minHeight).");
+        }
+
+        [Test]
         public void AddTile_Idempotent_WhenCalledTwice()
         {
             var map   = this.LoadMap();
