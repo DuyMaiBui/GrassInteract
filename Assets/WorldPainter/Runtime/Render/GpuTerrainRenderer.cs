@@ -112,22 +112,22 @@ namespace GpuTerrain
 #if UNITY_EDITOR
             if (this.cullCompute == null)
                 this.cullCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                    "Assets/GpuTerrain/Shaders/TerrainNodeCull.compute");
+                    "Assets/WorldPainter/Shaders/TerrainNodeCull.compute");
             if (this.patchMaterial == null)
                 this.patchMaterial = AssetDatabase.LoadAssetAtPath<Material>(
-                    "Assets/GpuTerrain/Materials/TerrainPatch.mat");
+                    "Assets/WorldPainter/Materials/TerrainPatch.mat");
 #endif
             if (this.cullCompute == null)
             {
                 Debug.LogError("[GpuTerrainRenderer] cullCompute is null and could not be " +
-                    "auto-resolved from Assets/GpuTerrain/Shaders/TerrainNodeCull.compute. " +
+                    "auto-resolved from Assets/WorldPainter/Shaders/TerrainNodeCull.compute. " +
                     "Assign it manually or ensure the asset exists.");
                 return false;
             }
             if (this.patchMaterial == null)
             {
                 Debug.LogError("[GpuTerrainRenderer] patchMaterial is null and could not be " +
-                    "auto-resolved from Assets/GpuTerrain/Materials/TerrainPatch.mat. " +
+                    "auto-resolved from Assets/WorldPainter/Materials/TerrainPatch.mat. " +
                     "Assign it manually or ensure the asset exists.");
                 return false;
             }

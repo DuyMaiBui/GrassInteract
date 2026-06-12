@@ -10,20 +10,21 @@ namespace GpuTerrain.Editor
     /// <summary>
     /// Editor utility: builds a 2-tile validation scene for multi-tile render + B1 UV fix testing.
     ///
-    /// Menu: Tools/GPU Terrain/Create 2-Tile Validation Scene
+    /// Menu: Tools/WorldPainter/Create 2-Tile Validation Scene
     ///
-    /// Outputs:
-    ///   Assets/GpuTerrain/Demo/TileA_0_0.asset      — radial hill, tileCoord (0,0)
-    ///   Assets/GpuTerrain/Demo/TileB_1_0.asset      — diagonal ridges, tileCoord (1,0)
-    ///   Assets/GpuTerrain/Demo/ValidationLayerSet.asset
-    ///   Assets/GpuTerrain/Demo/TerrainValidation.unity
+    /// On-demand generator (menu + the WorldPainter coach-marks "Create 1×1 tile" empty-state
+    /// button). Outputs to a gitignored generated folder so the scene is never committed:
+    ///   Assets/WorldPainter/Generated/TileA_0_0.asset      — radial hill, tileCoord (0,0)
+    ///   Assets/WorldPainter/Generated/TileB_1_0.asset      — diagonal ridges, tileCoord (1,0)
+    ///   Assets/WorldPainter/Generated/ValidationLayerSet.asset
+    ///   Assets/WorldPainter/Generated/TerrainValidation.unity
     ///
     /// ONE GpuTerrainRenderer with a tiles array of size 2.  Both tiles are always
     /// visible in the validation scene; one shared lodRangesM governs both.
     /// </summary>
     public static class TerrainValidationSceneBuilder
     {
-        private const string DEMO_DIR    = "Assets/GpuTerrain/Demo";
+        private const string DEMO_DIR    = "Assets/WorldPainter/Generated";
         private const string SCENE_PATH  = DEMO_DIR + "/TerrainValidation.unity";
         private const string TILE_A_PATH = DEMO_DIR + "/TileA_0_0.asset";
         private const string TILE_B_PATH = DEMO_DIR + "/TileB_1_0.asset";
@@ -32,12 +33,12 @@ namespace GpuTerrain.Editor
         private const float MIN_HEIGHT = 0f;
         private const float MAX_HEIGHT = 40f;
 
-        [MenuItem("Tools/GPU Terrain/Create 2-Tile Validation Scene")]
+        [MenuItem("Tools/WorldPainter/Create 2-Tile Validation Scene")]
         public static void CreateValidationScene()
         {
-            // 1. Ensure Demo folder exists.
+            // 1. Ensure generated folder exists.
             if (!AssetDatabase.IsValidFolder(DEMO_DIR))
-                AssetDatabase.CreateFolder("Assets/GpuTerrain", "Demo");
+                AssetDatabase.CreateFolder("Assets/WorldPainter", "Generated");
 
             // 2. Generate tile assets.
             TerrainTileAsset tileA = CreateOrReplaceTile(
@@ -50,16 +51,16 @@ namespace GpuTerrain.Editor
 
             // 4. Locate required assets from project.
             ComputeShader? cullCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                "Assets/GpuTerrain/Shaders/TerrainNodeCull.compute");
+                "Assets/WorldPainter/Shaders/TerrainNodeCull.compute");
             Material? patchMat = AssetDatabase.LoadAssetAtPath<Material>(
-                "Assets/GpuTerrain/Materials/TerrainPatch.mat");
+                "Assets/WorldPainter/Materials/TerrainPatch.mat");
             if (patchMat == null)
             {
                 // Fallback: create material from shader if .mat doesn't exist yet.
                 Shader? patchShader = Shader.Find("GpuTerrain/TerrainPatch");
                 if (patchShader == null)
                     patchShader = AssetDatabase.LoadAssetAtPath<Shader>(
-                        "Assets/GpuTerrain/Shaders/TerrainPatch.shader");
+                        "Assets/WorldPainter/Shaders/TerrainPatch.shader");
                 if (patchShader != null)
                 {
                     patchMat = new Material(patchShader) { name = "TerrainPatch_Validation" };

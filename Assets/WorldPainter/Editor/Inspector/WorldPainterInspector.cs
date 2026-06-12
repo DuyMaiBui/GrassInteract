@@ -20,10 +20,10 @@ namespace GpuTerrain.Editor
         // ── Stylesheet paths (relative to Assets/) ───────────────────────────
 
         private const string USS_PRO_PATH =
-            "Assets/GpuTerrain/Editor/WorldPainter/WorldPainter.uss";
+            "Assets/WorldPainter/Editor/WorldPainter/WorldPainter.uss";
 
         private const string USS_LIGHT_PATH =
-            "Assets/GpuTerrain/Editor/WorldPainter/WorldPainterLight.uss";
+            "Assets/WorldPainter/Editor/WorldPainter/WorldPainterLight.uss";
 
         // ── Sub-views (created once, reused on repaint) ───────────────────────
 

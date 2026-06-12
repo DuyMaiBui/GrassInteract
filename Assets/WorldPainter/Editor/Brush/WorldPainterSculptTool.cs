@@ -74,7 +74,7 @@ namespace GpuTerrain.Editor
         public override void OnActivated()
         {
             this.brushCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                "Assets/GpuTerrain/Shaders/TerrainBrush.compute");
+                "Assets/WorldPainter/Shaders/TerrainBrush.compute");
 
             // Initialise biome composite stamp (P5).
             this.biomeStamp = new WorldPainterBiomeStamp(

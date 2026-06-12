@@ -109,10 +109,10 @@ namespace GpuTerrain
 #if UNITY_EDITOR
             if (this.cullCompute == null)
                 this.cullCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                    "Assets/GpuTerrain/Shaders/TerrainNodeCull.compute");
+                    "Assets/WorldPainter/Shaders/TerrainNodeCull.compute");
             if (this.patchMaterial == null)
                 this.patchMaterial = AssetDatabase.LoadAssetAtPath<Material>(
-                    "Assets/GpuTerrain/Materials/TerrainPatch.mat");
+                    "Assets/WorldPainter/Materials/TerrainPatch.mat");
 #endif
             if (this.cullCompute == null || this.patchMaterial == null)
             {

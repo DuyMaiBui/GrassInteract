@@ -104,3 +104,7 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# WorldPainter on-demand generated validation scenes/tiles (not committed)
+Assets/WorldPainter/Generated/
+Assets/WorldPainter/Generated.meta
