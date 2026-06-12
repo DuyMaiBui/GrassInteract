@@ -18,7 +18,11 @@ namespace WorldPainter.Editor
     /// Remove is gated behind the toggle (off by default) so a delete-click can never hijack a
     /// sculpt-click on an existing tile. Uses <see cref="WorldMapAsset.HasOpenNeighbor"/> (P1 API).
     /// </summary>
-    [Overlay(typeof(SceneView), "wp-neighbor-grow", "WorldPainter Tiles", true)]
+    // NOTE: overlay id is intentionally NEW ("wp-tile-editor", not the old "wp-neighbor-grow").
+    // Unity persists overlay visibility per id; a previously-seen id keeps its saved (hidden) state
+    // and ignores defaultDisplay. A fresh id is the only reliable way to make defaultDisplay=true
+    // actually show the overlay by default.
+    [Overlay(typeof(SceneView), "wp-tile-editor", "WorldPainter Tiles", true)]
     internal sealed class WorldPainterNeighborGrowOverlay : Overlay
     {
         // Add (grow) — green ghost preview.
