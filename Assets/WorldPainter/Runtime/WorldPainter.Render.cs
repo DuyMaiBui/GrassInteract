@@ -39,6 +39,13 @@ namespace WorldPainter
         /// <summary>True once <see cref="TryBuild"/> has succeeded with ≥1 tile.</summary>
         internal bool IsBuilt { get; private set; }
 
+        /// <summary>
+        /// Edit-mode scatter (grass/prop) preview state: true once the scatter engines have been
+        /// built for the Scene-view preview. Reset by <see cref="TryBuild"/> and a stroke-end
+        /// rebuild so a manual world rebuild or a density/instance edit re-scatters.
+        /// </summary>
+        private bool editScatterBuilt;
+
         // ── Internal seam accessors (for WorldPainterSculptTool) ──────────────
 
         internal GpuTerrainEngine? EngineForCoord(Vector2Int coord)
@@ -72,6 +79,8 @@ namespace WorldPainter
             RenderPipelineManager.beginCameraRendering -= this.OnBeginCameraRenderingEdit;
 #endif
             this.DisposeEngines();
+            this.DisposeScatterEngines();
+            this.editScatterBuilt = false;
         }
 
 #if UNITY_EDITOR
@@ -80,6 +89,26 @@ namespace WorldPainter
             if (Application.isPlaying) return;
             if (!this.IsBuilt) this.TryBuild();
             this.SubmitTerrain(cam);
+
+            // Live edit-mode scatter preview: build the grass/prop engines once (lazily), then
+            // submit them each camera so painted density/instance edits show in the Scene view.
+            if (!this.editScatterBuilt)
+            {
+                this.RebuildScatter();
+                this.editScatterBuilt = true;
+            }
+            this.SubmitScatter(cam);
+        }
+
+        /// <summary>
+        /// Editor-only: forces a scatter (grass/prop) rebuild from the freshly-committed layer
+        /// data so the Scene view reflects a just-finished density/instance stroke. Called by
+        /// <c>WorldPainterSculptTool</c> on mouse-up.
+        /// </summary>
+        internal void RebuildScatterPreview()
+        {
+            this.RebuildScatter();
+            this.editScatterBuilt = true;
         }
 
         [ContextMenu("Rebuild")]
@@ -91,6 +120,10 @@ namespace WorldPainter
         internal void TryBuild()
         {
             this.DisposeEngines();
+
+            // A terrain rebuild invalidates the scatter grounding sampler — force the edit-mode
+            // scatter preview to rebuild on the next camera render (and on "Rebuild World").
+            this.editScatterBuilt = false;
 
             if (!this.ResolveInfra()) return;
 

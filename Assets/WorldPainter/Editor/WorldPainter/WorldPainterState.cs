@@ -79,11 +79,7 @@ namespace WorldPainter.Editor
             // Scatter (Grass/Props) rows follow splat rows.
             int scatterOffset = idx - splatCount - 1;
             if (scatterOffset >= 0 && scatterOffset < painter.ScatterLayers.Count)
-            {
-                var layer = painter.ScatterLayers[scatterOffset];
-                string ln = layer != null ? layer.name.ToLowerInvariant() : string.Empty;
-                return ln.Contains("prop") ? LayerType.Props : LayerType.Grass;
-            }
+                return ScatterLayerKind(painter.ScatterLayers[scatterOffset]);
 
             // Biome rows follow scatter rows.
             int biomeOffset = idx - splatCount - painter.ScatterLayers.Count - 1;
@@ -92,6 +88,16 @@ namespace WorldPainter.Editor
 
             return LayerType.Height;
         }
+
+        /// <summary>
+        /// Classifies a scatter layer by its ACTUAL type, never its name: an
+        /// <see cref="InstanceScatterLayer"/> is <see cref="LayerType.Props"/>; any other
+        /// (density) scatter layer is <see cref="LayerType.Grass"/>. Type-based so an instance
+        /// layer whose name lacks "prop" is still routed to the prop detail card and the
+        /// instance brush tools (Place/Erase/Single) instead of the density path.
+        /// </summary>
+        public static LayerType ScatterLayerKind(ScatterLayer? layer) =>
+            layer is InstanceScatterLayer ? LayerType.Props : LayerType.Grass;
 
         /// <summary>
         /// The effective layer type that drives brush-tool dispatch + the contextual palette,

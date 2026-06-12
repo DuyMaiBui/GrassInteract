@@ -86,6 +86,9 @@ namespace WorldPainter.Editor
 
         private void HandleMouseUp(WorldPainter painter)
         {
+            // Capture the stroke's layer kind before teardown clears active-layer state.
+            LayerType strokeKind = WorldPainterState.EffectiveLayerType(painter);
+
             this.TeardownActiveStroke(painter);
             this.CommitLastStrokedState();
 
@@ -94,6 +97,15 @@ namespace WorldPainter.Editor
             {
                 Undo.CollapseUndoOperations(this.undoGroupId);
                 this.undoGroupId = -1;
+            }
+
+            // Live edit-mode preview: a scatter stroke (grass density or prop instances) changed
+            // the committed layer data — rebuild the scatter engines so the Scene view shows it.
+            // TeardownActiveStroke has already flushed the density writeback synchronously above.
+            if (strokeKind == LayerType.Grass || strokeKind == LayerType.Props)
+            {
+                painter.RebuildScatterPreview();
+                UnityEditor.SceneView.RepaintAll();
             }
         }
 

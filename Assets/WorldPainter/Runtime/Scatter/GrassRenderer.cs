@@ -74,6 +74,12 @@ namespace WorldPainter
 
             if (this.grassMaterial != null)
             {
+                // Graphics.RenderMeshInstanced hard-requires GPU instancing on the material.
+                // The CPU grass tier draws through it, so ensure the flag is set (a non-instanced
+                // grass material would otherwise throw InvalidOperationException and draw nothing).
+                if (!this.grassMaterial.enableInstancing)
+                    this.grassMaterial.enableInstancing = true;
+
                 this.renderParams = new RenderParams(this.grassMaterial)
                 {
                     shadowCastingMode = render.ShadowCastingMode,

@@ -127,8 +127,7 @@ namespace WorldPainter.Editor
                 ScatterLayer? scatterLayer = elem.objectReferenceValue as ScatterLayer;
                 string layerName = scatterLayer != null ? scatterLayer.name : $"Scatter {i}";
 
-                LayerType type = layerName.ToLowerInvariant().Contains("prop")
-                    ? LayerType.Props : LayerType.Grass;
+                LayerType type = WorldPainterState.ScatterLayerKind(scatterLayer);
 
                 if (!this.chips.Passes(type)) continue;
 
