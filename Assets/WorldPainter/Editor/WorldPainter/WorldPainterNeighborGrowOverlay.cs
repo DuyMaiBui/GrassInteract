@@ -82,6 +82,13 @@ namespace WorldPainter.Editor
             this.AddModeButton(row, TileEditMode.Remove, "Remove");
             root.Add(row);
 
+            // Hot-rebuild button — forces a full WorldPainter render rebuild on demand.
+            var rebuildBtn = new Button(RebuildActivePainter) { text = "Rebuild World" };
+            rebuildBtn.tooltip = "Force a full rebuild of the terrain render (disposes + rebuilds every tile). " +
+                                 "Use if the render looks out of sync.";
+            rebuildBtn.style.marginTop = 6;
+            root.Add(rebuildBtn);
+
             this.RefreshModeButtons();
             return root;
         }
@@ -131,6 +138,23 @@ namespace WorldPainter.Editor
                     btn.style.unityFontStyleAndWeight = StyleKeyword.Null;
                 }
             }
+        }
+
+        // ── Hot rebuild ─────────────────────────────────────────────────────────
+
+        private static void RebuildActivePainter()
+        {
+            var painter = WorldPainterState.ActivePainter;
+            if (painter == null)
+            {
+                Debug.LogWarning("[WorldPainterNeighborGrowOverlay] No active WorldPainter to rebuild " +
+                                 "(select the WorldPainter GameObject first).");
+                return;
+            }
+
+            painter.TryBuild();          // internal — full dispose + rebuild of every tile
+            SceneView.RepaintAll();
+            Debug.Log("[WorldPainterNeighborGrowOverlay] WorldPainter rebuilt.");
         }
 
         // ── SceneGUI dispatch ───────────────────────────────────────────────────
