@@ -14,6 +14,12 @@ All work committed, NOT pushed. All steps kept 378/378 `WorldPainter.Tests` gree
   partial builds N frozen engines per palette variant (reuses frozen private helpers via same-class access).
 - **`7973c15` P3** — authoring lifecycle: `WorldMapAssetLifecycle.AddSplatLayer/AddGrassLayer/AddGrassVariant/
   RemoveSurfaceLayer` + `Tools/WorldPainter/Surface Layers/` menu. Grass variant density maps can seed full.
+- **`b058f1b` P3b** — interactive paint-routing: density brush paints a grass variant's own density map.
+  `WorldPainterDensityEncoder` is now Texture2D-target-typed; `BrushToolTargets.ResolveDensityTarget` picks the
+  active variant (SurfaceLayers, Meadow kind) else the legacy layer; `WorldPainterState.ActiveGrassVariantIndex` +
+  `Tools/WorldPainter/Surface Layers/Paint Target Window` selects the active variant.
+
+**Functional pipeline is COMPLETE** — splat blend + grass multi-variant scatter + authoring + interactive paint all work.
 
 ## Manual-verify NOW (no more code needed)
 
@@ -25,24 +31,25 @@ All work committed, NOT pushed. All steps kept 378/378 `WorldPainter.Tests` gree
   → on the `Grass_Grass` layer assign a blade Mesh to `Render → LODs[0].mesh` (and optional per-variant `_BaseMap`
   textures) → enter Scene view. Both variants scatter across the field (density seeded full) = multi-variant grass.
 
-## REMAINING
+## REMAINING (polish only — feature already works)
 
-### Phase 3b — interactive paint-routing (the real workflow)
-Today grass variant density is seeded full; splat already paints. To paint per-variant grass density:
-- Paint write path (from P2 scout): `Editor/Brush/Tools/DensityBrushTools.cs:36-52` → `WorldPainterDensityEncoder.ExecuteSync()`
-  → writes pixels into `DensityScatterLayer.DensityMap`. Route this to the **active GrassLayer variant's** `densityMap`
-  instead (GrassVariant.densityMap is a normal RGBA32 Texture2D, R channel = density — same shape the encoder already writes).
-- Need an "active SurfaceLayer + active variant" selection (the tool palette from commits `3366021`/`6bc6853`
-  already tracks an active layer for the legacy stack — extend it to SurfaceLayers).
-- After a stroke, call `RebuildSurfaceLayers()` (already wired in `WorldPainter.Render.cs` `RebuildScatterPreview`).
+### Phase 4 — SurfaceLayers inspector cards
+Replace the stop-gap menu + Paint Target window with integrated inspector UI (mirror
+`WorldPainterLayerStackView` / `WorldPainterSplatLayerCard`): a "Surface Layers" section in
+`WorldPainterInspector.CreateInspectorGUI` that lists `map.SurfaceLayers`, adds/removes splat & grass layers,
+edits the grass palette (texture + density per variant), assigns the blade mesh, and selects the active
+variant for paint (calls `WorldPainterState.SetActiveLayer(grass.name, Meadow)` + `ActiveGrassVariantIndex`).
 
-### Phase 4 — SurfaceLayers inspector + demo
-- Inspector cards for `WorldMapAsset.SurfaceLayers` (mirror `WorldPainterSplatLayerCard` / layer-stack view):
-  add/remove splat & grass layers, edit grass palette (texture + density), assign blade mesh, select active for paint.
-- Reauthor the demo `WorldMap` with fresh SurfaceLayers; optionally retire the legacy `map.Layers` + frozen
-  `RebuildScatter` path (stop calling it — leave the frozen file untouched).
-- Optional: source `_LayerAlbedoArray` from the SplatLayer in SurfaceLayers (SSOT) instead of the separate
-  `map.splatSet` field (P1 reads `map.splatSet`; P3 keeps both in sync — fine for now, consolidate later).
+### Splat channel-selection consolidation
+Splat **albedos** now come from the unified `SplatLayer`/`TerrainLayerSet`, but the **channel** painted is still
+chosen by the legacy splat stack (`WorldPainterState.ActiveLayerType` → channel from the inline `SplatLayerDef`
+rows). Unify: drive the painted channel from the active `SplatLayer` palette index too, and retire the inline
+`SplatLayerDef[]`. (P1 binds `map.splatSet`; consider sourcing `_LayerAlbedoArray` from the SplatLayer in
+SurfaceLayers as the single SSOT.)
+
+### Demo reauthor (user content)
+Reauthor the demo `WorldMap` with fresh SurfaceLayers (real ground albedos + blade mesh + variant textures);
+optionally retire the legacy `map.Layers` + frozen `RebuildScatter` path (stop calling it — never edit the frozen file).
 
 ## Env / gotchas
 - **`refresh_unity(scope=scripts)` does NOT import NEW `.cs` files** (`refresh_triggered=false` → CS0246 for new types).

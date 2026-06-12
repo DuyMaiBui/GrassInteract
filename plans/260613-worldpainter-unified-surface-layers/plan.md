@@ -2,8 +2,10 @@
 
 **Branch:** `feat/worldpainter-ssot-consolidation`
 **Created:** 2026-06-13
-**Status:** Phase 0 ✅ `f9207e3` · Phase 1 ✅ `328bd49` · Phase 2 ✅ `5b8ba17` · Phase 3 ✅ `7973c15` — all 378/378 green.
-Remaining: **Phase 3b** interactive paint-routing (per-variant grass density / splat weight) · **Phase 4** SurfaceLayers inspector cards + demo reauthor. See HANDOFF.md.
+**Status:** P0 ✅ `f9207e3` · P1 ✅ `328bd49` · P2 ✅ `5b8ba17` · P3 ✅ `7973c15` · P3b ✅ `b058f1b` — all 378/378 green.
+**Functional pipeline COMPLETE** (data model + splat blend + grass multi-variant scatter + authoring + interactive paint).
+Remaining = polish: **Phase 4** SurfaceLayers inspector cards (replace the menu + Surface Paint window), splat
+channel-selection consolidation (still uses the legacy stack), demo reauthor. See HANDOFF.md.
 
 ## Goal
 
