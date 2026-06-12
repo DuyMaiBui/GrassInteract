@@ -2,7 +2,8 @@
 
 **Branch:** `feat/worldpainter-ssot-consolidation`
 **Created:** 2026-06-13
-**Status:** Phase 0 ✅ DONE (commit `f9207e3`, 378/378 tests green) — Phase 1 next
+**Status:** Phase 0 ✅ `f9207e3` · Phase 1 ✅ `328bd49` · Phase 2 ✅ `5b8ba17` · Phase 3 ✅ `7973c15` — all 378/378 green.
+Remaining: **Phase 3b** interactive paint-routing (per-variant grass density / splat weight) · **Phase 4** SurfaceLayers inspector cards + demo reauthor. See HANDOFF.md.
 
 ## Goal
 
