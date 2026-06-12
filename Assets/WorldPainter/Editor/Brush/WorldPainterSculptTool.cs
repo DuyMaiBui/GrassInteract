@@ -176,7 +176,8 @@ namespace WorldPainter.Editor
             if (hasHit)
             {
                 var brush = WorldPainterState.Brush;
-                var previewColor = new Color(0.3f, 0.7f, 1.0f, 0.6f); // WorldPainter blue
+                // Alpha is set by TerrainBrushPreview (ring=1f, fill=FILL_ALPHA) — not honored here.
+                var previewColor = new Color(0.3f, 0.7f, 1.0f); // WorldPainter blue
                 TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape, s_heightFn);
                 HandleUtility.Repaint();
 

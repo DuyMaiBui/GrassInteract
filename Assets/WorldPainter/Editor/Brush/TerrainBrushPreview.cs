@@ -40,13 +40,14 @@ namespace WorldPainter.Editor
         private const double FRESH_SECONDS = 0.25;
 
         // Handles visual parameters (MegaWorld double-stroke technique).
-        private const int   CIRCLE_SEGMENTS_MIN   = 16;
-        private const int   CIRCLE_SEGMENTS_MAX   = 128;
-        private const int   SQUARE_SAMPLES_PER_EDGE = 24; // points sampled along each of the 4 edges
-        private const float OUTLINE_BLACK_WIDTH   = 8f;   // px, drawn first (halo)
-        private const float OUTLINE_COLOR_WIDTH   = 4f;   // px, drawn over black
-        private const float FILL_ALPHA            = 0.10f;
-        private const float OUTLINE_BLACK_ALPHA   = 0.6f;
+        // internal so tests can reference them instead of hardcoding magic numbers.
+        internal const int   CIRCLE_SEGMENTS_MIN    = 16;
+        internal const int   CIRCLE_SEGMENTS_MAX    = 128;
+        internal const int   SQUARE_SAMPLES_PER_EDGE = 24; // points sampled along each of the 4 edges
+        private  const float OUTLINE_BLACK_WIDTH    = 8f;  // px, drawn first (halo)
+        private  const float OUTLINE_COLOR_WIDTH    = 4f;  // px, drawn over black
+        private  const float FILL_ALPHA             = 0.10f;
+        private  const float OUTLINE_BLACK_ALPHA    = 0.6f;
 
         // ── Brush state (pushed by tool) ──────────────────────────────────────
 
@@ -130,13 +131,38 @@ namespace WorldPainter.Editor
 
         // ── Perimeter construction ────────────────────────────────────────────
 
+        // Thin wrapper that feeds the static-state fields into the pure method below
+        // and reuses the cached static buffer (no per-frame alloc on the hot OnSceneGui path).
+        // Clears the buffer first — BuildPerimeterPoints appends, so without this the static
+        // list would accumulate a fresh loop every repaint frame.
         private static void BuildPerimeter()
         {
             perimeter.Clear();
-            float radius = brushRadius;
-            float lift   = Mathf.Max(Y_OFFSET_MIN, radius * Y_OFFSET_FRACTION);
+            BuildPerimeterPoints(hitPoint, brushRadius, brushShape, heightAt, perimeter);
+        }
 
-            if (brushShape == BrushShape.Square)
+        /// <summary>
+        /// Pure perimeter builder — no static-state reads. Appends world-space points
+        /// (including a closing duplicate of the first point) into <paramref name="output"/>.
+        /// The caller is responsible for <c>output.Clear()</c> before calling.
+        ///
+        /// Square = 4 OBB edges, each sampled <see cref="SQUARE_SAMPLES_PER_EDGE"/> times,
+        /// half-extent = <paramref name="radius"/>. Circle = adaptive segment count from
+        /// world-space circumference, clamped to [<see cref="CIRCLE_SEGMENTS_MIN"/>,
+        /// <see cref="CIRCLE_SEGMENTS_MAX"/>]. Both shapes conform Y via
+        /// <paramref name="height"/> + lift offset; null height falls back to
+        /// <paramref name="hitPoint"/>.y.
+        /// </summary>
+        internal static void BuildPerimeterPoints(
+            Vector3           hitPoint,
+            float             radius,
+            BrushShape        shape,
+            HeightFn?         height,
+            List<Vector3>     output)
+        {
+            float lift = Mathf.Max(Y_OFFSET_MIN, radius * Y_OFFSET_FRACTION);
+
+            if (shape == BrushShape.Square)
             {
                 // Square OBB in the XZ plane, half-extent = radius (matches the GPU Chebyshev
                 // half-extent). Corners CCW: (-r,-r) (+r,-r) (+r,+r) (-r,+r), each edge sampled
@@ -152,9 +178,9 @@ namespace WorldPainter.Editor
                     Vector2 b = corners[(e + 1) % 4];
                     for (int s = 0; s < SQUARE_SAMPLES_PER_EDGE; ++s)
                     {
-                        float u  = s / (float)SQUARE_SAMPLES_PER_EDGE;
+                        float   u = s / (float)SQUARE_SAMPLES_PER_EDGE;
                         Vector2 o = Vector2.Lerp(a, b, u);
-                        AppendConformed(o.x, o.y, lift);
+                        AppendConformed(hitPoint, o.x, o.y, lift, height, output);
                     }
                 }
             }
@@ -168,23 +194,33 @@ namespace WorldPainter.Editor
                 for (int i = 0; i < segments; ++i)
                 {
                     float ang = (i / (float)segments) * Mathf.PI * 2f;
-                    AppendConformed(Mathf.Cos(ang) * radius, Mathf.Sin(ang) * radius, lift);
+                    AppendConformed(
+                        hitPoint,
+                        Mathf.Cos(ang) * radius,
+                        Mathf.Sin(ang) * radius,
+                        lift, height, output);
                 }
             }
 
-            // Close the loop.
-            if (perimeter.Count > 0)
-                perimeter.Add(perimeter[0]);
+            // Close the loop (append first point again so DrawAAPolyLine/fill closes cleanly).
+            if (output.Count > 0)
+                output.Add(output[0]);
         }
 
-        private static void AppendConformed(float offX, float offZ, float lift)
+        private static void AppendConformed(
+            Vector3       origin,
+            float         offX,
+            float         offZ,
+            float         lift,
+            HeightFn?     height,
+            List<Vector3> output)
         {
-            float wx = hitPoint.x + offX;
-            float wz = hitPoint.z + offZ;
-            float wy = heightAt != null && heightAt(wx, wz, out float sampled)
+            float wx = origin.x + offX;
+            float wz = origin.z + offZ;
+            float wy = height != null && height(wx, wz, out float sampled)
                 ? sampled
-                : hitPoint.y; // off-tile / no sampler → flat fallback at hit height
-            perimeter.Add(new Vector3(wx, wy + lift, wz));
+                : origin.y; // off-tile / no sampler → flat fallback at hit height
+            output.Add(new Vector3(wx, wy + lift, wz));
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
