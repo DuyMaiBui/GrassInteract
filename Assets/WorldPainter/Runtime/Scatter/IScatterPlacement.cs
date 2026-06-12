@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Placement strategy for a ScatterLayer. Two implementations:

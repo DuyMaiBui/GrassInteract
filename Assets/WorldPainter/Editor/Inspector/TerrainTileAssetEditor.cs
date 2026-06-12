@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEditor;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Custom Inspector for <see cref="TerrainTileAsset"/>.

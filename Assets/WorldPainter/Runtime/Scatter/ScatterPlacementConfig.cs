@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Shared placement configuration for any scatter layer.

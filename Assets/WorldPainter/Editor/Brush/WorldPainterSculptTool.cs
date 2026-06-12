@@ -1,11 +1,11 @@
 #nullable enable
 using System.Collections.Generic;
-using GrassInteract;
+using WorldPainter;
 using UnityEditor;
 using UnityEditor.EditorTools;
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Scene-view EditorTool for WorldPainter sculpt (Task 8).
@@ -180,7 +180,7 @@ namespace GpuTerrain.Editor
                 TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, null);
                 HandleUtility.Repaint();
 
-                // Prop layer ghost preview (P4 task 3 — inline Handles, no GrassInteract.Editor dep).
+                // Prop layer ghost preview (P4 task 3 — inline Handles, no WorldPainter.Editor dep).
                 // Draw a green wire disc at the hover point when a Prop layer is active.
                 LayerType hoverType = WorldPainterState.ActiveLayerType(painter, out _);
                 if (hoverType == LayerType.Props && e.type == EventType.Repaint)
@@ -213,7 +213,7 @@ namespace GpuTerrain.Editor
 
         /// <summary>
         /// Draws an inline prop placement ghost using Handles — green (valid placement)
-        /// or red (slope/overlap rejected). No dependency on GrassInteract.Editor.
+        /// or red (slope/overlap rejected). No dependency on WorldPainter.Editor.
         /// </summary>
         private void DrawPropGhostHandles(Vector3 worldPos, bool valid)
         {

@@ -3,10 +3,10 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
-using GrassInteract;
-using GpuTerrain.Editor;
+using WorldPainter;
+using WorldPainter.Editor;
 
-namespace GrassInteract.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// EditMode tests for the density/stamp brush math seams. After the WorldPainter merge

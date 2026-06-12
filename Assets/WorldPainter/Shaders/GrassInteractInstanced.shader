@@ -10,7 +10,7 @@
 // without a CPU pass, add a single _Time-driven horizontal offset in vert(), scaled by heightT,
 // e.g. posWS.xz += float2(sin(_Time.y + posWS.x), 0) * heightT * _SwayAmount. Left out by design:
 // the C# matrix path is the source of truth for motion.
-Shader "GrassInteract/InstancedGrass"
+Shader "WorldPainter/InstancedGrass"
 {
     Properties
     {

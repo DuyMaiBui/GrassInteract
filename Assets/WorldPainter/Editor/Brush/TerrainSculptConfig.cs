@@ -1,5 +1,5 @@
 #nullable enable
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Named constants for the sculpt + paint editor tool (Phase 5).

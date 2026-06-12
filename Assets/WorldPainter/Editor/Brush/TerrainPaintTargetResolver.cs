@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Maps a world-space brush (center + radius) to the set of affected tile coordinates.

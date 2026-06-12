@@ -5,7 +5,7 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Uploads selected CdlodNode[] and per-node AABB arrays into GPU buffers.

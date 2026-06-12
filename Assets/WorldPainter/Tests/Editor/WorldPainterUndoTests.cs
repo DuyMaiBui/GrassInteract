@@ -1,10 +1,10 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain;
-using GpuTerrain.Editor;
+using WorldPainter;
+using WorldPainter.Editor;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for <see cref="WorldPainterUndo"/>: depth cap, memory cap,

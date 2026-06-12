@@ -2,7 +2,7 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for CDLOD morph blend math (host-replicated HLSL logic).

@@ -2,9 +2,9 @@
 using NUnit.Framework;
 using System.Collections.Generic;
 using UnityEngine;
-using GpuTerrain;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for <see cref="TerrainColliderStreamer"/>:

@@ -2,7 +2,7 @@
 using Unity.Collections;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Authored-instances placement strategy: feed pre-authored <see cref="InstanceRecord"/> stream

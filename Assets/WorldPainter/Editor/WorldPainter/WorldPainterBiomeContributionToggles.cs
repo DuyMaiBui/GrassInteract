@@ -3,7 +3,7 @@ using System;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Flags enum for per-stroke biome channel muting.

@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine.UIElements;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Horizontal filter chip bar: All / Height / Splat / Grass / Props.

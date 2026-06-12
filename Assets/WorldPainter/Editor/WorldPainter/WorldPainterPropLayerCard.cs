@@ -2,9 +2,9 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Detail card shown when a Prop scatter layer row is selected in the layer stack.

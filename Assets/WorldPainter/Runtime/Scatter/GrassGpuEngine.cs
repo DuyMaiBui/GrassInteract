@@ -3,7 +3,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Phase 5: GPU-driven indirect grass engine implementing <see cref="IGrassEngine"/>.
@@ -145,7 +145,7 @@ namespace GrassInteract
         /// Constructs the engine.
         /// </summary>
         /// <param name="computeShader">The GrassCull compute shader asset.</param>
-        /// <param name="indirectMaterial">Base indirect material (GrassInteract/IndirectGrass shader).
+        /// <param name="indirectMaterial">Base indirect material (WorldPainter/IndirectGrass shader).
         /// Will be cloned 3× — one instance per LOD — so each can have its own _VisibleIndices binding.</param>
         /// <param name="extraCullMargin">Extra metres of per-blade cull headroom beyond the auto blade
         /// reach (MaxBladeHeight×scaleMax + BendHeadroom). Default 0 = no behaviour change.</param>

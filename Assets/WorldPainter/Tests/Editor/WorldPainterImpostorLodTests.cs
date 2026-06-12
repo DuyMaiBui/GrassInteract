@@ -1,9 +1,9 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Pure-logic tests for <see cref="WorldPainterImpostorLod"/> distance-threshold LOD

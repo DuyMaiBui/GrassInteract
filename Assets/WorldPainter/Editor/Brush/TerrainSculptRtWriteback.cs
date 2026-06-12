@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Reads back the per-tile working RenderTextures (height RT + splat RT) to CPU,

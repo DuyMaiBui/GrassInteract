@@ -2,10 +2,10 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain.Editor;
-using GrassInteract;
+using WorldPainter.Editor;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for <see cref="WorldPainterIncrementalBake"/> chunk-index computation

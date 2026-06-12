@@ -2,7 +2,7 @@
 using Sirenix.OdinInspector;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Bounds and GPU-driven configuration shared across all scatter layer types.

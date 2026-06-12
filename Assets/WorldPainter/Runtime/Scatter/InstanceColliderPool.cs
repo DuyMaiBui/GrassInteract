@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Runtime pool of per-instance <see cref="MeshCollider"/> GameObjects for a single

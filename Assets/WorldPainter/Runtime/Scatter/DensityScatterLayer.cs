@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// ScatterLayer variant that drives placement from a density map via procedural RNG scatter.

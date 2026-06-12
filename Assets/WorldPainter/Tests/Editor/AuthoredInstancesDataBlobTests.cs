@@ -3,7 +3,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace GrassInteract.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// EditMode coverage for the <see cref="AuthoredInstancesData"/> V3 blob codec

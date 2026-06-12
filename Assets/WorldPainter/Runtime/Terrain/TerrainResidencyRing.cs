@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Pure function: camera world position → set of tileCoords that should be resident.

@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// SSOT for R16 height encoding and world-Y mapping.

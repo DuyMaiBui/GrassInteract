@@ -2,9 +2,9 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Encodes a density RenderTexture into the bytes of a <see cref="DensityScatterLayer"/>'s

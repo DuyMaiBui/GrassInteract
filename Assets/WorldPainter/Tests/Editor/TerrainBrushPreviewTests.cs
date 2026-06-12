@@ -1,9 +1,9 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain.Editor;
+using WorldPainter.Editor;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for the conforming brush disc geometry (TerrainBrushPreview.CreateUnitDisc).

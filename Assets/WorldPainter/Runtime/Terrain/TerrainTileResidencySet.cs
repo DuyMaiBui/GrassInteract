@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Bookkeeping for the set of currently-resident tiles.

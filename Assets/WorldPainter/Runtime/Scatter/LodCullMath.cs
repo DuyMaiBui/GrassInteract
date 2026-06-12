@@ -1,5 +1,5 @@
 #nullable enable
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Pure math helper: converts LOD switch distances + cull distance into squared thresholds

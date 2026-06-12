@@ -3,7 +3,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Spec-lock tests for the cull-distance math in <see cref="ScatterRenderConfig"/>.

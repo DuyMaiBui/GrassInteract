@@ -2,7 +2,7 @@
 using System;
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// ScriptableObject that holds up to <see cref="TerrainShadingConfig.MAX_SPLAT_LAYERS"/> layer
@@ -14,7 +14,7 @@ namespace GpuTerrain
     /// If more than MAX_SPLAT_LAYERS textures are assigned, excess entries are silently
     /// truncated and a warning is logged (see <see cref="BuildArray"/>).
     /// </summary>
-    [CreateAssetMenu(menuName = "GpuTerrain/Terrain Layer Set", fileName = "TerrainLayerSet")]
+    [CreateAssetMenu(menuName = "WorldPainter/Terrain Layer Set", fileName = "TerrainLayerSet")]
     public sealed class TerrainLayerSet : ScriptableObject
     {
         // ── Inspector fields ──────────────────────────────────────────────────

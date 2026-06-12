@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Genre-neutral scene orchestrator for a multi-layer scatter field. Drives all resources from
@@ -81,8 +81,8 @@ namespace GrassInteract
         /// and the <see cref="RaycastSurfaceSampler"/> fallback inside <see cref="BuildContext"/>.
         ///
         /// Assign before calling <see cref="Rebuild"/> (or after, then call Rebuild again).
-        /// Lives in GrassInteract — no GpuTerrain / Heightmap token here (library-decoupling compliant).
-        /// Example consumer: <c>GpuTerrainScatterGround</c> in GpuTerrain sets this to
+        /// Lives in WorldPainter — no WorldPainter / Heightmap token here (library-decoupling compliant).
+        /// Example consumer: <c>GpuTerrainScatterGround</c> in WorldPainter sets this to
         /// <c>HeightmapSurfaceSampler</c> so scatter grounds on the custom heightmap terrain.
         /// </summary>
         public ISurfaceSampler? ExternalSampler { get; set; }

@@ -4,7 +4,7 @@ using UnityEngine;
 using UnityEngine.Profiling;
 using UnityEngine.UIElements;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Perf badge displaying draw calls, dispatches, instance count, and VRAM.
@@ -94,7 +94,7 @@ namespace GpuTerrain.Editor
             {
                 foreach (var layer in painter.ScatterLayers)
                 {
-                    if (layer is GrassInteract.InstanceScatterLayer il)
+                    if (layer is InstanceScatterLayer il)
                         count += il.AuthoredInstances?.Count ?? 0;
                 }
             }

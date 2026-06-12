@@ -4,7 +4,7 @@ using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// GPU-indirect engine for <see cref="InstanceScatterLayer"/> mesh props. Replaces the former

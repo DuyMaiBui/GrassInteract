@@ -1,8 +1,8 @@
 #nullable enable
 using NUnit.Framework;
-using GpuTerrain;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for TerrainHeightFormat encode/decode SSOT.

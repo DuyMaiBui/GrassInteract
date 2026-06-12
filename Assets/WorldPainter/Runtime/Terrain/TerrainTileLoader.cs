@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Async tile loader: enqueues a load request, schedules the GPU-upload callback

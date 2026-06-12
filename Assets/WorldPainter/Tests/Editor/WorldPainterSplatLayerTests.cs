@@ -1,9 +1,9 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for <see cref="WorldPainter"/> Phase 2 splat-layer model:

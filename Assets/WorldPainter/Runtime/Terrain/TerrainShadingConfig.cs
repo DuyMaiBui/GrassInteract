@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Named constants for Phase 2 terrain shading.

@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// The existing CPU grass path behind the <see cref="IGrassEngine"/> seam.

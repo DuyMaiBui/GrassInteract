@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// World XZ ↔ tile coordinate ↔ texel UV mapping for the terrain tile grid.

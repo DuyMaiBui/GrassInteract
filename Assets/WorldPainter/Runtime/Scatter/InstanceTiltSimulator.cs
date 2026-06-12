@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// C# per-instance rigid-tilt simulator for <see cref="InstanceScatterLayer"/> props.

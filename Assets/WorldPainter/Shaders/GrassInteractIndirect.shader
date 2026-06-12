@@ -27,7 +27,7 @@
 //   - RenderParams.matProps NOT set.
 //   - RenderParams.camera = null.
 //   - RenderParams.worldBounds = non-zero-extent field AABB.
-Shader "GrassInteract/IndirectGrass"
+Shader "WorldPainter/IndirectGrass"
 {
     Properties
     {

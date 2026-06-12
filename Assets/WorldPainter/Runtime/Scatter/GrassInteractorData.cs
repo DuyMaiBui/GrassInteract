@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Shared interactor parameters — the single source of truth for WorldRadius, Strength, and

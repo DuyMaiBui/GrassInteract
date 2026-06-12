@@ -1,9 +1,9 @@
 #nullable enable
 using UnityEditor;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Biome composite stamp — one spacing-stamp fans out to all enabled channels

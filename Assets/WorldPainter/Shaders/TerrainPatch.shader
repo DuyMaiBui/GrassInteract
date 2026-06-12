@@ -1,4 +1,4 @@
-Shader "GpuTerrain/TerrainPatch"
+Shader "WorldPainter/TerrainPatch"
 {
     Properties
     {

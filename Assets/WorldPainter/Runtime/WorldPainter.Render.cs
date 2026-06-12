@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// WorldPainter partial — multi-tile GPU render submit logic.

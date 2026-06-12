@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Spacing-stamping stroke model for the WorldPainter brush (design §5.4).

@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Shared rendering configuration for any scatter layer.

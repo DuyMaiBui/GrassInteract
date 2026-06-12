@@ -2,7 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Enhanced scene-view input for WorldPainter sculpt:

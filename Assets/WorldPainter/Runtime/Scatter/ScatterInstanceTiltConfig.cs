@@ -2,7 +2,7 @@
 using Sirenix.OdinInspector;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Whole-instance rigid tilt configuration. Composed ONLY by <see cref="InstanceScatterLayer"/>

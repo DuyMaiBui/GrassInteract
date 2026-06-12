@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Result of a flat scatter: pooled instance-matrix slabs (each &lt;= 1023 TRS matrices) plus a parallel

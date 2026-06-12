@@ -1,10 +1,10 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain;
-using GrassInteract;
+using WorldPainter;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for <see cref="HeightmapSurfaceSampler"/> — the load-bearing risk-20 mitigation.

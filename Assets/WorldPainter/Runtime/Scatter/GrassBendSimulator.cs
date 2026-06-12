@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// The C# heart of the bend system: a single per-frame pass that rebuilds every blade's per-instance

@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// [ExecuteAlways] MonoBehaviour: owns one GpuTerrainEngine per tile in the tiles list,
@@ -18,7 +18,7 @@ namespace GpuTerrain
     ///    so Scene and Game views each get exactly one draw (no N× overdraw).
     /// </summary>
     [ExecuteAlways]
-    [AddComponentMenu("GpuTerrain/Gpu Terrain Renderer")]
+    [AddComponentMenu("WorldPainter/Gpu Terrain Renderer")]
     public sealed class GpuTerrainRenderer : MonoBehaviour
     {
         // ── Inspector fields ──────────────────────────────────────────────────

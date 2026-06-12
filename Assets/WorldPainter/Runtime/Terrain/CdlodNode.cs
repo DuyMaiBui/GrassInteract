@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Blittable GPU struct for one CDLOD render node.

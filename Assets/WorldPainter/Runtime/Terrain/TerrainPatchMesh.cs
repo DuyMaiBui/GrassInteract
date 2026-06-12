@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Builds the ONE shared terrain patch mesh: a (PATCH_RES+1)² grid in unit XZ [0,1], Y=0.

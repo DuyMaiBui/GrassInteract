@@ -2,7 +2,7 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace GrassInteract.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// EditMode tests for <see cref="InstanceVisibilityColliderDriver"/> Phase 2.

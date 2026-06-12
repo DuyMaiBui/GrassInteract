@@ -3,7 +3,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     // ──────────────────────────────────────────────────────────────────────────
     // InstanceData — blittable GPU record for static mesh prop instances.

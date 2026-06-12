@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// A moving disturbance that leans grass AWAY from it — attach to a car, wheel, player, or any mover.

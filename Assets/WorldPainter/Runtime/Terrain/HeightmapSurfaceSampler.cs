@@ -1,8 +1,8 @@
 #nullable enable
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// <see cref="ISurfaceSampler"/> implementation over the custom heightmap terrain.
@@ -16,7 +16,7 @@ namespace GpuTerrain
     /// populates <see cref="SurfaceHit.SplatWeights"/> from the Phase 0 RGBA32 splat data.
     /// Returns <c>false</c> off-grid or when the tile is not registered/loaded.
     ///
-    /// Lives in GpuTerrain (not GrassInteract) — one-way reference: GpuTerrain → GrassInteract.
+    /// Lives in WorldPainter (not WorldPainter) — one-way reference: WorldPainter → WorldPainter.
     /// </summary>
     public sealed class HeightmapSurfaceSampler : ISurfaceSampler
     {

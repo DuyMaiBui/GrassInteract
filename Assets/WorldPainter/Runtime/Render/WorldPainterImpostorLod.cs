@@ -1,8 +1,8 @@
 #nullable enable
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Runtime impostor/billboard far-LOD selection for dense prop instances.
@@ -11,7 +11,7 @@ namespace GpuTerrain
     /// impostor/billboard mesh (LOD last entry in the layer's <see cref="ScatterRenderConfig"/>).
     /// Inside the threshold, the full LOD0 mesh is used.
     ///
-    /// Ships in the runtime (GpuTerrain) assembly. MUST NOT reference any UnityEditor types
+    /// Ships in the runtime (WorldPainter) assembly. MUST NOT reference any UnityEditor types
     /// outside <c>#if UNITY_EDITOR</c> blocks (enforced by this file's runtime asmdef).
     ///
     /// Thread-safety: main-thread only (called from LateUpdate / cull path).

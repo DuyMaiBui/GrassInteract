@@ -1,10 +1,10 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain;
-using GpuTerrain.Editor;
+using WorldPainter;
+using WorldPainter.Editor;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for RT→R16 round-trip correctness (Risk-16 gate from phase-5.md).

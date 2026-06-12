@@ -1,9 +1,9 @@
 #nullable enable
 using UnityEditor;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// 220px LOD0 orbit preview for the selected scatter layer.

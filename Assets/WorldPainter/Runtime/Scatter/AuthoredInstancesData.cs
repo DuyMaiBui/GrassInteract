@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Per-instance authored override flags packed into a uint32.
@@ -104,7 +104,7 @@ namespace GrassInteract
     /// Asmdef boundary: this file must NOT use UnityEditor. Editor helpers live in
     /// Editor/InstancePickingService.cs and Editor/TerrainScatterConfigEditor.cs.
     /// </summary>
-    [CreateAssetMenu(menuName = "GrassInteract/Authored Instances Data", order = 100)]
+    [CreateAssetMenu(menuName = "WorldPainter/Authored Instances Data", order = 100)]
     public sealed class AuthoredInstancesData : ScriptableObject, ISerializationCallbackReceiver
     {
         // ── Blob version ───────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ using NUnit.Framework;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// EditMode tests for <see cref="ChunkedInstanceBuffer"/> Phase 1:

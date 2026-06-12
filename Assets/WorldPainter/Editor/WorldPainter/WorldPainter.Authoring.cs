@@ -3,7 +3,7 @@
 using UnityEngine;
 using UnityEditor;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Editor-only brush-engine driver for <see cref="WorldPainter"/>.

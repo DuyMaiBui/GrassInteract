@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// CPU bilinear height sampler for a <see cref="TerrainTileAsset"/>.

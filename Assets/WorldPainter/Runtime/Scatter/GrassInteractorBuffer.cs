@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Phase 6: Owns the per-frame <see cref="GraphicsBuffer"/> that carries up to

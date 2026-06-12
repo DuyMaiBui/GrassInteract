@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// One-time migration menu: <c>Tools/WorldPainter/Migrate from GpuTerrainRenderer</c>.

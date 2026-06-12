@@ -52,7 +52,7 @@
 //   RenderParams built with new RenderParams(material) CTOR (NOT object-initializer).
 //   multi_compile_local for runtime-toggled keywords.
 //   SCATTER_ prefix on all custom HLSL constants (URP Macros.hlsl pre-defines TWO_PI/PI/HALF_PI).
-Shader "GrassInteract/ScatterInstanced"
+Shader "WorldPainter/ScatterInstanced"
 {
     Properties
     {

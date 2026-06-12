@@ -1,8 +1,8 @@
 #nullable enable
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Bridge MonoBehaviour: wires <see cref="HeightmapSurfaceSampler"/> into a
@@ -10,17 +10,17 @@ namespace GpuTerrain
     /// terrain rather than the legacy <c>TerrainData</c> or Physics.Raycast path.
     ///
     /// ── Decoupling boundary ──────────────────────────────────────────────────
-    /// This is the ONLY place GpuTerrain and GrassInteract meet at runtime.
-    /// <c>GrassInteract</c> contains zero GpuTerrain references (library-decoupling
-    /// compliant). GpuTerrain references GrassInteract solely to implement
-    /// <see cref="ISurfaceSampler"/> (one-way: GpuTerrain → GrassInteract).
+    /// This is the ONLY place WorldPainter and WorldPainter meet at runtime.
+    /// <c>WorldPainter</c> contains zero WorldPainter references (library-decoupling
+    /// compliant). WorldPainter references WorldPainter solely to implement
+    /// <see cref="ISurfaceSampler"/> (one-way: WorldPainter → WorldPainter).
     ///
     /// Usage:
     ///   1. Place this component on the same GameObject as (or a parent of) ScatterField.
     ///   2. Assign <c>tileAsset</c> (single-tile / demo) or connect the streaming path.
     ///   3. ScatterField will use <see cref="HeightmapSurfaceSampler"/> on next Rebuild.
     /// </summary>
-    [AddComponentMenu("GpuTerrain/Gpu Terrain Scatter Ground")]
+    [AddComponentMenu("WorldPainter/Gpu Terrain Scatter Ground")]
     [DisallowMultipleComponent]
     public sealed class GpuTerrainScatterGround : MonoBehaviour
     {

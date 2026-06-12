@@ -2,9 +2,9 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityEditor;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for the LOD band-ruler → <see cref="ScatterLod.maxDistance"/> mapping contract:

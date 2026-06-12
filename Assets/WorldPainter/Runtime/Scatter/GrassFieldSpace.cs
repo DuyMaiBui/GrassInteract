@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Single source of truth for the field's world-XZ ↔ UV mapping. The static density map (placement,

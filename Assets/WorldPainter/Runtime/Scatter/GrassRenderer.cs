@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Render driver: pick ONE LOD mesh for the WHOLE field by distance to a reference viewpoint and submit

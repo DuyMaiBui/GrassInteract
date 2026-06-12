@@ -2,12 +2,12 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// World-space brush decal cursor for terrain sculpt strokes.
     ///
-    /// Mirrors the GrassInteract <c>ScatterBrushPreview</c> pattern:
+    /// Mirrors the WorldPainter <c>ScatterBrushPreview</c> pattern:
     /// — The tool pushes brush state each frame via <see cref="Set"/>.
     /// — Actual drawing happens from <see cref="SceneView.duringSceneGui"/> during
     ///   <see cref="EventType.Repaint"/> (so DrawMeshNow renders in world space, not
@@ -43,7 +43,7 @@ namespace GpuTerrain.Editor
         private const float  MAX_HIT_SQR   = 1e12f;
         private const int    DISC_TEX_SIZE = 64;
         private const double FRESH_SECONDS = 0.25;
-        private const string DECAL_SHADER  = "GpuTerrain/BrushDecal"; // ZTest Always → draws over terrain
+        private const string DECAL_SHADER  = "WorldPainter/BrushDecal"; // ZTest Always → draws over terrain
 
         // Disc tessellation — enough rings/segments to follow terrain curvature smoothly.
         private const int RINGS    = 10;

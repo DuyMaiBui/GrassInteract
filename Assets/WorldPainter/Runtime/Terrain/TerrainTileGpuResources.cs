@@ -3,7 +3,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Per-tile GPU textures built from a <see cref="TerrainTileAsset"/>: one height texture

@@ -5,7 +5,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Editor utility: builds a 2-tile validation scene for multi-tile render + B1 UV fix testing.
@@ -57,7 +57,7 @@ namespace GpuTerrain.Editor
             if (patchMat == null)
             {
                 // Fallback: create material from shader if .mat doesn't exist yet.
-                Shader? patchShader = Shader.Find("GpuTerrain/TerrainPatch");
+                Shader? patchShader = Shader.Find("WorldPainter/TerrainPatch");
                 if (patchShader == null)
                     patchShader = AssetDatabase.LoadAssetAtPath<Shader>(
                         "Assets/WorldPainter/Shaders/TerrainPatch.shader");

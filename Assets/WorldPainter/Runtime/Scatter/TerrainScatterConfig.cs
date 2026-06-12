@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Sirenix.OdinInspector;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Asset that owns all <see cref="ScatterLayer"/>s, density textures, and
@@ -14,7 +14,7 @@ namespace GrassInteract
     /// complete scatter project. Wind, bend, and render parameters are per-layer (on each
     /// <see cref="ScatterLayer"/> sub-asset directly).
     ///
-    /// Create via <c>Assets &gt; Create &gt; GrassInteract &gt; Terrain Scatter Config</c>.
+    /// Create via <c>Assets &gt; Create &gt; WorldPainter &gt; Terrain Scatter Config</c>.
     /// Assign to <see cref="ScatterField.Config"/>; the field drives from <see cref="Layers"/>,
     /// <see cref="CullCompute"/>, and <see cref="IndirectMaterial"/> defined here.
     ///
@@ -22,7 +22,7 @@ namespace GrassInteract
     /// project asset. The <see cref="ScatterField"/> component keeps the <c>boundTerrain</c>
     /// binding.
     /// </summary>
-    [CreateAssetMenu(menuName = "GrassInteract/Terrain Scatter Config", fileName = "TerrainScatterConfig")]
+    [CreateAssetMenu(menuName = "WorldPainter/Terrain Scatter Config", fileName = "TerrainScatterConfig")]
     public sealed class TerrainScatterConfig : ScriptableObject
     {
         // ── GPU Resources ─────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ namespace GrassInteract
         [SerializeField] private ComputeShader? cullCompute;
 
         [TitleGroup("GPU Resources")]
-        [Tooltip("Base material using the GrassInteract/IndirectGrass shader. Required for the GPU tier.")]
+        [Tooltip("Base material using the WorldPainter/IndirectGrass shader. Required for the GPU tier.")]
         [SerializeField] private Material? indirectMaterial;
 
         // ── Layers ────────────────────────────────────────────────────────────

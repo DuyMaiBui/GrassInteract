@@ -1,9 +1,9 @@
 #nullable enable
 using System;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Tier-C ScriptableObject defining a composite terrain biome:
@@ -12,12 +12,12 @@ namespace GpuTerrain
     /// Disk location: Assets/Worlds/&lt;WorldName&gt;/Biomes/&lt;name&gt;.asset
     ///
     /// Each channel is optional — null reference = channel not painted.
-    /// The biome stamp fan-out (<see cref="GpuTerrain.Editor.WorldPainterBiomeStamp"/>)
+    /// The biome stamp fan-out (<see cref="WorldPainter.Editor.WorldPainterBiomeStamp"/>)
     /// reads these rules and dispatches the appropriate kernel per enabled channel.
     ///
     /// Design §4.3 / Phase 5.
     /// </summary>
-    [CreateAssetMenu(menuName = "GpuTerrain/Biome Preset", fileName = "NewBiomePreset")]
+    [CreateAssetMenu(menuName = "WorldPainter/Biome Preset", fileName = "NewBiomePreset")]
     public sealed class BiomePreset : ScriptableObject
     {
         // ── Channel 1 — Height delta ──────────────────────────────────────────

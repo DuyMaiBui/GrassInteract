@@ -1,9 +1,9 @@
 #nullable enable
 using System.Collections.Generic;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Incremental <see cref="ChunkedInstanceBuffer"/> bake driver for Prop layers.

@@ -2,7 +2,7 @@
 using Unity.Collections;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Contract for authored-instance placement data. <see cref="InstancePlacement"/> consumes

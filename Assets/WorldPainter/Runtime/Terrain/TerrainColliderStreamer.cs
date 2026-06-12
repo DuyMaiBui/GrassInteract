@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// MonoBehaviour: manages a near-tile ring of heightfield colliders.
@@ -20,7 +20,7 @@ namespace GpuTerrain
     /// for a tile whose height data is not yet resident.
     /// </summary>
     [ExecuteAlways]
-    [AddComponentMenu("GpuTerrain/Terrain Collider Streamer")]
+    [AddComponentMenu("WorldPainter/Terrain Collider Streamer")]
     public sealed class TerrainColliderStreamer : MonoBehaviour
     {
         // ── Inspector ─────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     // ──────────────────────────────────────────────────────────────────────────
     // Blittable GPU structs — only float/uint fields; no managed refs, no bool.

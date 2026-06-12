@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// [ExecuteAlways] MonoBehaviour: drives the Phase 3 multi-tile streaming loop.
@@ -22,7 +22,7 @@ namespace GpuTerrain
     /// All GPU upload/dispose is main-thread only.
     /// </summary>
     [ExecuteAlways]
-    [AddComponentMenu("GpuTerrain/Terrain Streaming Manager")]
+    [AddComponentMenu("WorldPainter/Terrain Streaming Manager")]
     public sealed class TerrainStreamingManager : MonoBehaviour
     {
         // ── Inspector ─────────────────────────────────────────────────────────

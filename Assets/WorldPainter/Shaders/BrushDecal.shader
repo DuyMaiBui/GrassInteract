@@ -3,7 +3,7 @@
 // morph/skirt geometry can dip below the CPU heightmap the disc samples. Used via
 // Graphics.DrawMeshNow + SetPass from TerrainBrushPreview (immediate mode, so a plain
 // unlit CG pass is intentional — no SRP batching needed).
-Shader "GpuTerrain/BrushDecal"
+Shader "WorldPainter/BrushDecal"
 {
     Properties
     {

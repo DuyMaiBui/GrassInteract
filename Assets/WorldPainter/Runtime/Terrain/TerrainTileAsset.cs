@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// ScriptableObject holding one terrain tile's raw height and splat data.
@@ -27,7 +27,7 @@ namespace GpuTerrain
     /// heightData stores heightRes texels per edge; the last row/column is the
     /// shared border texel with the adjacent tile (1-texel overlap).
     /// </summary>
-    [CreateAssetMenu(menuName = "GpuTerrain/Terrain Tile", fileName = "TerrainTile")]
+    [CreateAssetMenu(menuName = "WorldPainter/Terrain Tile", fileName = "TerrainTile")]
     public sealed class TerrainTileAsset : ScriptableObject
     {
         // ── Tile identity ─────────────────────────────────────────────────────

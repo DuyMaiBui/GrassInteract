@@ -2,9 +2,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Per-tile snapshot undo stack for the WorldPainter sculpt tool (task 9).
@@ -217,7 +217,7 @@ namespace GpuTerrain.Editor
         /// Deep-copies the list so the snapshot is immutable.
         /// Evicts oldest when depth cap exceeded.
         /// </summary>
-        public void PushRecords(GrassInteract.AuthoredInstancesData data, int layerKey)
+        public void PushRecords(AuthoredInstancesData data, int layerKey)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
 
@@ -239,7 +239,7 @@ namespace GpuTerrain.Editor
         /// Pop the most-recent record snapshot for a layer and restore the working list.
         /// Returns true when a snapshot was found and restored.
         /// </summary>
-        public bool PopRecords(GrassInteract.AuthoredInstancesData data, int layerKey)
+        public bool PopRecords(AuthoredInstancesData data, int layerKey)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
 

@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Builds a Unity <c>TerrainData</c> heightfield proxy from a <see cref="TerrainTileAsset"/>'s

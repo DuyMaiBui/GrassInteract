@@ -1,10 +1,10 @@
 #nullable enable
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain.Editor;
-using GrassInteract;
+using WorldPainter.Editor;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Tests for <see cref="WorldPainterPropStampEmitter"/> — spacing-to-record-count math

@@ -1,9 +1,9 @@
 #nullable enable
 using System.Collections.Generic;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Runtime component for the WorldPainter authoring tool.
@@ -23,7 +23,7 @@ namespace GpuTerrain
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
-    [AddComponentMenu("GpuTerrain/World Painter")]
+    [AddComponentMenu("WorldPainter/World Painter")]
     public sealed partial class WorldPainter : MonoBehaviour
     {
         // ── Scatter grounding ─────────────────────────────────────────────────

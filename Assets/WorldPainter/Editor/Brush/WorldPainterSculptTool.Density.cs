@@ -1,15 +1,15 @@
 #nullable enable
-using GrassInteract;
+using WorldPainter;
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Density RT lifecycle half of <see cref="WorldPainterSculptTool"/> (partial).
     ///
     /// Manages the per-scatter-layer <see cref="RenderTexture"/> used by the
     /// <c>PaintDensity</c> compute kernel. Allocated lazily on first Grass-layer
-    /// stamp; seeded from the committed <see cref="GrassInteract.DensityScatterLayer.DensityMap"/>;
+    /// stamp; seeded from the committed <see cref="DensityScatterLayer.DensityMap"/>;
     /// released on <see cref="TeardownActiveStroke"/>.
     ///
     /// Density writeback is driven by <see cref="WorldPainterDensityEncoder"/> on the
@@ -19,7 +19,7 @@ namespace GpuTerrain.Editor
     {
         // ── Density RT management ─────────────────────────────────────────────
 
-        internal RenderTexture? GetOrCreateDensityRT(GrassInteract.DensityScatterLayer layer)
+        internal RenderTexture? GetOrCreateDensityRT(DensityScatterLayer layer)
         {
             // Reuse existing RT if the same layer is still active.
             if (this.densityRT != null && ReferenceEquals(this.activeDensityLayer, layer))

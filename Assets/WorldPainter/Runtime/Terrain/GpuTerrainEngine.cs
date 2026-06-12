@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Minimal interface for a per-tile terrain engine: submit a frame and dispose GPU resources.

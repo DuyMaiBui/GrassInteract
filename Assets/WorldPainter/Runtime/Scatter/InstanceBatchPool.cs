@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Recycles fixed-size <see cref="Matrix4x4"/> instancing slabs (1023 = Unity's per-instanced-draw

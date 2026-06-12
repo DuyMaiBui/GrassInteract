@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Seam between <see cref="ScatterField"/> (the facade) and a concrete grass rendering engine.

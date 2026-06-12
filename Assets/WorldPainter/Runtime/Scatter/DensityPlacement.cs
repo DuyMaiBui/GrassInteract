@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace GrassInteract
+namespace WorldPainter
 {
     /// <summary>
     /// Procedural-density placement strategy: density-map sample + RNG accept/reject + slope/splat filter.

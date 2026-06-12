@@ -1,6 +1,6 @@
 #nullable enable
 
-namespace GpuTerrain
+namespace WorldPainter
 {
     /// <summary>
     /// Named constants for the Phase 3 tile streaming system.

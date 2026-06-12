@@ -1,7 +1,7 @@
 #nullable enable
 using UnityEditor;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Three F1/F2/F3 brush preset slots — save, recall, and X-swap.

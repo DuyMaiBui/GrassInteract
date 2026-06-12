@@ -1,9 +1,9 @@
 #nullable enable
-using GrassInteract;
+using WorldPainter;
 using UnityEditor;
 using UnityEngine;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Stroke dispatch half of <see cref="WorldPainterSculptTool"/> (partial).
@@ -198,7 +198,7 @@ namespace GpuTerrain.Editor
                 int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
                 if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
                 {
-                    var scatterLayer = painter.ScatterLayers[scatterIdx] as GrassInteract.DensityScatterLayer;
+                    var scatterLayer = painter.ScatterLayers[scatterIdx] as DensityScatterLayer;
                     if (scatterLayer != null)
                     {
                         var dRT = this.GetOrCreateDensityRT(scatterLayer);
@@ -213,7 +213,7 @@ namespace GpuTerrain.Editor
                 int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
                 if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
                 {
-                    var propLayer = painter.ScatterLayers[scatterIdx] as GrassInteract.InstanceScatterLayer;
+                    var propLayer = painter.ScatterLayers[scatterIdx] as InstanceScatterLayer;
                     if (propLayer != null)
                     {
                         bool isDelete = Event.current != null && Event.current.shift;

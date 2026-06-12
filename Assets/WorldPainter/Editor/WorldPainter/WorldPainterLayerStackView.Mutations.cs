@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Mutation half of <see cref="WorldPainterLayerStackView"/> (partial).
@@ -105,7 +105,7 @@ namespace GpuTerrain.Editor
         {
             // Create a new DensityScatterLayer sub-asset on the WorldPainter's scene object.
             // Smart defaults: targetInstances = 50000, slopeRange = [0, 45].
-            var layer = ScriptableObject.CreateInstance<GrassInteract.DensityScatterLayer>();
+            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
             layer.name = $"Grass {this.scatterLayersProp.arraySize}";
 
             // Persist as an asset next to the scene (or in-memory for unsaved scenes).
@@ -147,11 +147,11 @@ namespace GpuTerrain.Editor
         private void AddPropLayer()
         {
             // Create a new InstanceScatterLayer sub-asset with smart defaults.
-            var layer = ScriptableObject.CreateInstance<GrassInteract.InstanceScatterLayer>();
+            var layer = ScriptableObject.CreateInstance<InstanceScatterLayer>();
             layer.name = $"Props {this.scatterLayersProp.arraySize}";
 
             // Create a companion AuthoredInstancesData sub-asset.
-            var authoredData = ScriptableObject.CreateInstance<GrassInteract.AuthoredInstancesData>();
+            var authoredData = ScriptableObject.CreateInstance<AuthoredInstancesData>();
             authoredData.name = $"{layer.name}_Authored";
 
             string scenePath = this.painter.gameObject.scene.path;

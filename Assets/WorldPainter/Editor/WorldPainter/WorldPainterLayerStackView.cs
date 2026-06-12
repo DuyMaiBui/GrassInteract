@@ -2,9 +2,9 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>Layer type discriminant for WorldPainter stack rows.</summary>
     public enum LayerType { Height, Splat, Grass, Props, Biome }

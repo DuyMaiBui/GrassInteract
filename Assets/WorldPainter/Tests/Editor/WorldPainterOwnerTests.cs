@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
-using GpuTerrain;
+using WorldPainter;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Owner-level tests for <see cref="WorldPainter"/>:

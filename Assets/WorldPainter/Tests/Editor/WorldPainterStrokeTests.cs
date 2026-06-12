@@ -1,8 +1,8 @@
 #nullable enable
 using NUnit.Framework;
-using GpuTerrain.Editor;
+using WorldPainter.Editor;
 
-namespace GpuTerrain.Tests
+namespace WorldPainter.Tests
 {
     /// <summary>
     /// Deterministic math tests for the spacing-stamping stroke model (task 7).

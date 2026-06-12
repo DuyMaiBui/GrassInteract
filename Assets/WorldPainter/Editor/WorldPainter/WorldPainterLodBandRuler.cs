@@ -1,9 +1,9 @@
 #nullable enable
 using UnityEditor;
 using UnityEngine;
-using GrassInteract;
+using WorldPainter;
 
-namespace GpuTerrain.Editor
+namespace WorldPainter.Editor
 {
     /// <summary>
     /// Horizontal LOD thumbnail strip over a draggable distance ruler.
