@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3878db4f9dfde9847baa20351454c7cb, type: 3}
+  m_Name: BakeManifest
+  m_EditorClassIdentifier: WorldPainter::WorldPainter.TileBakeManifest
+  entries:
+  - coord: {x: 0, y: 0}
+    assetPath: Assets/WorldPainter/Demo/Baked/Tile_0_0.asset
+  - coord: {x: 1, y: 0}
+    assetPath: Assets/WorldPainter/Demo/Baked/Tile_1_0.asset
+  - coord: {x: 0, y: 1}
+    assetPath: Assets/WorldPainter/Demo/Baked/Tile_0_1.asset
+  - coord: {x: 1, y: 1}
+    assetPath: Assets/WorldPainter/Demo/Baked/Tile_1_1.asset
+  - coord: {x: -1, y: 0}
+    assetPath: Assets/WorldPainter/Demo/Baked/Tile_n1_0.asset
