@@ -103,22 +103,24 @@ namespace WorldPainter.Editor
 
         private void AddGrassLayer()
         {
-            // Create a new DensityScatterLayer sub-asset on the WorldPainter's scene object.
-            // Smart defaults: targetInstances = 50000, slopeRange = [0, 45].
-            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
-            layer.name = $"Grass {this.scatterLayersProp.arraySize}";
-
-            // Persist as an asset next to the scene (or in-memory for unsaved scenes).
-            string scenePath = this.painter.gameObject.scene.path;
-            if (!string.IsNullOrEmpty(scenePath))
+            // Grass layers live as sub-assets of the WorldMapAsset (SSOT) — the scatter engine
+            // builds from WorldMapAsset.Layers (WorldPainter.Scatter.RebuildScatter). Require a
+            // saved map; a loose .asset would never reach the engine (errors-over-fallbacks).
+            WorldMapAsset? map = this.painter.Map;
+            if (map == null || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(map)))
             {
-                string dir    = System.IO.Path.GetDirectoryName(scenePath)!;
-                string assetP = System.IO.Path.Combine(dir, $"{layer.name}.asset")
-                                     .Replace('\\', '/');
-                UnityEditor.AssetDatabase.CreateAsset(layer, assetP);
-                UnityEditor.AssetDatabase.SaveAssets();
+                Debug.LogError(
+                    "[WorldPainter] Cannot add a grass layer: assign and save a World Map first " +
+                    "(use the 'Create World Map' button). Scatter layers are stored as sub-assets " +
+                    "of the map.");
+                return;
             }
 
+            // Create the layer as a sub-asset of the map (+ allocate per-tile density channels).
+            string baseName = $"Grass {this.scatterLayersProp.arraySize}";
+            DensityScatterLayer layer = WorldMapAssetLifecycle.AddDensityLayer(map, baseName);
+
+            // Reference it from the painter's scatter list so the stack + detail card resolve it.
             Undo.RecordObject(this.painter, "Add Grass Layer");
 
             int newIdx = this.scatterLayersProp.arraySize;
@@ -133,6 +135,30 @@ namespace WorldPainter.Editor
         private void RemoveScatterLayer(int index)
         {
             if (index < 0 || index >= this.scatterLayersProp.arraySize) return;
+
+            var layer = this.scatterLayersProp.GetArrayElementAtIndex(index)
+                            .objectReferenceValue as ScatterLayer;
+
+            // Confirm before deleting — removal destroys the layer's sub-assets (def + density
+            // map + material) from the World Map and is NOT undoable.
+            string layerName = layer != null ? layer.name : $"layer {index}";
+            if (!EditorUtility.DisplayDialog(
+                    "Remove Scatter Layer",
+                    $"Remove '{layerName}'?\n\nThis permanently deletes the layer and its " +
+                    "density-map and material sub-assets from the World Map. This cannot be undone.",
+                    "Remove", "Cancel"))
+                return;
+
+            // If this layer is a sub-asset of the map, remove it there too (def + density
+            // texture + per-tile channels) — the scatter engine builds from map.Layers, so a
+            // map-only leftover would keep rendering after the stack row is gone.
+            WorldMapAsset? map = this.painter.Map;
+            if (layer != null && map != null &&
+                !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(map)) &&
+                AssetDatabase.GetAssetPath(layer) == AssetDatabase.GetAssetPath(map))
+            {
+                WorldMapAssetLifecycle.RemoveLayer(map, layer);
+            }
 
             Undo.RecordObject(this.painter, "Remove Scatter Layer");
             this.scatterLayersProp.GetArrayElementAtIndex(index).objectReferenceValue = null;

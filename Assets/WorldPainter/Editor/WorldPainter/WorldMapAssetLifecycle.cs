@@ -118,6 +118,23 @@ namespace WorldPainter.Editor
             AssetDatabase.AddObjectToAsset(layer, mapPath);
             map.RegisterLayer(layer);
 
+            // Create a blank density-map texture as a sub-asset and assign it so the new layer
+            // passes DensityScatterLayer.Validate (non-null, readable, uncompressed) and is
+            // immediately paintable + renderable. Removed alongside the layer in RemoveLayer.
+            Texture2D densityMap = CreateBlankDensityMap(layer.name);
+            AssetDatabase.AddObjectToAsset(densityMap, mapPath);
+            AssignDensityMap(layer, densityMap);
+
+            // Create a default grass material as a sub-asset and assign it to render.material —
+            // the instanced render tier (GrassRenderer) reads ScatterRenderConfig.Material.
+            // Removed alongside the layer in RemoveLayer.
+            Material? material = CreateGrassMaterial(layer.name);
+            if (material != null)
+            {
+                AssetDatabase.AddObjectToAsset(material, mapPath);
+                AssignRenderMaterial(layer, material);
+            }
+
             // Allocate a per-tile density channel for all existing tiles.
             AllocateDensityChannelOnAllTiles(map, layer.name);
 
@@ -169,12 +186,100 @@ namespace WorldPainter.Editor
             else
                 FreePropBucketOnAllTiles(map, layerId);
 
+            // Remove auto-created sub-assets (see AddDensityLayer) so no orphan sub-asset
+            // survives. Only removes objects that live inside THIS map.
+            if (layer is DensityScatterLayer densityLayer)
+            {
+                Texture2D? densityMap = densityLayer.DensityMap;
+                if (densityMap != null &&
+                    AssetDatabase.GetAssetPath(densityMap) == AssetDatabase.GetAssetPath(map))
+                {
+                    AssetDatabase.RemoveObjectFromAsset(densityMap);
+                    Object.DestroyImmediate(densityMap, allowDestroyingAssets: true);
+                }
+            }
+
+            Material? renderMat = layer.Render.Material;
+            if (renderMat != null &&
+                AssetDatabase.GetAssetPath(renderMat) == AssetDatabase.GetAssetPath(map))
+            {
+                AssetDatabase.RemoveObjectFromAsset(renderMat);
+                Object.DestroyImmediate(renderMat, allowDestroyingAssets: true);
+            }
+
             map.UnregisterLayer(layer);
             AssetDatabase.RemoveObjectFromAsset(layer);
             Object.DestroyImmediate(layer, allowDestroyingAssets: true);
 
             EditorUtility.SetDirty(map);
             AssetDatabase.SaveAssets();
+        }
+
+        // ── Density-map sub-asset factory ─────────────────────────────────────
+
+        /// <summary>
+        /// Creates a blank, readable, uncompressed density map sized to
+        /// <see cref="WorldMapGrid.DENSITY_RES"/>. Black = zero density until the user paints.
+        /// RGBA32 (density in the R channel) is used for guaranteed <c>SetPixels</c> support —
+        /// the same call <see cref="WorldPainterDensityEncoder"/> uses on mouse-up paint.
+        /// </summary>
+        private static Texture2D CreateBlankDensityMap(string layerBaseName)
+        {
+            int res = WorldMapGrid.DENSITY_RES;
+            var tex = new Texture2D(res, res, TextureFormat.RGBA32, mipChain: false, linear: true)
+            {
+                name       = $"{layerBaseName}_Density",
+                wrapMode   = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+
+            tex.SetPixels(new Color[res * res]); // default (0,0,0,0) → zero density
+            tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            return tex;
+        }
+
+        /// <summary>Assigns <paramref name="densityMap"/> to the layer's private serialized field.</summary>
+        private static void AssignDensityMap(DensityScatterLayer layer, Texture2D densityMap)
+        {
+            using var so = new SerializedObject(layer);
+            var prop = so.FindProperty("densityMap");
+            if (prop == null) return;
+            prop.objectReferenceValue = densityMap;
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        // ── Grass material sub-asset factory ──────────────────────────────────
+
+        /// <summary>Shader for the per-layer grass material — the instanced render tier reads it.</summary>
+        private const string INSTANCED_GRASS_SHADER = "WorldPainter/InstancedGrass";
+
+        /// <summary>
+        /// Creates a default grass material on the <see cref="INSTANCED_GRASS_SHADER"/> shader.
+        /// Returns null (with a surfaced error) when the shader cannot be found — the layer is
+        /// then created without a material and the user assigns one manually.
+        /// </summary>
+        private static Material? CreateGrassMaterial(string layerBaseName)
+        {
+            Shader? shader = Shader.Find(INSTANCED_GRASS_SHADER);
+            if (shader == null)
+            {
+                Debug.LogError(
+                    $"[WorldPainter] Grass shader '{INSTANCED_GRASS_SHADER}' not found — new layer " +
+                    "created without a material; assign one manually on the layer's Render config.");
+                return null;
+            }
+
+            return new Material(shader) { name = $"{layerBaseName}_Material" };
+        }
+
+        /// <summary>Assigns <paramref name="material"/> to the layer's <c>render.material</c> serialized field.</summary>
+        private static void AssignRenderMaterial(ScatterLayer layer, Material material)
+        {
+            using var so = new SerializedObject(layer);
+            var prop = so.FindProperty("render")?.FindPropertyRelative("material");
+            if (prop == null) return;
+            prop.objectReferenceValue = material;
+            so.ApplyModifiedPropertiesWithoutUndo();
         }
 
         // â”€â”€ Per-tile channel/bucket allocation helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

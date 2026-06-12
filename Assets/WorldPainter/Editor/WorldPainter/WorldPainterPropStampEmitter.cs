@@ -72,6 +72,28 @@ namespace WorldPainter.Editor
             EditorUtility.SetDirty(authored);
         }
 
+        /// <summary>
+        /// Places exactly one instance at <paramref name="pos"/> (the Single tool). Reuses the
+        /// full anchor/ground-snap/slope pipeline via a single-density, near-zero-radius emit.
+        /// </summary>
+        public void EmitSingle(
+            InstanceScatterLayer     layer,
+            Vector3                  pos,
+            HeightmapSurfaceSampler? surfaceSampler)
+        {
+            int savedDensity = this.DensityPerStamp;
+            this.DensityPerStamp = 1;
+            try
+            {
+                // Near-zero radius keeps the single instance at the cursor.
+                this.Emit(layer, pos, brushRadius: 0.01f, deleteMode: false, surfaceSampler);
+            }
+            finally
+            {
+                this.DensityPerStamp = savedDensity;
+            }
+        }
+
         /// <summary>Returns the density-per-stamp label string for display in the card.</summary>
         public static string GetDensityLabel(InstanceScatterLayer layer)
         {

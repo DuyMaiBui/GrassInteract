@@ -11,8 +11,8 @@ namespace WorldPainter.Editor
     /// the mesh or material reference changes. Never re-renders on idle inspector repaint.
     ///
     /// Design §6 perf: zero <c>PreviewRenderUtility.Render</c> calls on idle repaint.
-    /// Both <see cref="WorldPainterLodPreviewPanel"/> and <see cref="WorldPainterLodBandRuler"/>
-    /// use this cache.
+    /// <see cref="WorldPainterLodBandRuler"/>, the layer-stack view, and the splat palette
+    /// view use this cache.
     /// </summary>
     internal sealed class WorldPainterPreviewCache
     {

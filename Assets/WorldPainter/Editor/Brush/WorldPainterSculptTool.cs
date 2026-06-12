@@ -54,6 +54,12 @@ namespace WorldPainter.Editor
 
         internal BiomeChannelMask biomeMuteMask = BiomeChannelMask.None;
 
+        // ── Flatten target (P8 — captured per stroke when the Flatten tool is active) ──
+        // World-space Y under the cursor at mouse-down; normalized per-tile at dispatch time.
+
+        internal float flattenTargetWorldY;
+        internal bool  flattenTargetValid;
+
         // ── Per-stroke tracking ───────────────────────────────────────────────
 
         internal readonly HashSet<Vector2Int> undoPushedCoords    = new HashSet<Vector2Int>();

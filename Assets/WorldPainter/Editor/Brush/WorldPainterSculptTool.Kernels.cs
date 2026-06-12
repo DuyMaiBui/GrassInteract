@@ -6,19 +6,17 @@ using UnityEngine;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Kernel-selection and per-layer dispatch half of <see cref="WorldPainterSculptTool"/> (partial).
+    /// Layer-routing half of <see cref="WorldPainterSculptTool"/> (partial).
     ///
-    /// Contains: <see cref="BindAndDispatch"/> (reads active layer type and routes to the
-    /// correct GPU kernel or CPU emitter), plus the three kernel methods:
-    /// <see cref="DispatchHeightKernel"/>, <see cref="DispatchSplatKernel"/>,
-    /// <see cref="DispatchDensityKernel"/>.
-    ///
-    /// Stamp-path dispatch (<see cref="WorldPainterSculptTool.Stroke.cs"/>) calls
-    /// <see cref="BindAndDispatch"/> after resolving which tiles to touch.
+    /// <see cref="BindAndDispatch"/> sets the common brush uniforms, then either routes a Biome
+    /// layer to the composite <see cref="WorldPainterBiomeStamp"/> (unchanged), or resolves the
+    /// active <see cref="IBrushTool"/> for the effective layer kind and invokes it. The per-kernel
+    /// dispatch logic lives in the tool implementations (Editor/Brush/Tools/), not here — adding a
+    /// new brush behaviour no longer means editing this dispatcher.
     /// </summary>
     internal sealed partial class WorldPainterSculptTool
     {
-        // ── Kernel selection / layer routing ──────────────────────────────────
+        // ── Layer routing → active brush tool ─────────────────────────────────
 
         private void BindAndDispatch(
             Vector3 worldPos,
@@ -29,8 +27,9 @@ namespace WorldPainter.Editor
             if (this.brushCompute == null) return;
 
             var painter = WorldPainterState.ActivePainter;
+            if (painter == null) return;
 
-            var brush = WorldPainterState.Brush;
+            var brush   = WorldPainterState.Brush;
             var worldXZ = new Vector2(worldPos.x, worldPos.z);
             TerrainPaintTargetResolver.WorldBrushToTileUV(
                 worldXZ, brush.size, tile.tileCoord,
@@ -39,105 +38,21 @@ namespace WorldPainter.Editor
             int rtRes  = TerrainSculptConfig.BRUSH_RT_RES;
             int groups = Mathf.CeilToInt((float)rtRes / TerrainSculptConfig.THREAD_GROUP_SIZE);
 
+            // Common brush uniforms — shared by every kernel; tools set only their own params.
             this.brushCompute.SetVector("_BrushCenterUV", centerUV);
             this.brushCompute.SetFloat("_BrushRadiusUV",  radiusUV);
             this.brushCompute.SetFloat("_Strength",        brush.strength);
             this.brushCompute.SetInt("_RTRes",             rtRes);
             this.brushCompute.SetInt("_BrushShape",        (int)brush.shape);
+            // Reset splat mode to Paint each dispatch. SplatEraseTool re-sets it to 1 just before
+            // its own dispatch; this default keeps the biome composite splat path (which never
+            // sets _SplatMode) from inheriting a stale Erase from a prior splat-erase stroke.
+            this.brushCompute.SetInt("_SplatMode", 0);
 
-            // Determine kernel by active layer (P5 SSOT: ActiveLayerKind / ActiveLayerId).
-            // Meadow → PaintDensity on the active density scatter layer.
-            // Splat  → PaintSplat on the active splat channel.
-            // Prop   → CPU prop stamp emitter (no GPU kernel).
-            // Height (default) → RaiseLower.
-            var layerKind = WorldPainterState.ActiveLayerKind;
-            var layerId   = WorldPainterState.ActiveLayerId;
+            LayerType activeType = WorldPainterState.EffectiveLayerType(painter);
 
-            // Legacy fallback: also check the older LayerType API so existing strokes
-            // that were started before the P5 API continue to work correctly.
-            LayerType activeType = LayerType.Height;
-            int splatChannel = -1;
-            if (painter != null)
-                activeType = WorldPainterState.ActiveLayerType(painter, out splatChannel);
-
-            if (layerKind == WorldPainterState.PaintLayerKind.Splat || activeType == LayerType.Splat)
-            {
-                // Prefer P5 channel resolution; fall back to legacy splatChannel.
-                int channel = splatChannel;
-                this.DispatchSplatKernel(groups, channel, splatRT);
-            }
-            else if ((layerKind == WorldPainterState.PaintLayerKind.Meadow) && painter != null)
-            {
-                // P5 path: find the DensityScatterLayer by ActiveLayerId.
-                DensityScatterLayer? scatterLayer = null;
-                foreach (var layer in painter.ScatterLayers)
-                {
-                    if (layer is DensityScatterLayer dl && dl.name == layerId)
-                    {
-                        scatterLayer = dl;
-                        break;
-                    }
-                }
-                if (scatterLayer == null)
-                {
-                    // Fallback: use ActiveScatterIndex (legacy).
-                    int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
-                    if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
-                        scatterLayer = painter.ScatterLayers[scatterIdx] as DensityScatterLayer;
-                }
-                if (scatterLayer != null)
-                {
-                    var dRT = this.GetOrCreateDensityRT(scatterLayer);
-                    if (dRT != null)
-                        this.DispatchDensityKernel(groups, dRT);
-                }
-            }
-            else if (activeType == LayerType.Grass && painter != null
-                     && layerKind == WorldPainterState.PaintLayerKind.None)
-            {
-                // Legacy path when P5 API hasn't been set (no palette card selected yet).
-                int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
-                if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
-                {
-                    var scatterLayer = painter.ScatterLayers[scatterIdx] as DensityScatterLayer;
-                    if (scatterLayer != null)
-                    {
-                        var dRT = this.GetOrCreateDensityRT(scatterLayer);
-                        if (dRT != null)
-                            this.DispatchDensityKernel(groups, dRT);
-                    }
-                }
-            }
-            else if ((layerKind == WorldPainterState.PaintLayerKind.Prop
-                      || activeType == LayerType.Props) && painter != null)
-            {
-                // Props use CPU spacing-stamp emitter (no GPU kernel).
-                int scatterIdx = WorldPainterState.ActiveScatterIndex(painter);
-                if (scatterIdx >= 0 && scatterIdx < painter.ScatterLayers.Count)
-                {
-                    var propLayer = painter.ScatterLayers[scatterIdx] as InstanceScatterLayer;
-                    if (propLayer != null)
-                    {
-                        bool isDelete = Event.current != null && Event.current.shift;
-                        // Push undo before first emit on this layer this stroke.
-                        var authored = propLayer.AuthoredInstances;
-                        if (authored != null)
-                        {
-                            int key = propLayer.GetInstanceID();
-                            if (!WorldPainterAuthoring.UndoStack.CanUndoRecords(key))
-                                WorldPainterAuthoring.UndoStack.PushRecords(authored, key);
-                        }
-
-                        this.propEmitter.Emit(
-                            propLayer,
-                            worldPos,
-                            brush.size * 0.5f,
-                            deleteMode: isDelete,
-                            surfaceSampler: null);
-                    }
-                }
-            }
-            else if (activeType == LayerType.Biome && painter != null && this.biomeStamp != null)
+            // Biome composite stamp keeps its own multi-channel path (not a brush tool).
+            if (activeType == LayerType.Biome && this.biomeStamp != null)
             {
                 int biomeIdx = WorldPainterState.ActiveBiomeLayerIndex(painter);
                 if (biomeIdx >= 0 && biomeIdx < painter.Biomes.Count)
@@ -158,51 +73,17 @@ namespace WorldPainter.Editor
                             surfaceSampler: null);
                     }
                 }
+                return;
             }
-            else
-            {
-                this.DispatchHeightKernel(groups, heightRT);
-            }
-        }
 
-        // ── GPU kernel dispatchers ─────────────────────────────────────────────
+            // Generic brush-tool dispatch (height / splat / density / instance).
+            var tool = BrushToolRegistry.ResolveActiveTool(
+                activeType, WorldPainterState.ActiveBrushToolId);
+            if (tool == null) return;
 
-        private void DispatchHeightKernel(int groups, RenderTexture heightRT)
-        {
-            if (this.brushCompute == null) return;
-
-            int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_RAISE_LOWER);
-            this.falloffLut.BindToCompute(this.brushCompute, k);
-            this.brushCompute.SetTexture(k, "_HeightRT", heightRT);
-            this.brushCompute.SetFloat("_RaiseSign", 1f);
-            this.brushCompute.Dispatch(k, groups, groups, 1);
-        }
-
-        private void DispatchSplatKernel(int groups, int splatChannel, RenderTexture splatRT)
-        {
-            if (this.brushCompute == null) return;
-
-            int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_SPLAT);
-            this.falloffLut.BindToCompute(this.brushCompute, k);
-            this.brushCompute.SetTexture(k, "_SplatRT", splatRT);
-            this.brushCompute.SetInt("_SplatLayer", Mathf.Clamp(splatChannel, 0, TerrainSculptConfig.MAX_SPLAT_LAYERS - 1));
-            this.brushCompute.Dispatch(k, groups, groups, 1);
-        }
-
-        private void DispatchDensityKernel(int groups, RenderTexture densityRT)
-        {
-            if (this.brushCompute == null) return;
-
-            int k = this.brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
-            this.falloffLut.BindToCompute(this.brushCompute, k);
-            this.brushCompute.SetTexture(k, "_DensityRT", densityRT);
-            // Mode 0 = Paint. Erase/smooth extend via different _DensityMode values (P4+).
-            this.brushCompute.SetInt("_DensityMode", 0);
-            this.brushCompute.Dispatch(k, groups, groups, 1);
-
-            // Queue throttled async writeback to the density layer.
-            if (this.activeDensityLayer != null)
-                this.densityEncoder.RequestAsync(this.activeDensityLayer, densityRT);
+            var ctx = new BrushToolContext(
+                this, painter, worldPos, tile, heightRT, splatRT, this.brushCompute, groups);
+            tool.Apply(in ctx);
         }
     }
 }

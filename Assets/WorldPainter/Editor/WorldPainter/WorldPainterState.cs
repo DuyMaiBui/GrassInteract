@@ -35,8 +35,23 @@ namespace WorldPainter.Editor
         /// Index into the layer stack of the currently selected (active) layer.
         /// -1 = no layer selected. The layer stack view reads/writes this.
         /// Stack order (display): 0 = Height (synthetic), 1..N = splat rows.
+        /// Setting a new value fires <see cref="ActiveLayerIndexChanged"/> so the contextual
+        /// brush-tool palette can refresh (the stack selects via this index, not SetActiveLayer).
         /// </summary>
-        public static int ActiveLayerIndex { get; set; } = -1;
+        public static int ActiveLayerIndex
+        {
+            get => activeLayerIndex;
+            set
+            {
+                if (activeLayerIndex == value) return;
+                activeLayerIndex = value;
+                ActiveLayerIndexChanged?.Invoke();
+            }
+        }
+        private static int activeLayerIndex = -1;
+
+        /// <summary>Fired after <see cref="ActiveLayerIndex"/> changes (stack-driven selection).</summary>
+        public static event System.Action? ActiveLayerIndexChanged;
 
         /// <summary>
         /// Returns the <see cref="LayerType"/> and splat channel index for the currently
@@ -75,6 +90,29 @@ namespace WorldPainter.Editor
             if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
                 return LayerType.Biome;
 
+            return LayerType.Height;
+        }
+
+        /// <summary>
+        /// The effective layer type that drives brush-tool dispatch + the contextual palette,
+        /// combining BOTH selection signals: the P5 SSOT (<see cref="ActiveLayerKind"/>, set by
+        /// the scatter/splat palette) and the legacy index path (<see cref="ActiveLayerType"/>,
+        /// set by the layer stack). Precedence matches the original BindAndDispatch routing:
+        /// Splat → Grass(density) → Props → Biome → Height.
+        /// </summary>
+        public static LayerType EffectiveLayerType(WorldPainter painter)
+        {
+            LayerType legacy = ActiveLayerType(painter, out _);
+            PaintLayerKind p5 = ActiveLayerKind;
+
+            // Precedence mirrors the original BindAndDispatch routing exactly, including the
+            // p5==None guard on the legacy-Grass branch so a stale P5 Prop selection does not
+            // get overridden by a stack-derived Grass index (and vice-versa).
+            if (p5 == PaintLayerKind.Splat || legacy == LayerType.Splat)        return LayerType.Splat;
+            if (p5 == PaintLayerKind.Meadow)                                    return LayerType.Grass;
+            if (legacy == LayerType.Grass && p5 == PaintLayerKind.None)         return LayerType.Grass;
+            if (p5 == PaintLayerKind.Prop || legacy == LayerType.Props)         return LayerType.Props;
+            if (legacy == LayerType.Biome)                                      return LayerType.Biome;
             return LayerType.Height;
         }
 
@@ -183,6 +221,27 @@ namespace WorldPainter.Editor
                 ActiveLayerChanged?.Invoke(layerId, kind);
         }
 
+        // ── Active brush tool (P8 — generic draw interface) ───────────────────
+
+        /// <summary>
+        /// Id of the currently selected brush tool (e.g. <c>"height.raise"</c>). Mapped onto the
+        /// active layer's tool set by <see cref="BrushToolRegistry.ResolveActiveTool"/>; an id
+        /// that doesn't belong to the active kind falls back to that kind's default tool.
+        /// Empty = use each kind's default. Drives <c>BindAndDispatch</c> + the dock tool palette.
+        /// </summary>
+        public static string ActiveBrushToolId { get; private set; } = string.Empty;
+
+        /// <summary>Fired after <see cref="SetActiveBrushTool"/> changes the active tool.</summary>
+        public static event System.Action<string>? ActiveBrushToolChanged;
+
+        /// <summary>Sets the active brush tool id and fires <see cref="ActiveBrushToolChanged"/> when changed.</summary>
+        public static void SetActiveBrushTool(string toolId)
+        {
+            if (ActiveBrushToolId == toolId) return;
+            ActiveBrushToolId = toolId;
+            ActiveBrushToolChanged?.Invoke(toolId);
+        }
+
         // ── Active biome (P5) ─────────────────────────────────────────────────
 
         /// <summary>
@@ -222,7 +281,10 @@ namespace WorldPainter.Editor
             ActiveBiomeIndex = -1;
             ActiveLayerId    = string.Empty;
             ActiveLayerKind  = PaintLayerKind.None;
+            ActiveBrushToolId  = string.Empty;
             ActiveLayerChanged = null;
+            ActiveLayerIndexChanged = null;
+            ActiveBrushToolChanged  = null;
             BrushFalloffDirty = null;
             ResetLastStroked();
         }

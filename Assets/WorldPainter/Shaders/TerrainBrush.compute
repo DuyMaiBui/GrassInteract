@@ -53,6 +53,9 @@ float _FlattenTarget;
 /// Layer index [0,3] to paint.
 int _SplatLayer;
 
+/// Splat paint mode: 0 = Paint (add + renormalize), 1 = Erase (subtract from active channel).
+int _SplatMode;
+
 // ── PaintDensity parameters ───────────────────────────────────────────────────
 
 /// Density working texture (RFloat, read+write). Normalized [0,1].
@@ -164,8 +167,20 @@ void PaintSplat(uint3 id : SV_DispatchThreadID)
     float4 splat = _SplatRT[id.xy];
     float  paint = _Strength * weight;
 
-    // Accumulate into the active layer channel (clamped to 1).
     float4 target = splat;
+
+    // Erase mode: subtract from the active channel only (no renormalization).
+    if (_SplatMode == 1)
+    {
+        if (_SplatLayer == 0) target.x = saturate(target.x - paint);
+        if (_SplatLayer == 1) target.y = saturate(target.y - paint);
+        if (_SplatLayer == 2) target.z = saturate(target.z - paint);
+        if (_SplatLayer == 3) target.w = saturate(target.w - paint);
+        _SplatRT[id.xy] = target;
+        return;
+    }
+
+    // Paint mode: accumulate into the active layer channel (clamped to 1).
     if (_SplatLayer == 0) target.x = saturate(target.x + paint);
     if (_SplatLayer == 1) target.y = saturate(target.y + paint);
     if (_SplatLayer == 2) target.z = saturate(target.z + paint);

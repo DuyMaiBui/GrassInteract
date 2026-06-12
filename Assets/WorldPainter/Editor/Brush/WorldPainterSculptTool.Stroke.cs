@@ -42,6 +42,23 @@ namespace WorldPainter.Editor
             GUIUtility.hotControl = controlId;
             this.stroke.Begin(worldPos);
 
+            // Capture the flatten target (cursor world-Y) once per stroke when the Flatten tool
+            // is active — normalized per-tile at dispatch. Other tools ignore this.
+            this.flattenTargetValid = false;
+            LayerType startKind = WorldPainterState.EffectiveLayerType(painter);
+            IBrushTool? startTool = BrushToolRegistry.ResolveActiveTool(
+                startKind, WorldPainterState.ActiveBrushToolId);
+            if (startTool is HeightFlattenTool)
+            {
+                Vector2Int fc = TerrainWorldGrid.WorldToTileCoord(worldPos.x, worldPos.z);
+                var ft = this.FindTile(painter, fc);
+                if (ft != null && TerrainHeightSampleCpu.TrySampleWorld(ft, worldPos.x, worldPos.z, out float fy))
+                {
+                    this.flattenTargetWorldY = fy;
+                    this.flattenTargetValid  = true;
+                }
+            }
+
             // Initial stamp at mouse-down position.
             this.DoStamp(painter, worldPos);
             this.CommitLastStrokedState();
@@ -50,6 +67,12 @@ namespace WorldPainter.Editor
         private void HandleMouseDrag(WorldPainter painter, Vector3 worldPos)
         {
             var brush = WorldPainterState.Brush;
+
+            // Single-placement instance tool places exactly one instance per click — ignore drag.
+            LayerType dragKind = WorldPainterState.EffectiveLayerType(painter);
+            IBrushTool? dragTool = BrushToolRegistry.ResolveActiveTool(
+                dragKind, WorldPainterState.ActiveBrushToolId);
+            if (dragTool is InstanceSingleTool) return;
 
             // Spacing-stamping: stamps every spacingM metres along path.
             this.stroke.Advance(
@@ -168,6 +191,10 @@ namespace WorldPainter.Editor
 
         internal TerrainTileAsset? FindTile(WorldPainter painter, Vector2Int coord)
         {
+            // Map-based SSOT path (P2+): painter.Tiles is empty when a WorldMapAsset is used.
+            if (painter.Map != null)
+                return painter.Map.GetTile(coord);
+
             foreach (var entry in painter.Tiles)
                 if (entry.coord == coord && entry.tileAsset != null)
                     return entry.tileAsset;
@@ -195,8 +222,11 @@ namespace WorldPainter.Editor
             foreach (var entry in painter.Tiles)
             {
                 if (entry.tileAsset == null) continue;
-                float midY = (entry.tileAsset.minHeight + entry.tileAsset.maxHeight) * 0.5f;
-                var plane  = new Plane(Vector3.up, new Vector3(0f, midY, 0f));
+                // Use minHeight for the plane: all-zero heightData means the surface sits at
+                // minHeight. Using midY (midpoint of [minH,maxH]) places the plane above the
+                // camera when the terrain is flat at Y=0 with maxHeight=512, causing Raycast
+                // to miss entirely.
+                var plane = new Plane(Vector3.up, new Vector3(0f, entry.tileAsset.minHeight, 0f));
                 if (plane.Raycast(ray, out float dist) && dist > 0f && dist < 1e6f)
                 {
                     worldPoint = ray.GetPoint(dist); return true;
@@ -208,9 +238,15 @@ namespace WorldPainter.Editor
 
         /// <summary>
         /// Analytic ray↔terrain-surface intersection for edit mode (no collider on the GPU
-        /// terrain). Two-pass: intersect a coarse mid-height plane to get an approximate XZ,
+        /// terrain). Two-pass: intersect a coarse surface plane to get an approximate XZ,
         /// sample the real surface height there, then re-intersect at that height so the brush
         /// sits on the terrain (exact for flat tiles, close for gentle slopes).
+        ///
+        /// Uses <c>minHeight</c> for the coarse plane, NOT <c>midY=(min+max)/2</c>. The mid-
+        /// point would be above the scene camera for a newly-created flat tile (minHeight=0,
+        /// maxHeight=512 ⇒ midY=256), causing <c>Plane.Raycast</c> to miss and returning no
+        /// hit, which makes every frame report <c>hasHit=false</c> — disabling both the preview
+        /// ring and all sculpt dispatch.
         /// </summary>
         private static bool TryMapSurfaceHit(Ray ray, WorldMapAsset map, out Vector3 worldPoint)
         {
@@ -218,8 +254,9 @@ namespace WorldPainter.Editor
             foreach (var tile in map.EnumerateTiles())
             {
                 if (tile == null) continue;
-                float midY = (tile.minHeight + tile.maxHeight) * 0.5f;
-                var coarse = new Plane(Vector3.up, new Vector3(0f, midY, 0f));
+                // Coarse plane at minHeight — the surface for a flat zero-filled tile is exactly
+                // here. For sculpted tiles with varying height the second pass corrects the Y.
+                var coarse = new Plane(Vector3.up, new Vector3(0f, tile.minHeight, 0f));
                 if (!coarse.Raycast(ray, out float d0) || d0 <= 0f || d0 >= 1e6f) continue;
 
                 Vector3    approx = ray.GetPoint(d0);
@@ -253,10 +290,22 @@ namespace WorldPainter.Editor
 
         /// <summary>
         /// Enumerates all (coord, tile) pairs in the painter for seam-sync neighbour registration.
+        /// Covers both the map-based SSOT path (P2+) and the legacy inline-Tiles path.
         /// </summary>
         private static IEnumerable<(Vector2Int coord, TerrainTileAsset tile)> EnumerateTileEntries(
             WorldPainter painter)
         {
+            if (painter.Map != null)
+            {
+                foreach (var coord in painter.Map.EnumerateTileCoords())
+                {
+                    var tile = painter.Map.GetTile(coord);
+                    if (tile != null)
+                        yield return (coord, tile);
+                }
+                yield break;
+            }
+
             foreach (var entry in painter.Tiles)
             {
                 if (entry.tileAsset != null)

@@ -34,6 +34,10 @@ namespace WorldPainter.Editor
         private string[]    stampNames    = System.Array.Empty<string>();
         private int selectedStampIndex;
 
+        // ── Contextual tool palette ───────────────────────────────────────────
+
+        private VisualElement? toolPaletteRoot;
+
         // ── Preset slot labels ────────────────────────────────────────────────
 
         private Label[] presetLabels = new Label[WorldPainterPresetSlots.SLOT_COUNT];
@@ -63,8 +67,8 @@ namespace WorldPainter.Editor
 
             var brush = WorldPainterState.Brush;
 
-            // Height / Splat / Density mode toggle
-            dock.Add(this.BuildModeToggle());
+            // Contextual tool palette (tools for the active layer kind)
+            dock.Add(this.BuildToolPalette());
 
             // Shape toggle (Circle / Square)
             dock.Add(this.BuildShapeToggle());
@@ -101,39 +105,91 @@ namespace WorldPainter.Editor
             return dock;
         }
 
-        // ── Mode toggle (Height / Splat / Density) ────────────────────────────
+        // ── Contextual tool palette (tools per active layer kind) ─────────────
 
-        private VisualElement BuildModeToggle()
+        /// <summary>
+        /// Builds the TOOLS row. Its buttons reflect the active layer kind (Height → Raise/Lower/
+        /// Smooth/Flatten, Splat → Paint/Erase, Density → Paint/Erase/Smooth, Props → Place/Erase/
+        /// Single). Rebuilds when the active layer (stack or palette) or active tool changes.
+        /// </summary>
+        private VisualElement BuildToolPalette()
         {
-            var row = new VisualElement();
-            row.AddToClassList("wp-mode-toggle-row");
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginBottom  = 4;
+            var container = new VisualElement();
 
-            var modes = new[] { "Height", "Splat", "Density" };
-            var kinds = new[]
-            {
-                WorldPainterState.PaintLayerKind.None,
-                WorldPainterState.PaintLayerKind.Splat,
-                WorldPainterState.PaintLayerKind.Meadow,
-            };
+            var title = new Label("TOOLS");
+            title.AddToClassList("wp-section-title");
+            container.Add(title);
 
-            for (int i = 0; i < modes.Length; i++)
+            this.toolPaletteRoot = new VisualElement();
+            this.toolPaletteRoot.AddToClassList("wp-mode-toggle-row");
+            this.toolPaletteRoot.style.flexDirection = FlexDirection.Row;
+            this.toolPaletteRoot.style.flexWrap      = Wrap.Wrap;
+            this.toolPaletteRoot.style.marginBottom  = 4;
+            container.Add(this.toolPaletteRoot);
+
+            this.PopulateToolPalette();
+
+            // Subscribe to all three signals that can change the effective layer kind / tool.
+            System.Action onIndex = this.PopulateToolPalette;
+            System.Action<string> onTool = _ => this.PopulateToolPalette();
+            System.Action<string, WorldPainterState.PaintLayerKind> onLayer =
+                (_, __) => this.PopulateToolPalette();
+
+            WorldPainterState.ActiveLayerIndexChanged += onIndex;
+            WorldPainterState.ActiveBrushToolChanged  += onTool;
+            WorldPainterState.ActiveLayerChanged      += onLayer;
+
+            this.toolPaletteRoot.RegisterCallback<DetachFromPanelEvent>(_ =>
             {
-                int capturedIdx = i;
-                var btn = new Button(() => this.OnModeClicked(kinds[capturedIdx]));
-                btn.text = modes[i];
+                WorldPainterState.ActiveLayerIndexChanged -= onIndex;
+                WorldPainterState.ActiveBrushToolChanged  -= onTool;
+                WorldPainterState.ActiveLayerChanged      -= onLayer;
+            });
+
+            return container;
+        }
+
+        private void PopulateToolPalette()
+        {
+            if (this.toolPaletteRoot == null) return;
+            this.toolPaletteRoot.Clear();
+
+            var painter = WorldPainterState.ActivePainter;
+            LayerType kind = painter != null
+                ? WorldPainterState.EffectiveLayerType(painter)
+                : LayerType.Height;
+
+            var tools = BrushToolRegistry.ToolsFor(kind);
+            if (tools.Count == 0)
+            {
+                var hint = new Label(kind == LayerType.Biome
+                    ? "Biome uses contribution toggles"
+                    : "Select a layer to paint");
+                hint.style.fontSize   = 9;
+                hint.style.color      = new StyleColor(new Color(0.6f, 0.6f, 0.6f));
+                hint.style.marginLeft = 4;
+                this.toolPaletteRoot.Add(hint);
+                return;
+            }
+
+            var resolved = BrushToolRegistry.ResolveActiveTool(
+                kind, WorldPainterState.ActiveBrushToolId);
+
+            for (int i = 0; i < tools.Count; i++)
+            {
+                var tool = tools[i];
+                var btn = new Button(() => WorldPainterState.SetActiveBrushTool(tool.Id))
+                {
+                    text = tool.Label,
+                };
                 btn.AddToClassList("wp-mode-btn");
                 btn.style.flexGrow = 1;
 
-                // Highlight the currently active mode.
-                if (WorldPainterState.ActiveLayerKind == kinds[i])
+                if (resolved != null && resolved.Id == tool.Id)
                     btn.AddToClassList("wp-mode-btn--active");
 
-                row.Add(btn);
+                this.toolPaletteRoot.Add(btn);
             }
-
-            return row;
         }
 
         // ── Shape toggle (Circle / Square) ────────────────────────────────────
@@ -166,15 +222,6 @@ namespace WorldPainter.Editor
             }
 
             return row;
-        }
-
-        private void OnModeClicked(WorldPainterState.PaintLayerKind kind)
-        {
-            // Toggle: clicking the already-active mode deselects.
-            if (WorldPainterState.ActiveLayerKind == kind)
-                WorldPainterState.SetActiveLayer(string.Empty, WorldPainterState.PaintLayerKind.None);
-            else
-                WorldPainterState.SetActiveLayer(WorldPainterState.ActiveLayerId, kind);
         }
 
         // ── Stamp thumbnail strip ─────────────────────────────────────────────

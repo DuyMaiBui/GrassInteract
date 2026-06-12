@@ -34,10 +34,12 @@ namespace WorldPainter.Editor
 
         // ── Grass sub-views ───────────────────────────────────────────────────
 
-        private WorldPainterPreviewCache?    previewCache;
-        private WorldPainterLodPreviewPanel? lodPreviewPanel;
-        private WorldPainterLodBandRuler?    lodBandRuler;
         private WorldPainterScatterLayerCard? scatterCard;
+
+        // Identity of the layer currently shown in the detail card. The 200ms poll
+        // rebuilds the card ONLY when this changes — rebuilding every tick would
+        // destroy+recreate the embedded layer Editor 5×/sec (flicker + lost focus).
+        private string? lastCardKey;
 
         // ── Prop sub-views (P4) ───────────────────────────────────────────────
 
@@ -159,11 +161,7 @@ namespace WorldPainter.Editor
             root.Add(this.coachMarks.BuildLayerCoachArea(painter));
 
             // Grass sub-views (created once; shown when a Grass layer is active).
-            this.previewCache   = new WorldPainterPreviewCache();
-            this.lodPreviewPanel = new WorldPainterLodPreviewPanel();
-            this.lodBandRuler   = new WorldPainterLodBandRuler(this.previewCache);
-            this.scatterCard    = new WorldPainterScatterLayerCard(
-                this.lodPreviewPanel, this.lodBandRuler, this.previewCache);
+            this.scatterCard = new WorldPainterScatterLayerCard();
             this.propCard = new WorldPainterPropLayerCard();
 
             // Scatter layer card area — refreshed when active layer index changes.
@@ -174,11 +172,22 @@ namespace WorldPainter.Editor
             root.schedule.Execute(() =>
             {
                 LayerType layerType = WorldPainterState.ActiveLayerType(painter, out _);
+                int si = WorldPainterState.ActiveScatterIndex(painter);
+
+                // Identity of the active detail target. Include the layer asset's instance id
+                // so swapping the asset at the same index also refreshes.
+                int layerId = 0;
+                if (si >= 0 && si < painter.ScatterLayers.Count && painter.ScatterLayers[si] != null)
+                    layerId = painter.ScatterLayers[si].GetInstanceID();
+
+                string key = $"{layerType}:{si}:{layerId}";
+                if (key == this.lastCardKey) return; // unchanged → keep card (and its edit/focus state)
+                this.lastCardKey = key;
+
                 cardArea.Clear();
 
                 if (layerType == LayerType.Grass)
                 {
-                    int si = WorldPainterState.ActiveScatterIndex(painter);
                     if (si >= 0 && this.scatterCard != null)
                     {
                         var card = this.scatterCard.Build(painter, si);
@@ -187,7 +196,6 @@ namespace WorldPainter.Editor
                 }
                 else if (layerType == LayerType.Props)
                 {
-                    int si = WorldPainterState.ActiveScatterIndex(painter);
                     if (si >= 0 && this.propCard != null)
                     {
                         var card = this.propCard.Build(painter, si);
@@ -218,9 +226,6 @@ namespace WorldPainter.Editor
                 WorldPainterAuthoring.ActivePainter = null;
                 WorldPainterState.ResetLastStroked();
             }
-
-            this.lodPreviewPanel?.Cleanup();
-            this.previewCache?.Cleanup();
         }
 
         // ── Paint-mode activation ─────────────────────────────────────────────

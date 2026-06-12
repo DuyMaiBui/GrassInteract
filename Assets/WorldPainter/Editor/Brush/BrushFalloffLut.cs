@@ -43,6 +43,12 @@ namespace WorldPainter.Editor
         /// <summary>
         /// Sets <c>_FalloffLUT</c> and <c>_UseFalloffLUT=1</c> on the compute shader kernel.
         /// If the LUT RT is null (not yet uploaded), sets <c>_UseFalloffLUT=0</c> (inline fallback).
+        ///
+        /// <c>_FalloffLUT</c> is bound in BOTH cases: the brush kernels reference it
+        /// unconditionally (via <c>BrushMask.hlsl::BrushFalloffLUT</c>), so the HLSL compiler
+        /// keeps it as a required resource. Unity rejects <c>Dispatch</c> when any referenced
+        /// texture is unbound — even though the <c>_UseFalloffLUT=0</c> branch never samples it
+        /// — so the null case binds a dummy texture to satisfy the binding requirement.
         /// </summary>
         public void BindToCompute(ComputeShader cs, int kernel)
         {
@@ -53,6 +59,9 @@ namespace WorldPainter.Editor
             }
             else
             {
+                // No real LUT yet: bind a dummy so the kernel's _FalloffLUT slot is set,
+                // and select the inline cubic falloff (the dummy is never sampled).
+                cs.SetTexture(kernel, "_FalloffLUT", Texture2D.whiteTexture);
                 cs.SetInt("_UseFalloffLUT", 0);
             }
         }
