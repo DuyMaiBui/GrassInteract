@@ -78,6 +78,12 @@ namespace WorldPainter
         [Tooltip("Map-level scatter layer defs (DensityScatterLayer + InstanceScatterLayer sub-assets).")]
         [SerializeField] private List<ScatterLayer> layers = new();
 
+        // ── Surface layer list (unified splat + grass — WorldPainterLayer) ──────
+
+        [Tooltip("Unified surface layers (SplatLayer + GrassLayer sub-assets). Separate from the " +
+                 "legacy 'layers' list; iterated by WorldPainter.SurfaceLayers, NOT the frozen RebuildScatter.")]
+        [SerializeField] private List<WorldPainterLayer> surfaceLayers = new();
+
         // â”€â”€ Splat texture set (referenced, not nested) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         [Tooltip("Splat texture set (TerrainLayerSet) referenced by this map. Not a sub-asset.")]
@@ -134,6 +140,9 @@ namespace WorldPainter
 
         /// <summary>Read-only list of scatter layer defs (density + instance).</summary>
         public IReadOnlyList<ScatterLayer> Layers => this.layers;
+
+        /// <summary>Read-only list of unified surface layers (splat + grass).</summary>
+        public IReadOnlyList<WorldPainterLayer> SurfaceLayers => this.surfaceLayers;
 
         // â”€â”€ Neighbor query (used by P4 ghost quads) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -220,6 +229,27 @@ namespace WorldPainter
         internal void UnregisterLayer(ScatterLayer layer)
         {
             this.layers.Remove(layer);
+        }
+
+        /// <summary>
+        /// Appends a unified surface-layer sub-asset. Called by <see cref="WorldMapAssetLifecycle"/>
+        /// AFTER <c>AddObjectToAsset</c>.
+        /// </summary>
+        internal void RegisterSurfaceLayer(WorldPainterLayer layer)
+        {
+            if (this.surfaceLayers.Contains(layer))
+                throw new InvalidOperationException(
+                    $"[WorldMapAsset] Surface layer '{layer.name}' already registered.");
+            this.surfaceLayers.Add(layer);
+        }
+
+        /// <summary>
+        /// Removes a unified surface-layer from the list. Called by <see cref="WorldMapAssetLifecycle"/>
+        /// BEFORE <c>RemoveObjectFromAsset</c> + <c>DestroyImmediate</c>.
+        /// </summary>
+        internal void UnregisterSurfaceLayer(WorldPainterLayer layer)
+        {
+            this.surfaceLayers.Remove(layer);
         }
 
         // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
