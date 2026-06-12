@@ -6,70 +6,60 @@ using WorldPainter.Editor;
 namespace WorldPainter.Tests
 {
     /// <summary>
-    /// Tests for the conforming brush disc geometry (TerrainBrushPreview.CreateUnitDisc).
-    ///  - Vertex count = 1 (center) + rings × segments.
-    ///  - All verts lie within the unit circle (radius ≤ 0.5) in the XZ plane, Y=0.
-    ///  - UV maps the disc texture: center at (0.5,0.5), border verts at distance 0.5.
-    ///  - Triangles are non-empty and index in range.
+    /// Smoke tests for TerrainBrushPreview (Handles-based rewrite).
+    /// The old disc-mesh tests (CreateUnitDisc) were removed when the mesh-based
+    /// implementation was replaced with a pure-Handles ring + fill in Phase 3 of
+    /// the MegaWorld brush-preview port.
+    ///
+    /// These tests verify the public/internal contract of the new implementation:
+    ///   - Set() accepts valid inputs without throwing.
+    ///   - HeightFn delegate compiles and can be constructed.
     /// </summary>
     [TestFixture]
     public sealed class TerrainBrushPreviewTests
     {
         [Test]
-        public void CreateUnitDisc_VertexCount_IsCenterPlusRingGrid()
+        public void Set_ValidInputs_DoesNotThrow()
         {
-            const int rings = 6, segments = 24;
-            Mesh mesh = TerrainBrushPreview.CreateUnitDisc(rings, segments);
-            try
+            // Verify that Set() accepts valid inputs without throwing.
+            Assert.DoesNotThrow(() =>
             {
-                Assert.AreEqual(1 + rings * segments, mesh.vertexCount);
-                Assert.Greater(mesh.triangles.Length, 0, "Disc must have triangles.");
-                foreach (int i in mesh.triangles)
-                    Assert.Less(i, mesh.vertexCount, "Triangle index out of range.");
-            }
-            finally { Object.DestroyImmediate(mesh); }
+                TerrainBrushPreview.Set(
+                    worldPoint: new Vector3(10f, 5f, 10f),
+                    radius: 5f,
+                    tint: new Color(0.3f, 0.7f, 1f, 0.6f),
+                    shape: BrushShape.Circle,
+                    height: null);
+            });
         }
 
         [Test]
-        public void CreateUnitDisc_AllVerts_WithinUnitCircle_FlatXZ()
+        public void Set_SquareShape_DoesNotThrow()
         {
-            Mesh mesh = TerrainBrushPreview.CreateUnitDisc(10, 48);
-            try
+            // Verify Square shape variant accepted without throwing.
+            Assert.DoesNotThrow(() =>
             {
-                foreach (Vector3 p in mesh.vertices)
-                {
-                    Assert.AreEqual(0f, p.y, 1e-5f, "Disc verts must be flat (Y=0); height is applied at draw.");
-                    float r = Mathf.Sqrt(p.x * p.x + p.z * p.z);
-                    Assert.LessOrEqual(r, 0.5f + 1e-4f, $"Vert radius {r} exceeds unit disc (0.5).");
-                }
-            }
-            finally { Object.DestroyImmediate(mesh); }
+                TerrainBrushPreview.Set(
+                    worldPoint: new Vector3(0f, 0f, 0f),
+                    radius: 10f,
+                    tint: Color.white,
+                    shape: BrushShape.Square,
+                    height: null);
+            });
         }
 
         [Test]
-        public void CreateUnitDisc_Uv_CentersTextureAndReachesBorder()
+        public void HeightFn_Delegate_CanBeConstructed()
         {
-            Mesh mesh = TerrainBrushPreview.CreateUnitDisc(4, 16);
-            try
+            // Verify the HeightFn delegate can be instantiated with a valid lambda.
+            TerrainBrushPreview.HeightFn fn = (float wx, float wz, out float wy) =>
             {
-                Vector2[] uv = mesh.uv;
-                Vector3[] v  = mesh.vertices;
-                Assert.AreEqual(new Vector2(0.5f, 0.5f), uv[0], "Center vert UV must be texture center.");
-
-                // Outer-ring verts (radius 0.5) must map to UV distance 0.5 from center.
-                float maxUvDist = 0f;
-                for (int i = 0; i < v.Length; ++i)
-                {
-                    float r = Mathf.Sqrt(v[i].x * v[i].x + v[i].z * v[i].z);
-                    if (r > 0.49f)
-                    {
-                        float uvDist = Vector2.Distance(uv[i], new Vector2(0.5f, 0.5f));
-                        maxUvDist = Mathf.Max(maxUvDist, uvDist);
-                    }
-                }
-                Assert.AreEqual(0.5f, maxUvDist, 1e-3f, "Border verts must reach the texture edge (UV dist 0.5).");
-            }
-            finally { Object.DestroyImmediate(mesh); }
+                wy = 0f;
+                return true;
+            };
+            bool result = fn(0f, 0f, out float height);
+            Assert.IsTrue(result);
+            Assert.AreEqual(0f, height);
         }
     }
 }
