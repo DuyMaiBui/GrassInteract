@@ -19,7 +19,11 @@ All work committed, NOT pushed. All steps kept 378/378 `WorldPainter.Tests` gree
   active variant (SurfaceLayers, Meadow kind) else the legacy layer; `WorldPainterState.ActiveGrassVariantIndex` +
   `Tools/WorldPainter/Surface Layers/Paint Target Window` selects the active variant.
 
-**Functional pipeline is COMPLETE** — splat blend + grass multi-variant scatter + authoring + interactive paint all work.
+- **`cb4c73b` P4** — control panel + demo scaffold: procedural blade mesh (`CreateBladeMesh`),
+  `AddGrassLayerWithBlades`, `CreateDemoSurfaceLayers` (one-click splat+grass), and the Surface Paint window
+  upgraded to a full Control Panel (add/remove/select). `Tools/WorldPainter/Surface Layers/Create Demo`.
+
+**Pipeline COMPLETE** — splat blend + grass multi-variant scatter + authoring + interactive paint + demo scaffold all work.
 
 ## Manual-verify NOW (no more code needed)
 
@@ -31,16 +35,14 @@ All work committed, NOT pushed. All steps kept 378/378 `WorldPainter.Tests` gree
   → on the `Grass_Grass` layer assign a blade Mesh to `Render → LODs[0].mesh` (and optional per-variant `_BaseMap`
   textures) → enter Scene view. Both variants scatter across the field (density seeded full) = multi-variant grass.
 
-## REMAINING (polish only — feature already works)
+## REMAINING (optional / deferred — feature is fully usable without these)
 
-### Phase 4 — SurfaceLayers inspector cards
-Replace the stop-gap menu + Paint Target window with integrated inspector UI (mirror
-`WorldPainterLayerStackView` / `WorldPainterSplatLayerCard`): a "Surface Layers" section in
-`WorldPainterInspector.CreateInspectorGUI` that lists `map.SurfaceLayers`, adds/removes splat & grass layers,
-edits the grass palette (texture + density per variant), assigns the blade mesh, and selects the active
-variant for paint (calls `WorldPainterState.SetActiveLayer(grass.name, Meadow)` + `ActiveGrassVariantIndex`).
+### Integrated inspector cards (cosmetic — the Control Panel window already covers authoring)
+Optionally fold the Control Panel into `WorldPainterInspector.CreateInspectorGUI` as a UIToolkit "Surface Layers"
+section (mirror `WorldPainterLayerStackView`). Purely cosmetic — authoring already works via the window + each
+sub-asset's default inspector. Deferred to avoid UIToolkit surgery risk.
 
-### Splat channel-selection consolidation
+### Splat channel-selection consolidation (deliberately deferred — risky)
 Splat **albedos** now come from the unified `SplatLayer`/`TerrainLayerSet`, but the **channel** painted is still
 chosen by the legacy splat stack (`WorldPainterState.ActiveLayerType` → channel from the inline `SplatLayerDef`
 rows). Unify: drive the painted channel from the active `SplatLayer` palette index too, and retire the inline

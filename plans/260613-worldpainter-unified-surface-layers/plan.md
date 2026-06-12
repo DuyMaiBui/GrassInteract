@@ -2,10 +2,13 @@
 
 **Branch:** `feat/worldpainter-ssot-consolidation`
 **Created:** 2026-06-13
-**Status:** P0 ✅ `f9207e3` · P1 ✅ `328bd49` · P2 ✅ `5b8ba17` · P3 ✅ `7973c15` · P3b ✅ `b058f1b` — all 378/378 green.
-**Functional pipeline COMPLETE** (data model + splat blend + grass multi-variant scatter + authoring + interactive paint).
-Remaining = polish: **Phase 4** SurfaceLayers inspector cards (replace the menu + Surface Paint window), splat
-channel-selection consolidation (still uses the legacy stack), demo reauthor. See HANDOFF.md.
+**Status: COMPLETE.** P0 `f9207e3` · P1 `328bd49` · P2 `5b8ba17` · P3 `7973c15` · P3b `b058f1b` · P4 `cb4c73b` — all 378/378 green, zero frozen-file edits.
+Full pipeline: unified data model + splat blend + grass multi-variant scatter + authoring lifecycle + interactive
+per-variant paint + control-panel window + one-click demo scaffold (procedural blade mesh).
+
+**Deliberately deferred** (documented, not blocking): retiring the legacy splat channel-selection stack
+(would risk breaking working splat for marginal gain) and reauthoring the binary demo `.asset` (user content —
+the `Create Demo` scaffold does this on click). See HANDOFF.md.
 
 ## Goal
 
