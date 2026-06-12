@@ -98,7 +98,7 @@ namespace WorldPainter.Editor
             Event e = Event.current;
 
             if (this.removeMode)
-                this.DrawAndHandleRemove(sceneView, map, tileSize, e);
+                this.DrawAndHandleRemove(sceneView, painter, map, tileSize, e);
             else
                 this.DrawAndHandleAdd(sceneView, painter, map, tileSize, e);
         }
@@ -135,8 +135,8 @@ namespace WorldPainter.Editor
 
         // ── Remove (delete) ──────────────────────────────────────────────────────
 
-        private void DrawAndHandleRemove(SceneView sceneView, WorldMapAsset map,
-                                         float tileSize, Event e)
+        private void DrawAndHandleRemove(SceneView sceneView, WorldPainter painter,
+                                         WorldMapAsset map, float tileSize, Event e)
         {
             var tiles = CollectExistingTiles(map);
             if (tiles.Length == 0) return;
@@ -145,7 +145,7 @@ namespace WorldPainter.Editor
 
             if (e.type == EventType.MouseDown && e.button == 0 && mouseTile.HasValue)
             {
-                TryRemoveTile(map, mouseTile.Value);
+                TryRemoveTile(painter, map, mouseTile.Value);
                 e.Use();
                 return;
             }
@@ -172,6 +172,10 @@ namespace WorldPainter.Editor
             EditorUtility.SetDirty(painter);
             EditorUtility.SetDirty(map);
 
+            // Build ONLY the new tile into the live render (incremental) instead of letting a full
+            // TryBuild rebuild every tile. See WorldPainter.TileEdit.cs.
+            painter.AddTileToRender(tile);
+
             if (selectForSculpt && tile != null)
                 Selection.activeObject = tile;
 
@@ -179,7 +183,7 @@ namespace WorldPainter.Editor
                       (selectForSculpt ? " (selected for sculpt)." : "."));
         }
 
-        private static void TryRemoveTile(WorldMapAsset map, Vector2Int coord)
+        private static void TryRemoveTile(WorldPainter painter, WorldMapAsset map, Vector2Int coord)
         {
             // Guard the final tile — removing it leaves an empty map with no edge to grow from.
             if (map.TileCount <= 1)
@@ -198,6 +202,10 @@ namespace WorldPainter.Editor
                 "This cannot be undone.",
                 "Delete", "Cancel");
             if (!confirmed) return;
+
+            // Tear down ONLY this tile's render engine (incremental) before removing its data, so the
+            // rest of the world is not rebuilt. See WorldPainter.TileEdit.cs.
+            painter.RemoveTileFromRender(coord);
 
             WorldMapAssetLifecycle.RemoveTile(map, coord);
             EditorUtility.SetDirty(map);
