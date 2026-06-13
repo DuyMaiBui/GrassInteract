@@ -55,9 +55,16 @@ namespace WorldPainter.Editor
 
         /// <summary>
         /// Returns the <see cref="LayerType"/> and splat channel index for the currently
-        /// active layer.  Stack layout: 0=Height, 1..K=Splat, then Scatter, then Biome rows.
+        /// active layer.
+        ///
+        /// Phase 2: when a unified surface layer is active (ActiveLayerKind != None and
+        /// ActiveLayerId is set), the kind is derived directly from <see cref="ActiveLayerKind"/>
+        /// without relying on index arithmetic into the legacy lists.
+        ///
+        /// Legacy index arithmetic is still used for Height (index=0/-1) and Biome rows
+        /// (which are not unified surface layers).
         /// </summary>
-        /// <param name="painter">The active WorldPainter (needed for splatLayers.Count).</param>
+        /// <param name="painter">The active WorldPainter.</param>
         /// <param name="splatChannel">
         /// Output: 0-based splat channel [0..3] if the active layer is Splat; -1 otherwise.
         /// </param>
@@ -65,24 +72,27 @@ namespace WorldPainter.Editor
         public static LayerType ActiveLayerType(WorldPainter painter, out int splatChannel)
         {
             splatChannel = -1;
+
+            // Phase 2 — unified surface layer is active: derive kind from ActiveLayerKind.
+            if (ActiveLayerKind != PaintLayerKind.None && !string.IsNullOrEmpty(ActiveLayerId))
+            {
+                return ActiveLayerKind switch
+                {
+                    PaintLayerKind.Splat  => LayerType.Splat,
+                    PaintLayerKind.Meadow => LayerType.Grass,
+                    PaintLayerKind.Prop   => LayerType.Props,
+                    _ => LayerType.Height,
+                };
+            }
+
+            // Legacy path: derive from the raw display index.
             int idx = ActiveLayerIndex;
             if (idx <= 0) return LayerType.Height; // 0 or -1 = Height base
 
-            // Splat rows occupy indices 1 .. splatLayers.Count
-            int splatCount = painter.SplatLayers.Count;
-            if (idx <= splatCount)
-            {
-                splatChannel = idx - 1; // map stack display index → channel 0-based
-                return LayerType.Splat;
-            }
-
-            // Scatter (Grass/Props) rows follow splat rows.
-            int scatterOffset = idx - splatCount - 1;
-            if (scatterOffset >= 0 && scatterOffset < painter.ScatterLayers.Count)
-                return ScatterLayerKind(painter.ScatterLayers[scatterOffset]);
-
-            // Biome rows follow scatter rows.
-            int biomeOffset = idx - splatCount - painter.ScatterLayers.Count - 1;
+            // Biome rows. The stack now lists only biome rows after unified surface rows,
+            // so we can no longer compute biome offset via splatLayers.Count + scatter offset.
+            // Fall through to Height for any index we can't classify.
+            int biomeOffset = idx - 1; // legacy index 1+ maps to biome offset in the simple case
             if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
                 return LayerType.Biome;
 
@@ -100,34 +110,50 @@ namespace WorldPainter.Editor
             layer is InstanceScatterLayer ? LayerType.Props : LayerType.Grass;
 
         /// <summary>
-        /// The effective layer type that drives brush-tool dispatch + the contextual palette,
-        /// combining BOTH selection signals: the P5 SSOT (<see cref="ActiveLayerKind"/>, set by
-        /// the scatter/splat palette) and the legacy index path (<see cref="ActiveLayerType"/>,
-        /// set by the layer stack). Precedence matches the original BindAndDispatch routing:
-        /// Splat → Grass(density) → Props → Biome → Height.
+        /// The effective layer type that drives brush-tool dispatch + the contextual palette.
+        ///
+        /// Phase 2: combines THREE selection signals in priority order:
+        ///   1. <see cref="ActiveLayerKind"/> — unified surface layer (Splat/Meadow/Prop).
+        ///   2. <see cref="ActiveBiomeIndex"/> ≥ 0 — biome row selected via direct index.
+        ///   3. Legacy <see cref="ActiveLayerType"/> index path (Height fallback).
         /// </summary>
         public static LayerType EffectiveLayerType(WorldPainter painter)
         {
-            LayerType legacy = ActiveLayerType(painter, out _);
             PaintLayerKind p5 = ActiveLayerKind;
 
-            // Precedence mirrors the original BindAndDispatch routing exactly, including the
-            // p5==None guard on the legacy-Grass branch so a stale P5 Prop selection does not
-            // get overridden by a stack-derived Grass index (and vice-versa).
-            if (p5 == PaintLayerKind.Splat || legacy == LayerType.Splat)        return LayerType.Splat;
-            if (p5 == PaintLayerKind.Meadow)                                    return LayerType.Grass;
-            if (legacy == LayerType.Grass && p5 == PaintLayerKind.None)         return LayerType.Grass;
-            if (p5 == PaintLayerKind.Prop || legacy == LayerType.Props)         return LayerType.Props;
-            if (legacy == LayerType.Biome)                                      return LayerType.Biome;
+            // 1. Unified surface layer takes priority.
+            if (p5 == PaintLayerKind.Splat)  return LayerType.Splat;
+            if (p5 == PaintLayerKind.Meadow) return LayerType.Grass;
+            if (p5 == PaintLayerKind.Prop)   return LayerType.Props;
+
+            // 2. Biome row selected directly (Phase 2 biome path).
+            if (ActiveBiomeIndex >= 0 && ActiveBiomeIndex < painter.Biomes.Count)
+                return LayerType.Biome;
+
+            // 3. Legacy index-based routing (Height base row, or legacy splat/scatter/biome).
+            LayerType legacy = ActiveLayerType(painter, out _);
+            if (legacy == LayerType.Splat)  return LayerType.Splat;
+            if (legacy == LayerType.Grass)  return LayerType.Grass;
+            if (legacy == LayerType.Props)  return LayerType.Props;
+            if (legacy == LayerType.Biome)  return LayerType.Biome;
             return LayerType.Height;
         }
 
         /// <summary>
         /// Returns the 0-based index into <see cref="WorldPainter.Biomes"/> for the
         /// currently active layer, or -1 when the active layer is not a Biome layer.
+        ///
+        /// Phase 2: prefers <see cref="ActiveBiomeIndex"/> when it is ≥ 0 (set directly by
+        /// the stack's biome row selection). Falls back to the legacy display-index arithmetic
+        /// for tests and code that still sets <see cref="ActiveLayerIndex"/> directly.
         /// </summary>
         public static int ActiveBiomeLayerIndex(WorldPainter painter)
         {
+            // Phase 2 direct path: biome was selected by setting ActiveBiomeIndex directly.
+            if (ActiveBiomeIndex >= 0 && ActiveBiomeIndex < painter.Biomes.Count)
+                return ActiveBiomeIndex;
+
+            // Legacy fallback: derive from raw display index + legacy list counts.
             int idx          = ActiveLayerIndex;
             int splatCount   = painter.SplatLayers.Count;
             int scatterCount = painter.ScatterLayers.Count;

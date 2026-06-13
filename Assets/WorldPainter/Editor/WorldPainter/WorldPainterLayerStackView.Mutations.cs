@@ -2,16 +2,19 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using WorldPainter;
 
 namespace WorldPainter.Editor
 {
     /// <summary>
     /// Mutation half of <see cref="WorldPainterLayerStackView"/> (partial).
     ///
-    /// Contains: add-menu, drag-reorder implementation, add/remove/reorder mutations
-    /// (all wrapped in <c>Undo.RecordObject</c>).  The add-layer path enforces the
-    /// 4-layer RGBA32 hard cap with a surfaced <see cref="Debug.LogError"/> message
-    /// (errors-over-fallbacks rule).
+    /// Phase 2: add-menu creates UNIFIED types (SplatLayer/GrassLayer/PropLayer via
+    /// <see cref="WorldMapAssetLifecycle"/>). Legacy scatter/splat mutation methods are
+    /// retained for the Biome path; the old AddSplatLayer/AddGrassLayer/AddPropLayer
+    /// bodies are replaced with unified equivalents.
+    ///
+    /// Contains: add-menu, drag-reorder implementation, add/remove/reorder mutations.
     /// </summary>
     internal sealed partial class WorldPainterLayerStackView
     {
@@ -20,9 +23,9 @@ namespace WorldPainter.Editor
         private void ShowAddMenu()
         {
             var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("Splat layer"), false, () => this.AddSplatLayer());
-            menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayer());
-            menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayer());
+            menu.AddItem(new GUIContent("Splat layer"), false, () => this.AddSplatLayerUnified());
+            menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayerUnified());
+            menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayerUnified());
             menu.AddItem(new GUIContent("Biome preset"), false, () => this.AddBiomeRow());
             menu.ShowAsContext();
         }
@@ -60,156 +63,101 @@ namespace WorldPainter.Editor
             this.RefreshStack();
         }
 
-        // ── Mutations (persisted via SerializedObject) ────────────────────────
+        // ── Unified add mutations (Phase 2 — all go through WorldMapAssetLifecycle) ──
 
-        private void AddSplatLayer()
+        /// <summary>
+        /// Adds a unified <see cref="SplatLayer"/> via <see cref="WorldMapAssetLifecycle.AddSplatLayer"/>.
+        /// Requires a saved WorldMapAsset.
+        /// </summary>
+        private void AddSplatLayerUnified()
         {
-            // Hard cap: 4 layers max — surfaced error, not silent drop.
-            if (this.splatLayersProp.arraySize >= WorldPainter.MAX_SPLAT_LAYERS)
-            {
-                Debug.LogError(
-                    $"[WorldPainter] Cannot add splat layer: RGBA32 splat RT supports " +
-                    $"at most {WorldPainter.MAX_SPLAT_LAYERS} layers. Remove one first.");
-                return;
-            }
-
-            Undo.RecordObject(this.painter, "Add Splat Layer");
-
-            int newIdx = this.splatLayersProp.arraySize;
-            this.splatLayersProp.InsertArrayElementAtIndex(newIdx);
-
-            var elem     = this.splatLayersProp.GetArrayElementAtIndex(newIdx);
-            var nameProp = elem.FindPropertyRelative("name");
-            if (nameProp != null)
-                nameProp.stringValue = $"Splat {newIdx}";
-
-            this.serializedObject.ApplyModifiedProperties();
-            WorldPainterState.ActiveLayerIndex = 0;
-            this.RefreshStack();
-        }
-
-        private void RemoveSplatLayer(int index)
-        {
-            if (index < 0 || index >= this.splatLayersProp.arraySize) return;
-
-            Undo.RecordObject(this.painter, "Remove Splat Layer");
-            this.splatLayersProp.DeleteArrayElementAtIndex(index);
-            this.serializedObject.ApplyModifiedProperties();
-
-            WorldPainterState.ActiveLayerIndex =
-                Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
-            this.RefreshStack();
-        }
-
-        private void AddGrassLayer()
-        {
-            // Grass layers live as sub-assets of the WorldMapAsset (SSOT) — the scatter engine
-            // builds from WorldMapAsset.Layers (WorldPainter.Scatter.RebuildScatter). Require a
-            // saved map; a loose .asset would never reach the engine (errors-over-fallbacks).
             WorldMapAsset? map = this.painter.Map;
-            if (map == null || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(map)))
-            {
-                Debug.LogError(
-                    "[WorldPainter] Cannot add a grass layer: assign and save a World Map first " +
-                    "(use the 'Create World Map' button). Scatter layers are stored as sub-assets " +
-                    "of the map.");
-                return;
-            }
+            if (!this.RequireSavedMap(map, "splat")) return;
 
-            // Create the layer as a sub-asset of the map (+ allocate per-tile density channels).
-            string baseName = $"Grass {this.scatterLayersProp.arraySize}";
-            DensityScatterLayer layer = WorldMapAssetLifecycle.AddDensityLayer(map, baseName);
+            // Count existing splat layers in the unified system for a smart default name.
+            int existingSplatCount = 0;
+            foreach (var sl in map!.SurfaceLayers)
+                if (sl is SplatLayer) existingSplatCount++;
 
-            // Reference it from the painter's scatter list so the stack + detail card resolve it.
-            Undo.RecordObject(this.painter, "Add Grass Layer");
-
-            int newIdx = this.scatterLayersProp.arraySize;
-            this.scatterLayersProp.InsertArrayElementAtIndex(newIdx);
-            this.scatterLayersProp.GetArrayElementAtIndex(newIdx).objectReferenceValue = layer;
-            this.serializedObject.ApplyModifiedProperties();
-
-            WorldPainterState.ActiveLayerIndex = 1 + this.painter.SplatLayers.Count + newIdx;
+            string layerName = existingSplatCount == 0 ? "Ground" : $"Splat {existingSplatCount}";
+            SplatLayer newLayer = WorldMapAssetLifecycle.AddSplatLayer(map!, layerName);
+            this.SelectSurfaceLayer(newLayer);
             this.RefreshStack();
         }
 
-        private void RemoveScatterLayer(int index)
+        /// <summary>
+        /// Adds a unified <see cref="GrassLayer"/> with blade mesh + 2 variants via
+        /// <see cref="WorldMapAssetLifecycle.AddGrassLayerWithBlades"/>.
+        /// Requires a saved WorldMapAsset.
+        /// </summary>
+        private void AddGrassLayerUnified()
         {
-            if (index < 0 || index >= this.scatterLayersProp.arraySize) return;
+            WorldMapAsset? map = this.painter.Map;
+            if (!this.RequireSavedMap(map, "grass")) return;
 
-            var layer = this.scatterLayersProp.GetArrayElementAtIndex(index)
-                            .objectReferenceValue as ScatterLayer;
+            int existingGrassCount = 0;
+            foreach (var sl in map!.SurfaceLayers)
+                if (sl is GrassLayer) existingGrassCount++;
 
-            // Confirm before deleting — removal destroys the layer's sub-assets (def + density
-            // map + material) from the World Map and is NOT undoable.
-            string layerName = layer != null ? layer.name : $"layer {index}";
+            string layerName = existingGrassCount == 0 ? "Grass" : $"Grass {existingGrassCount}";
+            GrassLayer newLayer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map!, layerName, 2);
+            this.SelectSurfaceLayer(newLayer);
+            this.RefreshStack();
+        }
+
+        /// <summary>
+        /// Adds a unified <see cref="PropLayer"/> via <see cref="WorldMapAssetLifecycle.AddPropLayer"/>.
+        /// Requires a saved WorldMapAsset.
+        /// </summary>
+        private void AddPropLayerUnified()
+        {
+            WorldMapAsset? map = this.painter.Map;
+            if (!this.RequireSavedMap(map, "props")) return;
+
+            int existingPropCount = 0;
+            foreach (var sl in map!.SurfaceLayers)
+                if (sl is PropLayer) existingPropCount++;
+
+            string layerName = existingPropCount == 0 ? "Props" : $"Props {existingPropCount}";
+            PropLayer newLayer = WorldMapAssetLifecycle.AddPropLayer(map!, layerName);
+            this.SelectSurfaceLayer(newLayer);
+            this.RefreshStack();
+        }
+
+        /// <summary>
+        /// Removes the unified surface layer at <paramref name="surfaceIndex"/> in
+        /// <c>map.SurfaceLayers</c>. Confirms before destroying sub-assets.
+        /// </summary>
+        private void RemoveSurfaceLayerAt(int surfaceIndex)
+        {
+            WorldMapAsset? map = this.painter.Map;
+            if (map == null) return;
+
+            var layers = map.SurfaceLayers;
+            if (surfaceIndex < 0 || surfaceIndex >= layers.Count) return;
+
+            WorldPainterLayer layer = layers[surfaceIndex];
+            string layerName = layer.DisplayName;
+
             if (!EditorUtility.DisplayDialog(
-                    "Remove Scatter Layer",
+                    "Remove Surface Layer",
                     $"Remove '{layerName}'?\n\nThis permanently deletes the layer and its " +
-                    "density-map and material sub-assets from the World Map. This cannot be undone.",
+                    "sub-assets from the World Map. This cannot be undone.",
                     "Remove", "Cancel"))
                 return;
 
-            // If this layer is a sub-asset of the map, remove it there too (def + density
-            // texture + per-tile channels) — the scatter engine builds from map.Layers, so a
-            // map-only leftover would keep rendering after the stack row is gone.
-            WorldMapAsset? map = this.painter.Map;
-            if (layer != null && map != null &&
-                !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(map)) &&
-                AssetDatabase.GetAssetPath(layer) == AssetDatabase.GetAssetPath(map))
+            // Clear active selection if the removed layer was active.
+            if (WorldPainterState.ActiveLayerId == layer.name)
             {
-                WorldMapAssetLifecycle.RemoveLayer(map, layer);
+                WorldPainterState.SetActiveLayer(string.Empty, WorldPainterState.PaintLayerKind.None);
+                WorldPainterState.ActiveGrassVariantIndex = -1;
             }
 
-            Undo.RecordObject(this.painter, "Remove Scatter Layer");
-            this.scatterLayersProp.GetArrayElementAtIndex(index).objectReferenceValue = null;
-            this.scatterLayersProp.DeleteArrayElementAtIndex(index);
-            this.serializedObject.ApplyModifiedProperties();
-
-            WorldPainterState.ActiveLayerIndex =
-                Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
+            WorldMapAssetLifecycle.RemoveSurfaceLayer(map, layer);
             this.RefreshStack();
         }
 
-        private void AddPropLayer()
-        {
-            // Create a new InstanceScatterLayer sub-asset with smart defaults.
-            var layer = ScriptableObject.CreateInstance<InstanceScatterLayer>();
-            layer.name = $"Props {this.scatterLayersProp.arraySize}";
-
-            // Create a companion AuthoredInstancesData sub-asset.
-            var authoredData = ScriptableObject.CreateInstance<AuthoredInstancesData>();
-            authoredData.name = $"{layer.name}_Authored";
-
-            string scenePath = this.painter.gameObject.scene.path;
-            if (!string.IsNullOrEmpty(scenePath))
-            {
-                string dir       = System.IO.Path.GetDirectoryName(scenePath)!;
-                string layerPath = System.IO.Path.Combine(dir, $"{layer.name}.asset").Replace('\\', '/');
-                string dataPath  = System.IO.Path.Combine(dir, $"{authoredData.name}.asset").Replace('\\', '/');
-                AssetDatabase.CreateAsset(layer, layerPath);
-                AssetDatabase.CreateAsset(authoredData, dataPath);
-
-                // Wire the authored data into the layer via SerializedObject.
-                using var layerSo = new SerializedObject(layer);
-                var authoredProp  = layerSo.FindProperty("authoredInstances");
-                if (authoredProp != null)
-                {
-                    authoredProp.objectReferenceValue = authoredData;
-                    layerSo.ApplyModifiedPropertiesWithoutUndo();
-                }
-
-                AssetDatabase.SaveAssets();
-            }
-
-            Undo.RecordObject(this.painter, "Add Prop Layer");
-            int newIdx = this.scatterLayersProp.arraySize;
-            this.scatterLayersProp.InsertArrayElementAtIndex(newIdx);
-            this.scatterLayersProp.GetArrayElementAtIndex(newIdx).objectReferenceValue = layer;
-            this.serializedObject.ApplyModifiedProperties();
-
-            WorldPainterState.ActiveLayerIndex = 1 + this.painter.SplatLayers.Count + newIdx;
-            this.RefreshStack();
-        }
+        // ── Biome row mutation (unchanged from Phase 1) ───────────────────────
 
         private void RemoveBiomeLayer(int index)
         {
@@ -226,7 +174,25 @@ namespace WorldPainter.Editor
             this.RefreshStack();
         }
 
-        // Row helpers (SelectLayer, CreateBaseRow, MakeEyeToggle, MakeLockToggle,
+        // ── Guard helper ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns false and logs an error if <paramref name="map"/> is null or unsaved.
+        /// </summary>
+        private bool RequireSavedMap(WorldMapAsset? map, string layerKind)
+        {
+            if (map == null || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(map)))
+            {
+                Debug.LogError(
+                    $"[WorldPainter] Cannot add a {layerKind} layer: assign and save a World Map first " +
+                    "(use the 'Create World Map' button). Surface layers are stored as sub-assets " +
+                    "of the map.");
+                return false;
+            }
+            return true;
+        }
+
+        // Row helpers (SelectLayer, SelectSurfaceLayer, CreateBaseRow, MakeEyeToggle, MakeLockToggle,
         // LayerIcon, AddBiomeRow) are in WorldPainterLayerStackView.RowHelpers.cs
     }
 }

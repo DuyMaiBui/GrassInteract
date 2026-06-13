@@ -11,8 +11,12 @@ namespace WorldPainter.Editor
 
     /// <summary>
     /// Photoshop-style layer stack for <see cref="WorldPainter"/>. Height row is synthetic;
-    /// splat/scatter rows bind to serialized lists. Mutation methods in
-    /// <c>WorldPainterLayerStackView.Mutations.cs</c>. Design §4.1.
+    /// unified surface rows bind to <c>map.SurfaceLayers</c>; biome rows bind to the biomes list.
+    ///
+    /// Phase 2: stack now lists <c>map.SurfaceLayers</c> (SplatLayer/GrassLayer/PropLayer)
+    /// instead of inline <c>splatLayers[]</c> + <c>map.Layers</c>. Legacy list props are kept
+    /// for compilation but are no longer iterated here.
+    /// Mutation methods in <c>WorldPainterLayerStackView.Mutations.cs</c>.
     /// </summary>
     internal sealed partial class WorldPainterLayerStackView
     {
@@ -23,7 +27,7 @@ namespace WorldPainter.Editor
         private readonly WorldPainterFilterChips chips;
         private readonly WorldPainterPreviewCache previewCache = new();
 
-        // ── Cached SerializedProperty refs ────────────────────────────────────
+        // ── Cached SerializedProperty refs (kept for legacy compat + biome list) ──
 
         private SerializedProperty splatLayersProp = null!;
         private SerializedProperty scatterLayersProp = null!;
@@ -99,54 +103,86 @@ namespace WorldPainter.Editor
                     displayIndex++, LayerType.Height, "Height (base)", locked: true));
             }
 
-            // Splat rows — bound to splatLayers list; include albedo swatch + drag-reorder.
-            for (int i = 0; i < this.splatLayersProp.arraySize; i++)
+            // ── Unified surface layers (Phase 2 SSOT) ─────────────────────────
+            WorldMapAsset? map = this.painter.Map;
+            if (map != null)
             {
-                if (!this.chips.Passes(LayerType.Splat)) continue;
-                var elem  = this.splatLayersProp.GetArrayElementAtIndex(i);
-                string rn = elem.FindPropertyRelative("name")?.stringValue ?? $"Splat {i}";
-                var albedoProp = elem.FindPropertyRelative("albedo");
-                Texture2D? albedo = albedoProp?.objectReferenceValue as Texture2D;
-                Texture2D? thumb  = (albedo != null)
-                    ? (AssetPreview.GetAssetPreview(albedo) ?? albedo) : null;
-
-                int captured = i;
-                var row = this.BuildSerializedRow(
-                    displayIndex++, LayerType.Splat, rn,
-                    onRemove: () => this.RemoveSplatLayer(captured),
-                    albedoPreview: thumb);
-
-                this.RegisterDragReorder(row, captured);
-                this.stackContainer.Add(row);
-            }
-
-            // Scatter (Grass/Props) rows — bound to scatterLayers list.
-            for (int i = 0; i < this.scatterLayersProp.arraySize; i++)
-            {
-                var elem = this.scatterLayersProp.GetArrayElementAtIndex(i);
-                ScatterLayer? scatterLayer = elem.objectReferenceValue as ScatterLayer;
-                string layerName = scatterLayer != null ? scatterLayer.name : $"Scatter {i}";
-
-                LayerType type = WorldPainterState.ScatterLayerKind(scatterLayer);
-
-                if (!this.chips.Passes(type)) continue;
-
-                // LOD0 cached 24px thumbnail for collapsed grass row.
-                Texture2D? lodThumb = null;
-                if (type == LayerType.Grass && scatterLayer != null)
+                var surfaceLayers = map.SurfaceLayers;
+                for (int i = 0; i < surfaceLayers.Count; i++)
                 {
-                    Mesh[] lodMeshes = scatterLayer.Render.LodMeshes;
-                    Mesh? lod0 = lodMeshes.Length > 0 ? lodMeshes[0] : null;
-                    if (lod0 != null)
-                        lodThumb = this.previewCache.GetOrRender(
-                            scatterLayer.GetInstanceID(), lod0, scatterLayer.Render.Material, 24);
-                }
+                    var sl = surfaceLayers[i];
+                    if (sl == null) continue;
 
-                int captured = i;
-                this.stackContainer.Add(
-                    this.BuildSerializedRow(displayIndex++, type, layerName,
-                        onRemove: () => this.RemoveScatterLayer(captured),
-                        albedoPreview: lodThumb));
+                    LayerType rowType = sl.Kind switch
+                    {
+                        WorldPainterLayer.LayerKind.Splat => LayerType.Splat,
+                        WorldPainterLayer.LayerKind.Grass => LayerType.Grass,
+                        WorldPainterLayer.LayerKind.Prop  => LayerType.Props,
+                        _ => LayerType.Splat,
+                    };
+
+                    if (!this.chips.Passes(rowType)) continue;
+
+                    // Thumbnail: albedo swatch for Splat, LOD0 preview for Grass/Props.
+                    Texture2D? thumb = null;
+                    if (sl is SplatLayer splat && splat.LayerSet != null)
+                    {
+                        var albedos = splat.LayerSet.EditorAlbedos;
+                        if (albedos != null && albedos.Count > 0)
+                            thumb = AssetPreview.GetAssetPreview(albedos[0]) ?? albedos[0];
+                    }
+                    else if (sl is GrassLayer grass)
+                    {
+                        var lods = grass.Render.Lods;
+                        if (lods != null && lods.Length > 0 && lods[0].mesh != null)
+                            thumb = this.previewCache.GetOrRender(
+                                sl.GetInstanceID(), lods[0].mesh!, grass.Render.Material, 24);
+                    }
+
+                    int captured = i;
+                    var row = this.BuildSurfaceLayerRow(
+                        displayIndex++, rowType, sl.DisplayName,
+                        sl,
+                        onRemove: () => this.RemoveSurfaceLayerAt(captured),
+                        albedoPreview: thumb);
+
+                    this.stackContainer.Add(row);
+
+                    // For GrassLayer: show variant sub-rows for paint-target selection.
+                    if (sl is GrassLayer grassLayer && this.chips.Passes(LayerType.Grass))
+                    {
+                        bool isActiveLayer =
+                            WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
+                            WorldPainterState.ActiveLayerId == sl.name;
+
+                        if (isActiveLayer || IsRowSelected(sl))
+                        {
+                            for (int vi = 0; vi < grassLayer.Palette.Count; vi++)
+                            {
+                                var variant = grassLayer.Palette[vi];
+                                bool isActiveVariant = isActiveLayer &&
+                                    WorldPainterState.ActiveGrassVariantIndex == vi;
+
+                                string vname = string.IsNullOrEmpty(variant.name)
+                                    ? $"Variant {vi}" : variant.name;
+
+                                int capturedVi = vi;
+                                var vrow = this.BuildVariantRow(
+                                    displayIndex++, vname, isActiveVariant,
+                                    onClick: () =>
+                                    {
+                                        WorldPainterState.ActiveGrassVariantIndex = capturedVi;
+                                        WorldPainterState.SetActiveLayer(
+                                            grassLayer.name,
+                                            WorldPainterState.PaintLayerKind.Meadow);
+                                        WorldPainterState.SetActiveBrushTool("density.paint");
+                                        this.RefreshStack();
+                                    });
+                                this.stackContainer.Add(vrow);
+                            }
+                        }
+                    }
+                }
             }
 
             // Biome rows — bound to biomes list (mode-color violet).
@@ -158,18 +194,15 @@ namespace WorldPainter.Editor
                     var elem     = this.biomesProp.GetArrayElementAtIndex(i);
                     var preset   = elem.objectReferenceValue as BiomePreset;
                     string rn    = preset != null ? preset.name : $"Biome {i}";
-                    int captured = i;
+                    int capturedBiome = i;
 
                     Texture2D? thumb = preset != null ? AssetPreview.GetMiniThumbnail(preset) : null;
 
-                    var row = this.BuildSerializedRow(
-                        displayIndex++, LayerType.Biome, rn,
-                        onRemove: () => this.RemoveBiomeLayer(captured),
+                    var row = this.BuildBiomeRow(
+                        displayIndex++, rn,
+                        onSelect: () => this.SelectBiomeLayer(capturedBiome),
+                        onRemove: () => this.RemoveBiomeLayer(capturedBiome),
                         albedoPreview: thumb);
-
-                    // Violet tint for biome rows.
-                    row.style.borderLeftColor = new StyleColor(new Color(0.6f, 0.2f, 0.9f, 0.9f));
-                    row.style.borderLeftWidth = new StyleFloat(3f);
 
                     this.stackContainer.Add(row);
                 }
@@ -198,6 +231,94 @@ namespace WorldPainter.Editor
             return row;
         }
 
+        /// <summary>
+        /// Builds a row for a unified <see cref="WorldPainterLayer"/> sub-asset.
+        /// Clicking selects the layer via <see cref="WorldPainterState.SetActiveLayer"/>.
+        /// </summary>
+        private VisualElement BuildSurfaceLayerRow(
+            int displayIdx,
+            LayerType type,
+            string name,
+            WorldPainterLayer layer,
+            System.Action onRemove,
+            Texture2D? albedoPreview = null)
+        {
+            bool isSelected = IsRowSelected(layer);
+
+            var row = new VisualElement();
+            row.AddToClassList("wp-layer-row");
+            if (isSelected)
+                row.AddToClassList("wp-layer-row--selected");
+
+            row.Add(this.MakeEyeToggle(null));
+            row.Add(this.MakeLockToggle(false, null));
+
+            var typeChip = new Label(LayerIcon(type));
+            typeChip.AddToClassList("wp-type-chip");
+            row.Add(typeChip);
+
+            if (type == LayerType.Splat || type == LayerType.Grass || type == LayerType.Props)
+            {
+                var swatch = new VisualElement();
+                swatch.AddToClassList("wp-splat-swatch");
+                if (albedoPreview != null)
+                    swatch.style.backgroundImage = new StyleBackground(albedoPreview);
+                if (type == LayerType.Props && albedoPreview == null)
+                    swatch.style.backgroundColor = new StyleColor(new Color(0.1f, 0.6f, 0.5f, 0.7f));
+                row.Add(swatch);
+            }
+
+            var nameLabel = new Label(name);
+            nameLabel.AddToClassList("wp-layer-name");
+            row.Add(nameLabel);
+
+            // "Select" button opens the sub-asset in the Inspector.
+            var selectBtn = new Button(() => Selection.activeObject = layer) { text = "⚙" };
+            selectBtn.AddToClassList("wp-remove-btn");
+            selectBtn.tooltip = "Select sub-asset in Inspector";
+            row.Add(selectBtn);
+
+            var removeBtn = new Button(onRemove) { text = "✕" };
+            removeBtn.AddToClassList("wp-remove-btn");
+            row.Add(removeBtn);
+
+            row.RegisterCallback<ClickEvent>(evt =>
+            {
+                // Don't hijack button clicks.
+                if (evt.target is Button) return;
+                this.SelectSurfaceLayer(layer);
+            });
+            return row;
+        }
+
+        /// <summary>
+        /// Builds a variant sub-row under a GrassLayer. Clicking selects that variant for painting.
+        /// </summary>
+        private VisualElement BuildVariantRow(
+            int displayIdx,
+            string variantName,
+            bool isActive,
+            System.Action onClick)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("wp-layer-row");
+            row.style.paddingLeft = new StyleLength(24f); // indent under parent grass row
+
+            if (isActive)
+                row.AddToClassList("wp-layer-row--selected");
+
+            var dot   = new Label(isActive ? "●" : "○");
+            dot.AddToClassList("wp-type-chip");
+            row.Add(dot);
+
+            var nameLabel = new Label(variantName);
+            nameLabel.AddToClassList("wp-layer-name");
+            row.Add(nameLabel);
+
+            row.RegisterCallback<ClickEvent>(_ => onClick());
+            return row;
+        }
+
         private VisualElement BuildSerializedRow(
             int displayIdx,
             LayerType type,
@@ -214,14 +335,12 @@ namespace WorldPainter.Editor
             typeChip.AddToClassList("wp-type-chip");
             row.Add(typeChip);
 
-            // Albedo/LOD0 swatch chip for Splat, Grass, and Props rows.
             if (type == LayerType.Splat || type == LayerType.Grass || type == LayerType.Props)
             {
                 var swatch = new VisualElement();
                 swatch.AddToClassList("wp-splat-swatch");
                 if (albedoPreview != null)
                     swatch.style.backgroundImage = new StyleBackground(albedoPreview);
-                // Props rows use a teal background tint when no preview available.
                 if (type == LayerType.Props && albedoPreview == null)
                     swatch.style.backgroundColor = new StyleColor(new Color(0.1f, 0.6f, 0.5f, 0.7f));
                 row.Add(swatch);
@@ -238,6 +357,19 @@ namespace WorldPainter.Editor
             int captured = displayIdx;
             row.RegisterCallback<ClickEvent>(_ => this.SelectLayer(captured));
             return row;
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns true when the given <paramref name="layer"/> is the currently active unified layer.
+        /// </summary>
+        private static bool IsRowSelected(WorldPainterLayer layer)
+        {
+            // A surface layer is selected when its name matches ActiveLayerId AND
+            // the kind is a surface-layer kind (Splat, Meadow, or Prop).
+            if (WorldPainterState.ActiveLayerId != layer.name) return false;
+            return WorldPainterState.ActiveLayerKind != WorldPainterState.PaintLayerKind.None;
         }
 
         // Row helpers and layer selection live in WorldPainterLayerStackView.Mutations.cs

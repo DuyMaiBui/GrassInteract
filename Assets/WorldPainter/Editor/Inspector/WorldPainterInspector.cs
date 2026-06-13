@@ -45,6 +45,12 @@ namespace WorldPainter.Editor
 
         private WorldPainterPropLayerCard? propCard;
 
+        // ── Unified surface-layer detail (Phase 2) ────────────────────────────
+
+        // Cached editor for the currently-selected unified surface layer. Destroyed when
+        // the selection changes (prevents stale references and re-creation flicker).
+        private UnityEditor.Editor? surfaceLayerEditor;
+
         // ── P6 sub-views ──────────────────────────────────────────────────────
 
         private WorldPainterMiniMap?         miniMap;
@@ -126,7 +132,9 @@ namespace WorldPainter.Editor
             root.schedule.Execute(() =>
             {
                 bool noTiles = painter.Map == null && painter.Tiles.Count == 0;
-                bool noLayers = painter.SplatLayers.Count == 0 &&
+                int surfaceLayerCount = painter.Map != null ? painter.Map.SurfaceLayers.Count : 0;
+                bool noLayers = surfaceLayerCount == 0 &&
+                                painter.SplatLayers.Count == 0 &&
                                 painter.ScatterLayers.Count == 0 &&
                                 painter.Biomes.Count == 0;
                 bool hasNoMap = painter.Map == null;
@@ -171,35 +179,97 @@ namespace WorldPainter.Editor
 
             root.schedule.Execute(() =>
             {
-                LayerType layerType = WorldPainterState.ActiveLayerType(painter, out _);
-                int si = WorldPainterState.ActiveScatterIndex(painter);
+                // ── Phase 2: unified surface-layer detail card ────────────────
+                // When a unified surface layer is active (ActiveLayerId set, kind != None)
+                // embed its default inspector via CreateEditor in an IMGUIContainer.
+                // Legacy scatter/splat detail (ActiveLayerId empty) is handled below.
+                string unifiedId   = WorldPainterState.ActiveLayerId;
+                var    unifiedKind = WorldPainterState.ActiveLayerKind;
 
-                // Identity of the active detail target. Include the layer asset's instance id
-                // so swapping the asset at the same index also refreshes.
-                int layerId = 0;
-                if (si >= 0 && si < painter.ScatterLayers.Count && painter.ScatterLayers[si] != null)
-                    layerId = painter.ScatterLayers[si].GetInstanceID();
+                WorldPainterLayer? activeSurfaceLayer = null;
+                if (!string.IsNullOrEmpty(unifiedId) && unifiedKind != WorldPainterState.PaintLayerKind.None)
+                {
+                    WorldMapAsset? map = painter.Map;
+                    if (map != null)
+                    {
+                        foreach (var sl in map.SurfaceLayers)
+                        {
+                            if (sl != null && sl.name == unifiedId)
+                            {
+                                activeSurfaceLayer = sl;
+                                break;
+                            }
+                        }
+                    }
+                }
 
-                string key = $"{layerType}:{si}:{layerId}";
-                if (key == this.lastCardKey) return; // unchanged → keep card (and its edit/focus state)
+                // Build a stable key: unified layer id wins; fall back to legacy scatter index key.
+                string key;
+                if (activeSurfaceLayer != null)
+                    key = $"surface:{activeSurfaceLayer.GetInstanceID()}";
+                else
+                {
+                    LayerType legacyType = WorldPainterState.ActiveLayerType(painter, out _);
+                    int si = WorldPainterState.ActiveScatterIndex(painter);
+                    int layerId = 0;
+                    if (si >= 0 && si < painter.ScatterLayers.Count && painter.ScatterLayers[si] != null)
+                        layerId = painter.ScatterLayers[si].GetInstanceID();
+                    key = $"{legacyType}:{si}:{layerId}";
+                }
+
+                if (key == this.lastCardKey) return; // unchanged → keep card
                 this.lastCardKey = key;
 
                 cardArea.Clear();
 
-                if (layerType == LayerType.Grass)
+                // Destroy the previously cached editor (avoids leaking UnityEditor.Editor instances).
+                if (this.surfaceLayerEditor != null)
                 {
-                    if (si >= 0 && this.scatterCard != null)
-                    {
-                        var card = this.scatterCard.Build(painter, si);
-                        if (card != null) cardArea.Add(card);
-                    }
+                    Object.DestroyImmediate(this.surfaceLayerEditor);
+                    this.surfaceLayerEditor = null;
                 }
-                else if (layerType == LayerType.Props)
+
+                if (activeSurfaceLayer != null)
                 {
-                    if (si >= 0 && this.propCard != null)
+                    // Unified detail: embed the sub-asset's default inspector in an IMGUIContainer.
+                    WorldPainterLayer capturedLayer = activeSurfaceLayer;
+                    this.surfaceLayerEditor = UnityEditor.Editor.CreateEditor(capturedLayer);
+                    UnityEditor.Editor capturedEditor = this.surfaceLayerEditor;
+
+                    var label = new Label($"[{capturedLayer.Kind}] {capturedLayer.DisplayName}");
+                    label.AddToClassList("wp-layer-name");
+                    label.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    label.style.marginTop = 6;
+                    cardArea.Add(label);
+
+                    var imgui = new IMGUIContainer(() =>
                     {
-                        var card = this.propCard.Build(painter, si);
-                        if (card != null) cardArea.Add(card);
+                        if (capturedEditor == null || capturedEditor.target == null) return;
+                        capturedEditor.OnInspectorGUI();
+                    });
+                    cardArea.Add(imgui);
+                }
+                else
+                {
+                    // Legacy fallback: scatter/prop detail cards (still functional for legacy layers).
+                    LayerType layerType = WorldPainterState.ActiveLayerType(painter, out _);
+                    int si = WorldPainterState.ActiveScatterIndex(painter);
+
+                    if (layerType == LayerType.Grass)
+                    {
+                        if (si >= 0 && this.scatterCard != null)
+                        {
+                            var card = this.scatterCard.Build(painter, si);
+                            if (card != null) cardArea.Add(card);
+                        }
+                    }
+                    else if (layerType == LayerType.Props)
+                    {
+                        if (si >= 0 && this.propCard != null)
+                        {
+                            var card = this.propCard.Build(painter, si);
+                            if (card != null) cardArea.Add(card);
+                        }
                     }
                 }
             }).Every(200);
@@ -219,6 +289,13 @@ namespace WorldPainter.Editor
         private void OnDisable()
         {
             WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChanged;
+
+            // Destroy the cached surface-layer editor to avoid leaking UnityEditor.Editor instances.
+            if (this.surfaceLayerEditor != null)
+            {
+                Object.DestroyImmediate(this.surfaceLayerEditor);
+                this.surfaceLayerEditor = null;
+            }
 
             if (WorldPainterState.ActivePainter == (WorldPainter)this.target)
             {
