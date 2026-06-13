@@ -26,7 +26,7 @@ namespace WorldPainter.Editor
                       "TerrainLayerSet sub-asset, then paint with the splat tool to blend.", layer.LayerSet);
         }
 
-        [MenuItem(ROOT + "Add Grass Layer (blades + 2 variants)")]
+        [MenuItem(ROOT + "Add Grass Layer (blades + seeded density)")]
         private static void AddGrassLayer()
         {
             if (Selection.activeObject is not WorldMapAsset map)
@@ -35,9 +35,9 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            GrassLayer layer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass", variantCount: 2);
-            Debug.Log($"[WorldPainter] Added '{layer.name}' with a procedural blade mesh + 2 seeded variants. " +
-                      "Optionally assign per-variant _BaseMap textures; open the Control Panel to paint.", layer);
+            GrassLayer layer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass");
+            Debug.Log($"[WorldPainter] Added '{layer.name}' with a procedural blade mesh and per-tile density. " +
+                      "Open the Control Panel to paint.", layer);
         }
 
         [MenuItem(ROOT + "Create Demo (splat + grass)")]
@@ -51,7 +51,7 @@ namespace WorldPainter.Editor
 
             WorldMapAssetLifecycle.CreateDemoSurfaceLayers(map);
             Debug.Log("[WorldPainter] Created demo SurfaceLayers: 1 splat (assign albedos to its TerrainLayerSet) " +
-                      "+ 1 grass (blades & 2 variants). Grass renders immediately if the map has tiles.", map);
+                      "+ 1 grass (blades, seeded density per tile). Grass renders immediately if the map has tiles.", map);
         }
     }
 }

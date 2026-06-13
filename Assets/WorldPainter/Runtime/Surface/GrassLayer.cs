@@ -1,12 +1,11 @@
 #nullable enable
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace WorldPainter
 {
     /// <summary>
-    /// Per-tile density texture entry for a <see cref="GrassVariant"/>. Keyed by tile grid coordinate.
+    /// Per-tile density texture entry for a <see cref="GrassLayer"/>. Keyed by tile grid coordinate.
     /// </summary>
     [Serializable]
     public struct TileDensityTexture
@@ -19,36 +18,16 @@ namespace WorldPainter
     }
 
     /// <summary>
-    /// One grass appearance variant within a <see cref="GrassLayer"/>. Variants share the layer's
-    /// mesh/material/wind/bend config and differ ONLY by texture; each owns its own per-tile R8
-    /// density texture (one per tile) painted independently.
-    /// </summary>
-    [Serializable]
-    public struct GrassVariant
-    {
-        [Tooltip("Variant display name (used for the density-channel id and inspector).")]
-        public string name;
-
-        [Tooltip("Albedo (_BaseMap) override applied to the shared material for this variant.")]
-        public Texture2D? texture;
-
-        [Tooltip("Per-tile density textures — one entry per registered tile. " +
-                 "Created/assigned by the editor lifecycle; empty = variant has no tiles yet (valid, renders nothing).")]
-        public TileDensityTexture[] densityTiles;
-    }
-
-    /// <summary>
     /// Unified GRASS authoring layer. Holds ONE shared scatter config (mesh/material/wind/bend/
-    /// bounds/placement) plus a palette of <see cref="GrassVariant"/> entries. Each variant scatters
-    /// by its OWN per-tile R8 density channel via its own frozen-engine instance (built in
-    /// <c>WorldPainter.SurfaceLayers</c> through the <c>GrassVariantScatterLayer</c> adapter — Phase 2).
+    /// bounds/placement) plus a per-tile density texture array. Each tile has its own R8 density
+    /// channel painted independently; all tiles share the layer's single material and LODs.
     ///
     /// Composes the same SSOT config structs as the unified surface layers so engines read
     /// through the identical accessors.
     /// </summary>
     public sealed class GrassLayer : WorldPainterLayer
     {
-        // ── Shared config (SSOT structs — authored once for all variants) ──────
+        // ── Shared config (SSOT structs — authored once for all tiles) ────────
 
         [SerializeField] private ScatterRenderConfig    render;
         [SerializeField] private ScatterWindConfig      wind;
@@ -69,7 +48,7 @@ namespace WorldPainter
         [SerializeField] private Vector2 slopeRange = new Vector2(0f, 90f);
 
         [Min(1)]
-        [Tooltip("Candidate instances scattered per variant across the field.")]
+        [Tooltip("Candidate instances scattered per tile across the field.")]
         [SerializeField] private int targetInstances = 50000;
 
         [Tooltip("Per-layer uniform rotation offset applied to every instance.")]
@@ -84,15 +63,16 @@ namespace WorldPainter
         [Tooltip("Align instance up-axis to terrain/surface normal.")]
         [SerializeField] private bool alignToNormal = false;
 
-        // ── Palette ────────────────────────────────────────────────────────────
+        // ── Per-tile density textures ──────────────────────────────────────────
 
-        [Tooltip("Grass variants. Each owns its own painted density channel; all share the config above.")]
-        [SerializeField] private GrassVariant[] palette = Array.Empty<GrassVariant>();
+        [Tooltip("Per-tile density textures — one entry per registered tile. " +
+                 "Created/assigned by the editor lifecycle; empty = layer has no tiles yet (valid, renders nothing).")]
+        [SerializeField] private TileDensityTexture[] densityTiles = Array.Empty<TileDensityTexture>();
 
         // ── Identity ───────────────────────────────────────────────────────────
 
         public override LayerKind Kind => LayerKind.Grass;
-        public override int PaletteCount => this.palette.Length;
+        public override int PaletteCount => this.densityTiles.Length;
 
         // ── Shared-config accessors ────────────────────────────────────────────
 
@@ -119,31 +99,28 @@ namespace WorldPainter
             || this.randomPitchRange != Vector2.zero
             || this.randomRollRange != Vector2.zero;
 
-        // ── Palette access ─────────────────────────────────────────────────────
-
-        /// <summary>Read-only palette of grass variants.</summary>
-        public IReadOnlyList<GrassVariant> Palette => this.palette;
-
-        // ── Editor authoring setters (used by WorldMapAssetLifecycle) ──────────
-
-        /// <summary>The mutable palette array. Editor lifecycle only.</summary>
-        internal GrassVariant[] EditorPalette => this.palette;
-
-        /// <summary>Replaces the palette. Editor lifecycle only.</summary>
-        internal void EditorSetPalette(GrassVariant[] variants) => this.palette = variants;
+        // ── Per-tile density access ────────────────────────────────────────────
 
         /// <summary>
-        /// Returns the density <see cref="Texture2D"/> for the given tile coordinate in variant
-        /// <paramref name="v"/>, or null if no entry exists for that coord.
+        /// Returns the density <see cref="Texture2D"/> for the given tile coordinate,
+        /// or null if no entry exists for that coord.
         /// </summary>
-        public static Texture2D? GetTileDensity(in GrassVariant v, Vector2Int coord)
+        public Texture2D? GetTileDensity(Vector2Int coord)
         {
-            var tiles = v.densityTiles;
+            var tiles = this.densityTiles;
             if (tiles == null) return null;
             for (int i = 0; i < tiles.Length; ++i)
                 if (tiles[i].coord == coord) return tiles[i].tex;
             return null;
         }
+
+        // ── Editor authoring accessors ─────────────────────────────────────────
+
+        /// <summary>The mutable densityTiles array. Editor lifecycle only.</summary>
+        internal TileDensityTexture[] EditorTileDensities => this.densityTiles;
+
+        /// <summary>Replaces the densityTiles array. Editor lifecycle only.</summary>
+        internal void EditorSetTileDensities(TileDensityTexture[] tiles) => this.densityTiles = tiles;
 
         /// <summary>Sets the shared render material (keeps LODs/shadow/cull). Editor lifecycle only.</summary>
         internal void EditorSetMaterial(Material material)

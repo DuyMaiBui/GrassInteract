@@ -103,10 +103,10 @@ namespace WorldPainter.Editor
 
             // ── Channel 3: Grass density ──────────────────────────────────────
             // NOTE: biome-stamp grass density is omitted in the unified path — the GrassLayer
-            // uses per-tile per-variant density textures (GrassVariant.densityTiles[coord]) which
-            // require a tile coordinate. The biome stamp operates across tile boundaries, so a
+            // maps one density texture per tile (GrassLayer.densityTiles[coord]) which requires
+            // a tile coordinate. The biome stamp operates across tile boundaries, so a
             // single-RT approach does not generalise. Use the per-tile DensityBrush tool instead
-            // for targeted density paint on individual grass variants.
+            // for targeted density paint on individual tiles.
             // Removed: GetOrCreateDensityRT(DensityScatterLayer) — that type is deleted (Phase 5).
 
             // ── Channel 4: Props ──────────────────────────────────────────────

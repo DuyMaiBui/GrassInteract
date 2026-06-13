@@ -6,10 +6,10 @@ namespace WorldPainter.Editor
 {
     /// <summary>
     /// Control panel for unified <c>SurfaceLayers</c> authoring + paint-target selection. Add/remove
-    /// splat &amp; grass layers, add grass variants, and click a variant to make it the density brush's
-    /// target (sets <see cref="WorldPainterState"/> active layer = Meadow + variant index + Paint tool).
-    /// Then activate the WorldPainter sculpt tool and paint. Editing per-layer fields (variant textures,
-    /// blade mesh, splat albedos) is done on each sub-asset's default inspector via the Select buttons.
+    /// splat &amp; grass layers, and click a grass layer row to make it the density brush's target
+    /// (sets <see cref="WorldPainterState"/> active layer = Meadow + Paint tool). Then activate the
+    /// WorldPainter sculpt tool and paint. Editing per-layer fields (blade mesh, splat albedos) is done
+    /// on each sub-asset's default inspector via the Select buttons.
     /// </summary>
     internal sealed class WorldPainterSurfacePaintWindow : EditorWindow
     {
@@ -44,7 +44,7 @@ namespace WorldPainter.Editor
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Add Splat"))   WorldMapAssetLifecycle.AddSplatLayer(map, "Ground");
-                if (GUILayout.Button("Add Grass"))   WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass", 2);
+                if (GUILayout.Button("Add Grass"))   WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass");
                 if (GUILayout.Button("Create Demo")) WorldMapAssetLifecycle.CreateDemoSurfaceLayers(map);
             }
             EditorGUILayout.Space();
@@ -72,28 +72,15 @@ namespace WorldPainter.Editor
                 }
                 else if (sl is GrassLayer g)
                 {
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        EditorGUILayout.LabelField($"Variants ({g.Palette.Count}) — click to paint:");
-                        if (GUILayout.Button("Add Variant", GUILayout.Width(90f)))
-                            WorldMapAssetLifecycle.AddGrassVariant(map, g, $"Variant{(char)('A' + g.PaletteCount)}", true);
-                    }
+                    bool active =
+                        WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
+                        WorldPainterState.ActiveLayerId == g.name;
 
-                    for (int i = 0; i < g.Palette.Count; i++)
+                    string dot = active ? "● " : "○ ";
+                    if (GUILayout.Button($"  {dot}{g.DisplayName} — click to paint"))
                     {
-                        bool active =
-                            WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
-                            WorldPainterState.ActiveLayerId == g.name &&
-                            WorldPainterState.ActiveGrassVariantIndex == i;
-
-                        string dot   = active ? "● " : "○ ";
-                        string vname = string.IsNullOrEmpty(g.Palette[i].name) ? $"Variant {i}" : g.Palette[i].name;
-                        if (GUILayout.Button($"  {dot}{vname}"))
-                        {
-                            WorldPainterState.ActiveGrassVariantIndex = i;
-                            WorldPainterState.SetActiveLayer(g.name, WorldPainterState.PaintLayerKind.Meadow);
-                            WorldPainterState.SetActiveBrushTool("density.paint");
-                        }
+                        WorldPainterState.SetActiveLayer(g.name, WorldPainterState.PaintLayerKind.Meadow);
+                        WorldPainterState.SetActiveBrushTool("density.paint");
                     }
                 }
 
@@ -107,9 +94,10 @@ namespace WorldPainter.Editor
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "Grass: select a variant, activate the WorldPainter sculpt tool, then paint (Paint adds, " +
-                "Erase removes); release rebuilds the scatter. Splat: assign albedos to a Splat layer's " +
-                "TerrainLayerSet, then paint with the splat tool.", MessageType.None);
+                "Grass: click a grass layer row to select it, activate the WorldPainter sculpt tool, " +
+                "then paint (Paint adds, Erase removes); release rebuilds the scatter. " +
+                "Splat: assign albedos to a Splat layer's TerrainLayerSet, then paint with the splat tool.",
+                MessageType.None);
         }
     }
 }

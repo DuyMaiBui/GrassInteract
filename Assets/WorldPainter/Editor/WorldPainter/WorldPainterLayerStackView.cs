@@ -175,7 +175,6 @@ namespace WorldPainter.Editor
                                     onClick: () =>
                                     {
                                         WorldPainterState.ActiveSplatChannel = capturedCi;
-                                        WorldPainterState.ActiveGrassVariantIndex = -1;
                                         WorldPainterState.SetActiveLayer(
                                             splatLayerExpanded.name,
                                             WorldPainterState.PaintLayerKind.Splat);
@@ -187,40 +186,8 @@ namespace WorldPainter.Editor
                         }
                     }
 
-                    // For GrassLayer: show variant sub-rows for paint-target selection.
-                    if (sl is GrassLayer grassLayer && this.chips.Passes(LayerType.Grass))
-                    {
-                        bool isActiveLayer =
-                            WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
-                            WorldPainterState.ActiveLayerId == sl.name;
-
-                        if (isActiveLayer || IsRowSelected(sl))
-                        {
-                            for (int vi = 0; vi < grassLayer.Palette.Count; vi++)
-                            {
-                                var variant = grassLayer.Palette[vi];
-                                bool isActiveVariant = isActiveLayer &&
-                                    WorldPainterState.ActiveGrassVariantIndex == vi;
-
-                                string vname = string.IsNullOrEmpty(variant.name)
-                                    ? $"Variant {vi}" : variant.name;
-
-                                int capturedVi = vi;
-                                var vrow = this.BuildVariantRow(
-                                    displayIndex++, vname, isActiveVariant,
-                                    onClick: () =>
-                                    {
-                                        WorldPainterState.ActiveGrassVariantIndex = capturedVi;
-                                        WorldPainterState.SetActiveLayer(
-                                            grassLayer.name,
-                                            WorldPainterState.PaintLayerKind.Meadow);
-                                        WorldPainterState.SetActiveBrushTool("density.paint");
-                                        this.RefreshStack();
-                                    });
-                                this.stackContainer.Add(vrow);
-                            }
-                        }
-                    }
+                    // GrassLayer: clicking the row activates density painting directly.
+                    // No variant sub-rows — one density texture per tile per layer.
                 }
             }
 

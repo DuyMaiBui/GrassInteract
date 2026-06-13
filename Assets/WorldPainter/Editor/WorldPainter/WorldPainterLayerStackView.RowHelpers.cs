@@ -31,7 +31,6 @@ namespace WorldPainter.Editor
 
             // Clear unified surface-layer selection.
             WorldPainterState.SetActiveLayer(string.Empty, WorldPainterState.PaintLayerKind.None);
-            WorldPainterState.ActiveGrassVariantIndex = -1;
 
             // Clear direct biome selection so EffectiveLayerType falls through to Height.
             WorldPainterState.ActiveBiomeIndex = -1;
@@ -58,11 +57,6 @@ namespace WorldPainter.Editor
                 WorldPainterLayer.LayerKind.Prop  => WorldPainterState.PaintLayerKind.Prop,
                 _ => WorldPainterState.PaintLayerKind.None,
             };
-
-            // For grass: reset the active variant so the stack shows sub-rows but no specific
-            // variant is active until the user clicks one.
-            if (layer.Kind == WorldPainterLayer.LayerKind.Grass)
-                WorldPainterState.ActiveGrassVariantIndex = -1;
 
             // For splat: reset the active channel so the stack shows albedo-slot sub-rows but
             // no specific channel is active until the user clicks one.
@@ -131,7 +125,6 @@ namespace WorldPainter.Editor
             WorldPainterState.ActiveLayerIndex = -(biomeIndex + 100);
             // Clear unified surface-layer selection.
             WorldPainterState.SetActiveLayer(string.Empty, WorldPainterState.PaintLayerKind.None);
-            WorldPainterState.ActiveGrassVariantIndex = -1;
             this.RefreshStack();
         }
 

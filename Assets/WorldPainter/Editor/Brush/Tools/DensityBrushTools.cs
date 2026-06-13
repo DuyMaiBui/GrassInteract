@@ -39,7 +39,7 @@ namespace WorldPainter.Editor
             // from the tile currently under the brush (ctx.Tile.tileCoord).
             if (WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow)
             {
-                var tileDensityTex = BrushToolTargets.ResolveGrassVariantDensityForTile(
+                var tileDensityTex = BrushToolTargets.ResolveGrassDensityForTile(
                     ctx.Painter, ctx.Tile.tileCoord);
                 if (tileDensityTex == null) return; // no texture for this tile — skip
 

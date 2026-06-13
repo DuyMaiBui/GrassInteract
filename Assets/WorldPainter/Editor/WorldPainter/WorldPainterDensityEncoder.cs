@@ -9,7 +9,7 @@ namespace WorldPainter.Editor
 {
     /// <summary>
     /// Encodes a density RenderTexture into a target density <see cref="Texture2D"/> and persists it.
-    /// The target is a per-tile <c>GrassVariant.densityTiles</c> entry — a plain R texture.
+    /// The target is a per-tile density texture on a <see cref="GrassLayer"/> — a plain R texture.
     ///
     /// Sits on the same throttled 0.15s pipeline as <see cref="TerrainSculptRtWriteback"/>:
     /// call <see cref="RequestAsync(Texture2D, RenderTexture)"/> during drag, <see cref="ExecuteSync(Texture2D, RenderTexture)"/> on mouse-up.

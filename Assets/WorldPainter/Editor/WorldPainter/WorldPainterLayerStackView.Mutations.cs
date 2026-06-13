@@ -63,7 +63,7 @@ namespace WorldPainter.Editor
                 if (sl is GrassLayer) existingGrassCount++;
 
             string layerName = existingGrassCount == 0 ? "Grass" : $"Grass {existingGrassCount}";
-            GrassLayer newLayer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map!, layerName, 2);
+            GrassLayer newLayer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map!, layerName);
             this.SelectSurfaceLayer(newLayer);
             this.RefreshStack();
         }
@@ -113,7 +113,6 @@ namespace WorldPainter.Editor
             if (WorldPainterState.ActiveLayerId == layer.name)
             {
                 WorldPainterState.SetActiveLayer(string.Empty, WorldPainterState.PaintLayerKind.None);
-                WorldPainterState.ActiveGrassVariantIndex = -1;
             }
 
             WorldMapAssetLifecycle.RemoveSurfaceLayer(map, layer);

@@ -5,12 +5,12 @@ using UnityEngine;
 namespace WorldPainter
 {
     /// <summary>
-    /// WorldPainter partial — unified SurfaceLayers (grass variants) scatter orchestration.
+    /// WorldPainter partial — unified SurfaceLayers scatter orchestration.
     ///
     /// Parallels the FROZEN <see cref="RebuildScatter"/> path but iterates the new
-    /// <see cref="WorldMapAsset.SurfaceLayers"/>. For each <see cref="GrassLayer"/> it builds N
-    /// frozen engines — one per palette variant — via a transient <see cref="GrassVariantScatterLayer"/>
-    /// adapter, REUSING the frozen private helpers (<c>SelectAndBuildScatterEngine</c>,
+    /// <see cref="WorldMapAsset.SurfaceLayers"/>. For each <see cref="GrassLayer"/> it builds one
+    /// frozen engine per tile — via a transient <see cref="GrassTileScatterLayer"/> adapter,
+    /// REUSING the frozen private helpers (<c>SelectAndBuildScatterEngine</c>,
     /// <c>ResolveScatterInfra</c>, <c>BuildScatterSampler</c>) which are accessible because this is the
     /// same partial class.
     ///
@@ -18,16 +18,16 @@ namespace WorldPainter
     /// </summary>
     public sealed partial class WorldPainter
     {
-        // One engine + its adapter per (grass layer, variant). Adapters are kept alive for the
+        // One engine + its adapter per (grass layer, tile). Adapters are kept alive for the
         // lifetime of their engine (the engine retains the layer reference for Submit-time config).
-        private readonly List<IGrassEngine>             surfaceEngines  = new();
-        private readonly List<GrassVariantScatterLayer> surfaceAdapters = new();
+        private readonly List<IGrassEngine>          surfaceEngines  = new();
+        private readonly List<GrassTileScatterLayer> surfaceAdapters = new();
 
         // One engine + its adapter per PropLayer (layer-global, not per-tile).
         private readonly List<IGrassEngine>            surfacePropEngines  = new();
         private readonly List<PropLayerScatterLayer>   surfacePropAdapters = new();
 
-        /// <summary>(Re)builds one frozen engine per grass-variant from <see cref="WorldMapAsset.SurfaceLayers"/>.</summary>
+        /// <summary>(Re)builds one frozen engine per (grass layer, tile) from <see cref="WorldMapAsset.SurfaceLayers"/>.</summary>
         internal void RebuildSurfaceLayers()
         {
             this.DisposeSurfaceLayers();
@@ -42,8 +42,6 @@ namespace WorldPainter
             // grass never placed on any tile but the first (multi-tile no-render bug). Nulled on
             // teardown in DisposeSurfaceLayers so it rebuilds each pass.
             this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
-            this.ResolveScatterInfra();
-            this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
             this.ResolveScatterInfra();
             this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
 
@@ -67,57 +65,46 @@ namespace WorldPainter
 
                 if (layers[i] is not GrassLayer grass) continue; // splat layers don't scatter
 
-                IReadOnlyList<GrassVariant> palette = grass.Palette;
-                for (int v = 0; v < palette.Count; ++v)
+                // Per-tile: build one engine per tile. Each tile gets its own adapter at the tile
+                // center origin with that tile's density texture.
+                if (this.map != null)
                 {
-                    GrassVariant variant = palette[v];
-
-                    // Per-tile: build one engine per (variant, tile). Each tile gets its own
-                    // adapter at the tile center origin with that tile's density texture.
-                    bool anyTile = false;
-                    if (this.map != null)
+                    foreach (TerrainTileAsset tile in this.map.EnumerateTiles())
                     {
-                        foreach (TerrainTileAsset tile in this.map.EnumerateTiles())
+                        Texture2D? tileTex = grass.GetTileDensity(tile.tileCoord);
+                        // tileTex == null means no density painted yet → skip (valid state).
+                        if (tileTex == null) continue;
+
+                        var adapter = GrassTileScatterLayer.Create(grass, tile.tileCoord, tileTex);
+
+                        if (!adapter.Validate(out string tileErr))
                         {
-                            Texture2D? tileTex = GrassLayer.GetTileDensity(variant, tile.tileCoord);
-                            // tileTex == null means no density painted yet → skip (valid state).
-                            if (tileTex == null) continue;
-
-                            var adapter = GrassVariantScatterLayer.Create(grass, v, tile.tileCoord, tileTex);
-
-                            if (!adapter.Validate(out string tileErr))
-                            {
-                                Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {tileErr} — skipped.", this);
-                                DestroyAdapter(adapter);
-                                continue;
-                            }
-
-                            // Per-tile origin = tile center world XZ at the painter's Y.
-                            Vector2 tileOriginXZ = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
-                            float halfTile = TerrainWorldGrid.TILE_SIZE_M * 0.5f;
-                            var tileOrigin = new Vector3(
-                                tileOriginXZ.x + halfTile,
-                                painterOrigin.y,
-                                tileOriginXZ.y + halfTile);
-
-                            ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
-                                ?? new RaycastSurfaceSampler(adapter.Placement.GroundSnapMask, tileOrigin.y);
-
-                            IGrassEngine engine = this.SelectAndBuildScatterEngine(
-                                i, adapter, tileOrigin, sampler, gpuCapable, probeReason);
-                            engine.Build(adapter, tileOrigin, this.scatterPool!, sampler);
-
-                            this.surfaceEngines.Add(engine);
-                            this.surfaceAdapters.Add(adapter);
-                            anyTile = true;
-
-                            Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name} → " +
-                                      $"tier={this.ScatterActiveTierName}.", this);
+                            Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {tileErr} — skipped.", this);
+                            DestroyAdapter(adapter);
+                            continue;
                         }
-                    }
 
-                    // anyTile == false and map != null means no density painted yet for this variant
-                    // across any tile — quiet no-op is correct; no log needed.
+                        // Per-tile origin = tile center world XZ at the painter's Y.
+                        Vector2 tileOriginXZ = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
+                        float halfTile = TerrainWorldGrid.TILE_SIZE_M * 0.5f;
+                        var tileOrigin = new Vector3(
+                            tileOriginXZ.x + halfTile,
+                            painterOrigin.y,
+                            tileOriginXZ.y + halfTile);
+
+                        ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
+                            ?? new RaycastSurfaceSampler(adapter.Placement.GroundSnapMask, tileOrigin.y);
+
+                        IGrassEngine engine = this.SelectAndBuildScatterEngine(
+                            i, adapter, tileOrigin, sampler, gpuCapable, probeReason);
+                        engine.Build(adapter, tileOrigin, this.scatterPool!, sampler);
+
+                        this.surfaceEngines.Add(engine);
+                        this.surfaceAdapters.Add(adapter);
+
+                        Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name} → " +
+                                  $"tier={this.ScatterActiveTierName}.", this);
+                    }
                 }
             }
         }
@@ -243,7 +230,7 @@ namespace WorldPainter
             }
         }
 
-        private static void DestroyAdapter(GrassVariantScatterLayer? adapter)
+        private static void DestroyAdapter(GrassTileScatterLayer? adapter)
         {
             if (adapter == null) return;
             if (Application.isPlaying) Destroy(adapter);

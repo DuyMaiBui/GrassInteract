@@ -11,7 +11,7 @@ namespace WorldPainter
     /// NOT serialized — created transiently by <c>WorldPainter.SurfaceLayers.RebuildSurfaceLayers</c>
     /// and destroyed alongside its engine via <see cref="OnDisable"/> / <see cref="OnDestroy"/>.
     ///
-    /// Mirrors <see cref="GrassVariantScatterLayer"/> lifetime/disposal patterns exactly.
+    /// Mirrors <see cref="GrassTileScatterLayer"/> lifetime/disposal patterns.
     /// </summary>
     public sealed class PropLayerScatterLayer : ScatterLayer, IInstancePlacementSource
     {

@@ -9,10 +9,12 @@ using WorldPainter.Editor; // WorldMapAssetLifecycle, WorldPainterState, WorldPa
 namespace WorldPainter.Tests
 {
     /// <summary>
-    /// Phase 5 verification tests.
+    /// Phase 5 verification tests — updated for the per-tile density model.
     ///
-    /// 1. ALLOC: 3 tiles + activate density layer → each tile gains R8 256×256 channel keyed by layerId.
-    /// 2. FREE:  remove layer → channels freed + zero orphan sub-assets.
+    /// GrassLayer now maps a density texture DIRECTLY per tile (no GrassVariant/palette indirection).
+    ///
+    /// 1. ALLOC: 2 tiles + AddGrassLayerWithBlades → layer has 2 densityTiles entries.
+    /// 2. FREE:  remove layer → density textures freed + zero orphan sub-assets.
     /// 3. PREVIEW: <see cref="WorldPainterPreviewCache"/> produces a non-null thumbnail for a grass LOD0
     ///    mesh+material (light smoke — headless EditMode may return null, assertion is lenient).
     /// 4. ACTIVE-LAYER STATE: clicking a square (calling SetActiveLayer) sets
@@ -182,7 +184,7 @@ namespace WorldPainter.Tests
         // ── G6 Per-tile grass density alloc/remove tests ──────────────────────
 
         [Test]
-        public void TwoTiles_AddGrassVariant_EachVariantHasTwoDensityTiles()
+        public void TwoTiles_AddGrassLayerWithBlades_LayerHasTwoDensityTiles()
         {
             var map = this.LoadMap();
 
@@ -191,44 +193,40 @@ namespace WorldPainter.Tests
             WorldMapAssetLifecycle.AddTile(map, c0);
             WorldMapAssetLifecycle.AddTile(map, c1);
 
-            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "TestGrass", variantCount: 2);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "TestGrass");
 
-            // Each of the 2 variants should have 2 densityTiles (one per tile).
-            foreach (var v in grass.Palette)
+            // The layer should have 2 densityTiles (one per tile).
+            var tiles = grass.EditorTileDensities;
+            Assert.IsNotNull(tiles, "densityTiles must not be null.");
+            Assert.AreEqual(2, tiles.Length,
+                "GrassLayer must have exactly 2 densityTiles (one per tile).");
+
+            // Both textures must be sub-assets of the map.
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            foreach (var entry in tiles)
             {
-                Assert.IsNotNull(v.densityTiles,
-                    $"Variant '{v.name}' densityTiles must not be null.");
-                Assert.AreEqual(2, v.densityTiles.Length,
-                    $"Variant '{v.name}' must have exactly 2 densityTiles (one per tile).");
-
-                // Both textures must be sub-assets of the map.
-                string mapPath = AssetDatabase.GetAssetPath(map);
-                foreach (var entry in v.densityTiles)
-                {
-                    Assert.IsNotNull(entry.tex,
-                        $"Variant '{v.name}' tile {entry.coord} density tex must not be null.");
-                    Assert.AreEqual(mapPath, AssetDatabase.GetAssetPath(entry.tex),
-                        $"Variant '{v.name}' tile {entry.coord} density tex must be a sub-asset of the map.");
-                }
+                Assert.IsNotNull(entry.tex,
+                    $"Tile {entry.coord} density tex must not be null.");
+                Assert.AreEqual(mapPath, AssetDatabase.GetAssetPath(entry.tex),
+                    $"Tile {entry.coord} density tex must be a sub-asset of the map.");
             }
         }
 
         [Test]
-        public void AddGrassVariant_ZeroTiles_VariantHasEmptyDensityTiles()
+        public void AddGrassLayerWithBlades_ZeroTiles_LayerHasEmptyDensityTiles()
         {
             var map = this.LoadMap();
-            // No tiles — AddGrassVariant must produce an empty densityTiles array (valid state).
-            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "NoTileGrass", variantCount: 1);
+            // No tiles — AddGrassLayerWithBlades must produce an empty densityTiles array (valid state).
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "NoTileGrass");
 
-            Assert.AreEqual(1, grass.Palette.Count, "Layer should have 1 variant.");
-            Assert.IsNotNull(grass.Palette[0].densityTiles,
+            Assert.IsNotNull(grass.EditorTileDensities,
                 "densityTiles must not be null even with 0 tiles.");
-            Assert.AreEqual(0, grass.Palette[0].densityTiles.Length,
+            Assert.AreEqual(0, grass.EditorTileDensities.Length,
                 "densityTiles must be empty when map has no tiles.");
         }
 
         [Test]
-        public void AddTileAfterGrassVariant_VariantGainsThirdDensityTile()
+        public void AddTileAfterGrassLayer_LayerGainsThirdDensityTile()
         {
             var map = this.LoadMap();
 
@@ -237,9 +235,9 @@ namespace WorldPainter.Tests
             var c1 = new Vector2Int(1, 0);
             WorldMapAssetLifecycle.AddTile(map, c0);
             WorldMapAssetLifecycle.AddTile(map, c1);
-            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "ExpandGrass", variantCount: 1);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "ExpandGrass");
 
-            // Add a third tile after the variant exists.
+            // Add a third tile after the layer exists.
             var c2 = new Vector2Int(0, 1);
             WorldMapAssetLifecycle.AddTile(map, c2);
 
@@ -249,11 +247,11 @@ namespace WorldPainter.Tests
             GrassLayer? reloadedGrass = reloaded.SurfaceLayers.OfType<GrassLayer>().FirstOrDefault();
             Assert.IsNotNull(reloadedGrass, "GrassLayer must survive reimport.");
 
-            var variant = reloadedGrass!.Palette[0];
-            Assert.AreEqual(3, variant.densityTiles.Length,
-                "After AddTile, variant must have 3 densityTiles.");
+            var densityTiles = reloadedGrass!.EditorTileDensities;
+            Assert.AreEqual(3, densityTiles.Length,
+                "After AddTile, layer must have 3 densityTiles.");
             bool hasC2 = false;
-            foreach (var e in variant.densityTiles)
+            foreach (var e in densityTiles)
                 if (e.coord == c2) { hasC2 = true; break; }
             Assert.IsTrue(hasC2, "Third tile coord must appear in densityTiles.");
         }
@@ -267,7 +265,7 @@ namespace WorldPainter.Tests
             var c1 = new Vector2Int(1, 0);
             WorldMapAssetLifecycle.AddTile(map, c0);
             WorldMapAssetLifecycle.AddTile(map, c1);
-            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "RemoveGrass", variantCount: 2);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "RemoveGrass");
 
             WorldMapAssetLifecycle.RemoveSurfaceLayer(map, grass);
 
@@ -279,7 +277,7 @@ namespace WorldPainter.Tests
         }
 
         [Test]
-        public void RemoveTile_RemovesVariantDensityTextureForThatCoord()
+        public void RemoveTile_RemovesDensityTextureForThatCoord()
         {
             var map = this.LoadMap();
 
@@ -287,10 +285,10 @@ namespace WorldPainter.Tests
             var c1 = new Vector2Int(1, 0);
             WorldMapAssetLifecycle.AddTile(map, c0);
             WorldMapAssetLifecycle.AddTile(map, c1);
-            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "TileRemoveGrass", variantCount: 1);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "TileRemoveGrass");
 
             // Should have 2 density textures before removal.
-            Assert.AreEqual(2, grass.Palette[0].densityTiles.Length, "Pre-condition: 2 density tiles.");
+            Assert.AreEqual(2, grass.EditorTileDensities.Length, "Pre-condition: 2 density tiles.");
 
             WorldMapAssetLifecycle.RemoveTile(map, c1);
 
@@ -298,9 +296,9 @@ namespace WorldPainter.Tests
             var reloaded = this.LoadMap();
             GrassLayer? rg = reloaded.SurfaceLayers.OfType<GrassLayer>().FirstOrDefault();
             Assert.IsNotNull(rg);
-            Assert.AreEqual(1, rg!.Palette[0].densityTiles.Length,
-                "After RemoveTile, variant must have 1 density tile remaining.");
-            Assert.AreEqual(c0, rg.Palette[0].densityTiles[0].coord,
+            Assert.AreEqual(1, rg!.EditorTileDensities.Length,
+                "After RemoveTile, layer must have 1 density tile remaining.");
+            Assert.AreEqual(c0, rg.EditorTileDensities[0].coord,
                 "Remaining density tile must be coord c0.");
 
             // No orphan Texture2D for the removed tile.
