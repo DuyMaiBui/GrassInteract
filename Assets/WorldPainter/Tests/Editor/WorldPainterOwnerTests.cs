@@ -8,7 +8,7 @@ namespace WorldPainter.Tests
 {
     /// <summary>
     /// Owner-level tests for <see cref="WorldPainter"/>:
-    ///   (a) Tier-A schema round-trip (worldGrid + tiles + splatLayers + scatterLayers).
+    ///   (a) Tier-A schema round-trip (worldGrid + tiles — splatLayers/scatterLayers removed Phase 5b).
     ///   (b) Coord-lookup via Tiles list (no GPU build needed — pure data).
     ///   (c) Migration mapping parity — tile/layer count in == count on painter.
     ///

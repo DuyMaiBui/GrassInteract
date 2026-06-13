@@ -89,8 +89,8 @@ namespace WorldPainter.Editor
             int idx = ActiveLayerIndex;
             if (idx <= 0) return LayerType.Height; // 0 or -1 = Height base
 
-            // Biome rows. The stack now lists only biome rows after unified surface rows,
-            // so we can no longer compute biome offset via splatLayers.Count + scatter offset.
+            // Biome rows. The stack now lists only biome rows after unified surface rows
+            // (splatLayers/scatterLayers removed in Phase 5b — no index arithmetic available).
             // Fall through to Height for any index we can't classify.
             int biomeOffset = idx - 1; // legacy index 1+ maps to biome offset in the simple case
             if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)

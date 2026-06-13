@@ -13,9 +13,8 @@ namespace WorldPainter.Editor
     /// Photoshop-style layer stack for <see cref="WorldPainter"/>. Height row is synthetic;
     /// unified surface rows bind to <c>map.SurfaceLayers</c>; biome rows bind to the biomes list.
     ///
-    /// Phase 2: stack now lists <c>map.SurfaceLayers</c> (SplatLayer/GrassLayer/PropLayer)
-    /// instead of inline <c>splatLayers[]</c> + <c>map.Layers</c>. Legacy list props are kept
-    /// for compilation but are no longer iterated here.
+    /// Phase 5b: legacy splatLayers/scatterLayers fields and SplatLayerDef removed.
+    /// Stack lists <c>map.SurfaceLayers</c> exclusively.
     /// Mutation methods in <c>WorldPainterLayerStackView.Mutations.cs</c>.
     /// </summary>
     internal sealed partial class WorldPainterLayerStackView
@@ -27,19 +26,14 @@ namespace WorldPainter.Editor
         private readonly WorldPainterFilterChips chips;
         private readonly WorldPainterPreviewCache previewCache = new();
 
-        // ── Cached SerializedProperty refs (kept for legacy compat + biome list) ──
+        // ── Cached SerializedProperty refs ───────────────────────────────────
 
-        private SerializedProperty splatLayersProp = null!;
-        private SerializedProperty scatterLayersProp = null!;
         private SerializedProperty biomesProp = null!;
 
         // ── UI ────────────────────────────────────────────────────────────────
 
         private VisualElement? stackContainer;
 
-        // ── Drag-reorder state ────────────────────────────────────────────────
-
-        private int dragFromIndex = -1;
 
         // ── Ctor ──────────────────────────────────────────────────────────────
 
@@ -52,8 +46,6 @@ namespace WorldPainter.Editor
             this.painter           = painter;
             this.chips             = chips;
 
-            this.splatLayersProp   = so.FindProperty("splatLayers")!;
-            this.scatterLayersProp = so.FindProperty("scatterLayers")!;
             this.biomesProp        = so.FindProperty("biomes")!;
 
             chips.FilterChanged += _ => this.RefreshStack();

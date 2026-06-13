@@ -45,8 +45,7 @@ namespace WorldPainter.Editor
         /// and <see cref="WorldPainterState.ActiveSplatChannel"/> is set (≥ 0), use it directly.
         ///
         /// Legacy fallback: derive the channel from the active layer's display-index position
-        /// via <see cref="WorldPainterState.ActiveLayerType"/> (legacy splat rows mapped channels
-        /// by their position in the inline <c>splatLayers[]</c> array).
+        /// via <see cref="WorldPainterState.ActiveLayerType"/> (legacy index path, height fallback).
         /// </summary>
         internal static int ResolveChannel(WorldPainter painter)
         {

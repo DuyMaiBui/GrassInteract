@@ -54,7 +54,7 @@ namespace WorldPainter
 
         /// <summary>
         /// The referenced WorldMapAsset container. When non-null, scatter and terrain
-        /// reads go through this asset's APIs (GetTile / EnumerateTiles / Layers).
+        /// reads go through this asset's APIs (GetTile / EnumerateTiles / SurfaceLayers).
         /// </summary>
         public WorldMapAsset? Map
         {

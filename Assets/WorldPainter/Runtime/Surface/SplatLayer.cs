@@ -8,9 +8,8 @@ namespace WorldPainter
     /// SSOT) into the <see cref="WorldPainterLayer"/> hierarchy so splat and grass live in one
     /// <see cref="WorldMapAsset.SurfaceLayers"/> list.
     ///
-    /// Consolidates the legacy dual config — the inline <c>SplatLayerDef[]</c> on the WorldPainter
-    /// MonoBehaviour vs. the asset-based <see cref="TerrainLayerSet"/> — onto the asset as the
-    /// single source of truth.
+    /// The asset-based <see cref="TerrainLayerSet"/> is the single source of truth for
+    /// splat albedo data (SplatLayerDef and inline splatLayers[] removed in Phase 5b).
     ///
     /// Painted control = the per-tile RGBA weight map (<c>TerrainTileAsset.splatData</c>, uploaded
     /// as <see cref="TerrainTileGpuResources.SplatTexture"/>); blending is done by

@@ -9,12 +9,8 @@ namespace WorldPainter.Editor
     /// <summary>
     /// Mutation half of <see cref="WorldPainterLayerStackView"/> (partial).
     ///
-    /// Phase 2: add-menu creates UNIFIED types (SplatLayer/GrassLayer/PropLayer via
-    /// <see cref="WorldMapAssetLifecycle"/>). Legacy scatter/splat mutation methods are
-    /// retained for the Biome path; the old AddSplatLayer/AddGrassLayer/AddPropLayer
-    /// bodies are replaced with unified equivalents.
-    ///
-    /// Contains: add-menu, drag-reorder implementation, add/remove/reorder mutations.
+    /// Phase 5b: drag-reorder legacy methods removed (depended on splatLayersProp).
+    /// Contains: add-menu, unified add/remove mutations, biome row mutations.
     /// </summary>
     internal sealed partial class WorldPainterLayerStackView
     {
@@ -28,39 +24,6 @@ namespace WorldPainter.Editor
             menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayerUnified());
             menu.AddItem(new GUIContent("Biome preset"), false, () => this.AddBiomeRow());
             menu.ShowAsContext();
-        }
-
-        // ── Drag-reorder implementation ───────────────────────────────────────
-
-        private void RegisterDragReorder(VisualElement row, int splatIndex)
-        {
-            row.RegisterCallback<MouseDownEvent>(e =>
-            {
-                if (e.button == 0 && e.ctrlKey)
-                {
-                    this.dragFromIndex = splatIndex;
-                    e.StopPropagation();
-                }
-            });
-
-            row.RegisterCallback<MouseUpEvent>(e =>
-            {
-                if (e.button == 0 && this.dragFromIndex >= 0 && this.dragFromIndex != splatIndex)
-                    this.ReorderSplatLayer(this.dragFromIndex, splatIndex);
-                this.dragFromIndex = -1;
-            });
-        }
-
-        private void ReorderSplatLayer(int fromIdx, int toIdx)
-        {
-            if (fromIdx < 0 || toIdx < 0) return;
-            if (fromIdx >= this.splatLayersProp.arraySize) return;
-            if (toIdx >= this.splatLayersProp.arraySize) return;
-
-            Undo.RecordObject(this.painter, "Reorder Splat Layer");
-            this.splatLayersProp.MoveArrayElement(fromIdx, toIdx);
-            this.serializedObject.ApplyModifiedProperties();
-            this.RefreshStack();
         }
 
         // ── Unified add mutations (Phase 2 — all go through WorldMapAssetLifecycle) ──
