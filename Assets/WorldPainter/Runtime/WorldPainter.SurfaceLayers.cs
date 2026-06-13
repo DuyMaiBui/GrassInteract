@@ -163,6 +163,12 @@ namespace WorldPainter
             for (int i = 0; i < this.surfacePropAdapters.Count; ++i)
                 DestroyPropAdapter(this.surfacePropAdapters[i]);
             this.surfacePropAdapters.Clear();
+
+            // Null the cached grounding sampler so RebuildSurfaceLayers rebuilds it (it uses
+            // `scatterSampler ??= BuildScatterSampler()`). Without this, the sampler binds to the
+            // first valid tile forever — stale after a Map swap or a tile becoming height-valid
+            // later (the old RebuildScatter path nulled it in DisposeScatterEngines, now removed).
+            this.scatterSampler = null;
         }
 
         /// <summary>
