@@ -36,8 +36,14 @@ namespace WorldPainter
             IReadOnlyList<WorldPainterLayer> layers = this.map.SurfaceLayers;
             if (layers.Count == 0) return;
 
-            // Reuse the frozen grounding sampler + GPU infra resolution.
-            this.scatterSampler ??= this.BuildScatterSampler();
+            // MAP-WIDE grounding sampler: resolve the tile per query position so grass on EVERY
+            // tile is grounded. The frozen BuildScatterSampler() binds to the FIRST valid tile only
+            // (HeightmapSurfaceSampler single-tile ctor) — that returns false off that one tile, so
+            // grass never placed on any tile but the first (multi-tile no-render bug). Nulled on
+            // teardown in DisposeSurfaceLayers so it rebuilds each pass.
+            this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
+            this.ResolveScatterInfra();
+            this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
             this.ResolveScatterInfra();
             this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
 
