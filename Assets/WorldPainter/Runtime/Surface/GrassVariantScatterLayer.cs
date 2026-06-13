@@ -25,33 +25,6 @@ namespace WorldPainter
         private Vector2    explicitFieldBounds;  // tile-sized bounds when useExplicitBounds == true
 
         /// <summary>
-        /// Builds a transient adapter for one variant (field-wide, global density).
-        /// Clones the layer material and overrides <c>_BaseMap</c> with the variant texture.
-        /// Caller owns the lifetime (destroy with the engine).
-        /// </summary>
-        public static GrassVariantScatterLayer Create(GrassLayer layer, int variantIndex, Texture2D? densityMap)
-        {
-            var adapter = CreateInstance<GrassVariantScatterLayer>();
-            adapter.hideFlags          = HideFlags.HideAndDontSave;
-            adapter.layer              = layer;
-            adapter.variantId          = $"{layer.name}#{variantIndex}";
-            adapter.densityMap         = densityMap;
-            adapter.name               = adapter.variantId;
-            adapter.useExplicitBounds  = false;
-            adapter.explicitFieldBounds = layer.FieldBounds;
-
-            GrassVariant v = layer.Palette[variantIndex];
-            Material? baseMat = layer.Render.Material;
-            if (baseMat != null)
-            {
-                adapter.variantMaterial = new Material(baseMat) { name = $"{adapter.variantId}_Mat" };
-                if (v.texture != null)
-                    adapter.variantMaterial.SetTexture(ID_BaseMap, v.texture);
-            }
-            return adapter;
-        }
-
-        /// <summary>
         /// Builds a tile-aware transient adapter for one (variant, tile). Uses a tile-sized
         /// <see cref="FieldBounds"/> and sets <see cref="UseExplicitFieldBounds"/> = true so
         /// <see cref="DensityPlacement"/> does not override bounds with terrain size.

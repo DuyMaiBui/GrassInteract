@@ -99,12 +99,8 @@ namespace WorldPainter
                         }
                     }
 
-                    // Fallback: if map is null or has no tiles, use the global adapter (0-tile case).
-                    if (!anyTile && this.map == null)
-                    {
-                        // No tiles → nothing to scatter; log once and skip.
-                        Debug.Log($"[WorldPainter.SurfaceLayers] {grass.name}#{v}: no tiles — skipped.", this);
-                    }
+                    // anyTile == false and map != null means no density painted yet for this variant
+                    // across any tile — quiet no-op is correct; no log needed.
                 }
             }
         }

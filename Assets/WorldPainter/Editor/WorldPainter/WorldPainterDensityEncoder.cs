@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -8,26 +9,31 @@ namespace WorldPainter.Editor
 {
     /// <summary>
     /// Encodes a density RenderTexture into a target density <see cref="Texture2D"/> and persists it.
-    /// The target is either a legacy <see cref="DensityScatterLayer"/>'s <c>densityMap</c> or a unified
-    /// <c>GrassVariant.densityMap</c> — both are plain RGBA/R textures, so the encoder is target-typed.
+    /// The target is either a legacy <see cref="DensityScatterLayer"/>'s <c>densityMap</c> or a per-tile
+    /// <c>GrassVariant.densityTiles</c> entry — both are plain RGBA/R textures, so the encoder is target-typed.
     ///
     /// Sits on the same throttled 0.15s pipeline as <see cref="TerrainSculptRtWriteback"/>:
     /// call <see cref="RequestAsync(Texture2D, RenderTexture)"/> during drag, <see cref="ExecuteSync(Texture2D, RenderTexture)"/> on mouse-up.
     /// </summary>
     internal sealed class WorldPainterDensityEncoder
     {
-        // ── Pending state (coalesced per target; last RT wins) ────────────────
+        // ── Pending state (keyed by target; last RT per target wins) ─────────
+        // Using a Dictionary so a single brush stamp straddling two tiles enqueues BOTH targets
+        // instead of the second call overwriting the first ("last call wins" caused live-preview
+        // flicker on tile seams during drag).
 
-        private Texture2D?     pendingTarget;
-        private RenderTexture? pendingRT;
+        private readonly Dictionary<Texture2D, RenderTexture> pendingQueue = new();
 
         // ── Public API (Texture2D target) ─────────────────────────────────────
 
-        /// <summary>Queue an async density readback into <paramref name="target"/>. Last call wins.</summary>
+        /// <summary>
+        /// Queue an async density readback into <paramref name="target"/>.
+        /// A later RT for the SAME target replaces the earlier one (still correct — same tile, newer paint).
+        /// Different targets accumulate so seam tiles are not dropped.
+        /// </summary>
         public void RequestAsync(Texture2D target, RenderTexture densityRT)
         {
-            this.pendingTarget = target;
-            this.pendingRT     = densityRT;
+            this.pendingQueue[target] = densityRT;
         }
 
         /// <summary>Synchronous encode: reads RT pixels on the CPU immediately. Use on mouse-up.</summary>
@@ -67,31 +73,39 @@ namespace WorldPainter.Editor
 
         // ── Drain ─────────────────────────────────────────────────────────────
 
-        /// <summary>Drain the pending async request (issue AsyncGPUReadback). Call from OnEditorUpdate.</summary>
+        /// <summary>
+        /// Drain ALL pending async requests (one AsyncGPUReadback per queued target).
+        /// The throttle cadence (0.15s) applies to the whole drain, not per-entry.
+        /// Call from OnEditorUpdate.
+        /// </summary>
         public void Tick()
         {
-            if (this.pendingTarget == null || this.pendingRT == null) return;
+            if (this.pendingQueue.Count == 0) return;
 
-            var target = this.pendingTarget;
-            var rt     = this.pendingRT;
-            this.pendingTarget = null;
-            this.pendingRT     = null;
+            // Snapshot and clear before issuing callbacks (re-entrant safety).
+            var snapshot = new Dictionary<Texture2D, RenderTexture>(this.pendingQueue);
+            this.pendingQueue.Clear();
 
-            if (target == null || rt == null) return;
-
-            AsyncGPUReadback.Request(rt, 0, request =>
+            foreach (var (target, rt) in snapshot)
             {
-                if (request.hasError || target == null) return;
-                var raw = request.GetData<float>();
-                WriteToTarget(target, raw, rt.width, rt.height);
-            });
+                if (target == null || rt == null) continue;
+
+                // Capture locals for the closure — target/rt are loop vars.
+                var capturedTarget = target;
+                var capturedRt     = rt;
+                AsyncGPUReadback.Request(capturedRt, 0, request =>
+                {
+                    if (request.hasError || capturedTarget == null) return;
+                    var raw = request.GetData<float>();
+                    WriteToTarget(capturedTarget, raw, capturedRt.width, capturedRt.height);
+                });
+            }
         }
 
-        /// <summary>Cancel any queued async request (call before ExecuteSync on mouse-up).</summary>
+        /// <summary>Cancel all queued async requests (call before ExecuteSync on mouse-up).</summary>
         public void CancelPending()
         {
-            this.pendingTarget = null;
-            this.pendingRT     = null;
+            this.pendingQueue.Clear();
         }
 
         // ── Private helpers ───────────────────────────────────────────────────
