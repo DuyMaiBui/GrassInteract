@@ -113,5 +113,31 @@ namespace WorldPainter.Editor
 
             return null;
         }
+
+        /// <summary>
+        /// The active unified <see cref="PropLayer"/> from <c>map.SurfaceLayers</c>, or null when:
+        ///   - <see cref="WorldPainterState.ActiveLayerKind"/> is not <see cref="WorldPainterState.PaintLayerKind.Prop"/>, OR
+        ///   - no <see cref="PropLayer"/> in <c>map.SurfaceLayers</c> has a name matching
+        ///     <see cref="WorldPainterState.ActiveLayerId"/>.
+        ///
+        /// Callers (prop brush tools) should prefer this over <see cref="ResolveInstanceLayer"/>
+        /// when the unified path is active, and fall back to <see cref="ResolveInstanceLayer"/>
+        /// when this returns null.
+        /// </summary>
+        public static PropLayer? ResolvePropLayer(WorldPainter painter)
+        {
+            if (WorldPainterState.ActiveLayerKind != WorldPainterState.PaintLayerKind.Prop)
+                return null;
+
+            WorldMapAsset? map = painter.Map;
+            if (map == null) return null;
+
+            string id = WorldPainterState.ActiveLayerId;
+            foreach (var sl in map.SurfaceLayers)
+                if (sl is PropLayer pl && pl.name == id)
+                    return pl;
+
+            return null;
+        }
     }
 }

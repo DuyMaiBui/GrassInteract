@@ -148,6 +148,53 @@ namespace WorldPainter.Editor
 
                     this.stackContainer.Add(row);
 
+                    // For SplatLayer: show albedo-slot sub-rows for paint-channel selection.
+                    if (sl is SplatLayer splatLayerExpanded && this.chips.Passes(LayerType.Splat))
+                    {
+                        bool isSplatActive =
+                            WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Splat &&
+                            WorldPainterState.ActiveLayerId == sl.name;
+
+                        if (isSplatActive || IsRowSelected(sl))
+                        {
+                            var layerSet = splatLayerExpanded.LayerSet;
+                            int slotCount = layerSet != null ? layerSet.ActiveLayerCount : 0;
+                            // Always show at least one slot row even if the set is empty,
+                            // so the user can see the channel and click to activate painting.
+                            if (slotCount == 0) slotCount = 1;
+
+                            for (int ci = 0; ci < slotCount; ci++)
+                            {
+                                bool isActiveChannel = isSplatActive &&
+                                    WorldPainterState.ActiveSplatChannel == ci;
+
+                                // Build a display name from the albedo asset, or fall back to "Channel N".
+                                string slotName = $"Channel {ci}";
+                                if (layerSet != null)
+                                {
+                                    var albedos = layerSet.EditorAlbedos;
+                                    if (ci < albedos.Count && albedos[ci] != null)
+                                        slotName = albedos[ci].name;
+                                }
+
+                                int capturedCi = ci;
+                                var crow = this.BuildVariantRow(
+                                    displayIndex++, slotName, isActiveChannel,
+                                    onClick: () =>
+                                    {
+                                        WorldPainterState.ActiveSplatChannel = capturedCi;
+                                        WorldPainterState.ActiveGrassVariantIndex = -1;
+                                        WorldPainterState.SetActiveLayer(
+                                            splatLayerExpanded.name,
+                                            WorldPainterState.PaintLayerKind.Splat);
+                                        WorldPainterState.SetActiveBrushTool("splat.paint");
+                                        this.RefreshStack();
+                                    });
+                                this.stackContainer.Add(crow);
+                            }
+                        }
+                    }
+
                     // For GrassLayer: show variant sub-rows for paint-target selection.
                     if (sl is GrassLayer grassLayer && this.chips.Passes(LayerType.Grass))
                     {

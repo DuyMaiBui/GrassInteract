@@ -73,6 +73,35 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
+        /// Unified-path overload: emits into a <see cref="PropLayer"/>'s
+        /// <see cref="PropLayer.AuthoredInstances"/> using the same placement logic.
+        ///
+        /// Mirrors the legacy <see cref="Emit(InstanceScatterLayer,Vector3,float,bool,HeightmapSurfaceSampler?)"/>
+        /// but adapts the config reads to the <see cref="PropLayer"/> property surface, keeping
+        /// the frozen engine files and the legacy <see cref="InstanceScatterLayer"/> path
+        /// completely unchanged.
+        /// </summary>
+        public void Emit(
+            PropLayer                propLayer,
+            Vector3                  stampPos,
+            float                    brushRadius,
+            bool                     deleteMode,
+            HeightmapSurfaceSampler? surfaceSampler)
+        {
+            var authored = propLayer.AuthoredInstances;
+            if (authored == null) return;
+
+            if (deleteMode)
+                this.DeleteUnderBrush(authored, stampPos, brushRadius);
+            else
+                this.AddInstancesFromPropLayer(propLayer, authored, stampPos, brushRadius, surfaceSampler);
+
+            RebuildTileBuckets(authored);
+            authored.PackBlob();
+            EditorUtility.SetDirty(authored);
+        }
+
+        /// <summary>
         /// Places exactly one instance at <paramref name="pos"/> (the Single tool). Reuses the
         /// full anchor/ground-snap/slope pipeline via a single-density, near-zero-radius emit.
         /// </summary>
@@ -94,6 +123,26 @@ namespace WorldPainter.Editor
             }
         }
 
+        /// <summary>
+        /// Unified-path single-instance overload for <see cref="PropLayer"/>.
+        /// </summary>
+        public void EmitSingle(
+            PropLayer                propLayer,
+            Vector3                  pos,
+            HeightmapSurfaceSampler? surfaceSampler)
+        {
+            int savedDensity = this.DensityPerStamp;
+            this.DensityPerStamp = 1;
+            try
+            {
+                this.Emit(propLayer, pos, brushRadius: 0.01f, deleteMode: false, surfaceSampler);
+            }
+            finally
+            {
+                this.DensityPerStamp = savedDensity;
+            }
+        }
+
         /// <summary>Returns the density-per-stamp label string for display in the card.</summary>
         public static string GetDensityLabel(InstanceScatterLayer layer)
         {
@@ -102,6 +151,76 @@ namespace WorldPainter.Editor
         }
 
         // ── Add instances ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Unified-path version of <see cref="AddInstances"/> for <see cref="PropLayer"/>.
+        /// Adapts the <see cref="PropLayer"/> property surface (no <c>ScaleRange</c> on the
+        /// layer directly — derived from <see cref="PropLayer.OverrideScaleRange"/> or defaulted
+        /// to (1,1)) and reads slope range from the PropLayer's <c>placement</c> field the same
+        /// way as the legacy path.
+        /// </summary>
+        private void AddInstancesFromPropLayer(
+            PropLayer                propLayer,
+            AuthoredInstancesData    authored,
+            Vector3                  stampPos,
+            float                    brushRadius,
+            HeightmapSurfaceSampler? surfaceSampler)
+        {
+            // ScaleRange: PropLayer uses OverrideScaleRange + ScaleRangeOverride; default (1,1).
+            Vector2 scaleRange = propLayer.OverrideScaleRange
+                ? propLayer.ScaleRangeOverride
+                : new Vector2(1f, 1f);
+
+            float midScale = (scaleRange.x + scaleRange.y) * 0.5f;
+            if (midScale <= 0f) midScale = 1f;
+
+            float maxSlopeDeg = 45f;
+            var slopeRange = GetSlopeMaskDegForPropLayer(propLayer);
+            if (slopeRange.y > 0f) maxSlopeDeg = slopeRange.y;
+
+            bool groundSnap    = propLayer.PropGroundSnap;
+            bool alignToNormal = propLayer.PropAlignToNormal;
+            Vector3 pivotOffset = propLayer.PropPivotOffset;
+
+            for (int i = 0; i < this.DensityPerStamp; ++i)
+            {
+                float angle  = Random.value * Mathf.PI * 2f;
+                float radius = Mathf.Sqrt(Random.value) * brushRadius;
+                var offset   = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+                var pos      = stampPos + offset;
+
+                var rot = Quaternion.Euler(0f, Random.value * 360f, 0f);
+                float slopeDeg = 0f;
+
+                if (groundSnap && surfaceSampler != null &&
+                    surfaceSampler.TrySample(pos.x, pos.z, out var hit))
+                {
+                    pos.y    = hit.Y;
+                    slopeDeg = hit.SlopeDeg;
+
+                    if (alignToNormal && hit.Normal.sqrMagnitude > 0.01f)
+                    {
+                        var normalRot = Quaternion.FromToRotation(Vector3.up, hit.Normal);
+                        rot = normalRot * rot;
+                    }
+                }
+
+                if (slopeDeg > maxSlopeDeg) continue;
+
+                pos += rot * pivotOffset;
+
+                float scale = midScale * (1f + (Random.value * 2f - 1f) * this.ScaleJitter);
+                scale = Mathf.Max(0.01f, scale);
+
+                authored.AddRecord(new InstanceRecord
+                {
+                    position     = pos,
+                    rotation     = rot,
+                    scale        = scale,
+                    overrideMask = InstanceOverrideMask.None,
+                });
+            }
+        }
 
         private void AddInstances(
             InstanceScatterLayer     layer,
@@ -201,6 +320,19 @@ namespace WorldPainter.Editor
 
         /// <summary>Returns the layer's slope range from placement config (degrees).</summary>
         private static Vector2 GetSlopeMaskDeg(InstanceScatterLayer layer)
+        {
+            using var so = new SerializedObject(layer);
+            var placementProp = so.FindProperty("placement");
+            var slopeProp     = placementProp?.FindPropertyRelative("slopeRange");
+            if (slopeProp == null) return new Vector2(0f, 45f);
+            return slopeProp.vector2Value;
+        }
+
+        /// <summary>
+        /// Returns the unified <see cref="PropLayer"/>'s slope range from its placement config (degrees).
+        /// Mirrors <see cref="GetSlopeMaskDeg"/> but operates on a <see cref="PropLayer"/> sub-asset.
+        /// </summary>
+        private static Vector2 GetSlopeMaskDegForPropLayer(PropLayer layer)
         {
             using var so = new SerializedObject(layer);
             var placementProp = so.FindProperty("placement");

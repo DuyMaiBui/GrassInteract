@@ -46,6 +46,8 @@ namespace WorldPainter.Editor
         ///
         /// For <see cref="GrassLayer"/>: selects the layer without a variant (kind = Meadow but
         /// variant index = -1). The user then clicks a variant sub-row to start painting.
+        /// For <see cref="SplatLayer"/>: selects the layer without a channel (kind = Splat but
+        /// channel = -1). The user then clicks an albedo-slot sub-row to start painting.
         /// </summary>
         private void SelectSurfaceLayer(WorldPainterLayer layer)
         {
@@ -61,6 +63,11 @@ namespace WorldPainter.Editor
             // variant is active until the user clicks one.
             if (layer.Kind == WorldPainterLayer.LayerKind.Grass)
                 WorldPainterState.ActiveGrassVariantIndex = -1;
+
+            // For splat: reset the active channel so the stack shows albedo-slot sub-rows but
+            // no specific channel is active until the user clicks one.
+            if (layer.Kind == WorldPainterLayer.LayerKind.Splat)
+                WorldPainterState.ActiveSplatChannel = -1;
 
             // Clear the legacy index and biome selection.
             WorldPainterState.ActiveLayerIndex = -1;

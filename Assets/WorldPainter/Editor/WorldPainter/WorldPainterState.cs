@@ -291,6 +291,20 @@ namespace WorldPainter.Editor
         /// </summary>
         public static int ActiveGrassVariantIndex { get; set; } = -1;
 
+        // ── Active splat channel (unified SurfaceLayers paint) ────────────────
+
+        /// <summary>
+        /// The RGBA channel index [0..3] the splat brush writes to when a unified
+        /// <see cref="SplatLayer"/> is active (Phase 3 paint routing).
+        /// -1 = no channel selected / use legacy path.
+        ///
+        /// Set together with <see cref="SetActiveLayer"/>(splatLayer.name, Splat) when the user
+        /// clicks an albedo slot sub-row in the layer stack. The splat brush reads this value
+        /// and passes it as <c>_SplatLayer</c> to the GPU compute kernel, replacing the old
+        /// index-arithmetic path for the unified case.
+        /// </summary>
+        public static int ActiveSplatChannel { get; set; } = -1;
+
         // ── Stroke tracking ───────────────────────────────────────────────────
 
         /// <summary>
@@ -321,6 +335,7 @@ namespace WorldPainter.Editor
             ActiveLayerIndex = -1;
             ActiveBiomeIndex = -1;
             ActiveGrassVariantIndex = -1;
+            ActiveSplatChannel = -1;
             ActiveLayerId    = string.Empty;
             ActiveLayerKind  = PaintLayerKind.None;
             ActiveBrushToolId  = string.Empty;

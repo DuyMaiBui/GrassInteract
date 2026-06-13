@@ -32,12 +32,34 @@ namespace WorldPainter.Editor
             ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_SplatRT", ctx.SplatRT);
 
-            // Channel comes from the active layer's stack position (Splat rows map to channels 0..3).
-            WorldPainterState.ActiveLayerType(ctx.Painter, out int channel);
-            if (channel < 0) channel = 0;
+            int channel = ResolveChannel(ctx.Painter);
             ctx.Compute.SetInt("_SplatLayer", Mathf.Clamp(channel, 0, TerrainSculptConfig.MAX_SPLAT_LAYERS - 1));
             ctx.Compute.SetInt("_SplatMode", mode);
             ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
+        }
+
+        /// <summary>
+        /// Resolves the splat channel [0..3] to paint.
+        ///
+        /// Phase 3 unified path: when <see cref="WorldPainterState.ActiveLayerKind"/> is Splat
+        /// and <see cref="WorldPainterState.ActiveSplatChannel"/> is set (≥ 0), use it directly.
+        ///
+        /// Legacy fallback: derive the channel from the active layer's display-index position
+        /// via <see cref="WorldPainterState.ActiveLayerType"/> (legacy splat rows mapped channels
+        /// by their position in the inline <c>splatLayers[]</c> array).
+        /// </summary>
+        internal static int ResolveChannel(WorldPainter painter)
+        {
+            // Unified path: inspector-selected albedo slot → channel.
+            if (WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Splat &&
+                WorldPainterState.ActiveSplatChannel >= 0)
+            {
+                return WorldPainterState.ActiveSplatChannel;
+            }
+
+            // Legacy path: index arithmetic (still used when no unified splat layer is active).
+            WorldPainterState.ActiveLayerType(painter, out int channel);
+            return channel < 0 ? 0 : channel;
         }
     }
 }
