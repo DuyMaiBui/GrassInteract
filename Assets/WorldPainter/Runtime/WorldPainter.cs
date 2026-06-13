@@ -36,9 +36,20 @@ namespace WorldPainter
         {
             if (!Application.isPlaying) return;
             if (!this.IsBuilt) this.TryBuild();
+
+            // Build scatter + surface (grass) engines once on play start, then submit each frame.
+            if (this.IsBuilt && !this.playScatterBuilt)
+            {
+                this.RebuildScatter();
+                this.RebuildSurfaceLayers();
+                this.playScatterBuilt = true;
+            }
+
             this.SubmitTerrain(null);
             this.StepScatter(Time.deltaTime);
             this.SubmitScatter(null);
+            this.StepSurfaceLayers(Time.deltaTime);
+            this.SubmitSurfaceLayers(null);
             this.DrivePropLayers();
         }
 

@@ -49,6 +49,13 @@ namespace WorldPainter
         /// </summary>
         private bool editScatterBuilt;
 
+        /// <summary>
+        /// Play-mode scatter (grass/prop) state: true once the scatter + surface engines have been
+        /// built for the first LateUpdate in play mode. Reset by <see cref="TryBuild"/> and
+        /// <see cref="OnDisable"/> so re-enabling the component rebuilds correctly.
+        /// </summary>
+        private bool playScatterBuilt;
+
         // ── Internal seam accessors (for WorldPainterSculptTool) ──────────────
 
         internal GpuTerrainEngine? EngineForCoord(Vector2Int coord)
@@ -85,6 +92,7 @@ namespace WorldPainter
             this.DisposeScatterEngines();
             this.DisposeSurfaceLayers();
             this.editScatterBuilt = false;
+            this.playScatterBuilt = false;
         }
 
 #if UNITY_EDITOR
@@ -128,9 +136,10 @@ namespace WorldPainter
         {
             this.DisposeEngines();
 
-            // A terrain rebuild invalidates the scatter grounding sampler — force the edit-mode
-            // scatter preview to rebuild on the next camera render (and on "Rebuild World").
+            // A terrain rebuild invalidates the scatter grounding sampler — force both the
+            // edit-mode scatter preview and the play-mode scatter build to rebuild.
             this.editScatterBuilt = false;
+            this.playScatterBuilt = false;
 
             if (!this.ResolveInfra()) return;
 
