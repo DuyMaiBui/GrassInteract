@@ -49,6 +49,7 @@ namespace WorldPainter.Editor
         private WorldPainterPerfBadge?       perfBadge;
         private WorldPainterLiveReadoutStrip? readoutStrip;
         private WorldPainterCoachMarks?       coachMarks;
+        private WorldPainterTileStrip?        tileStrip;
 
         // ── CreateInspectorGUI ────────────────────────────────────────────────
 
@@ -102,6 +103,10 @@ namespace WorldPainter.Editor
 
             headerZone.Add(headerRight);
             root.Add(headerZone);
+
+            // ── Tile strip: explicit coord add / remove ───────────────────────
+            this.tileStrip = new WorldPainterTileStrip();
+            root.Add(this.tileStrip.Build(painter));
 
             // ── Empty-state coach marks ───────────────────────────────────────
             var emptyTilesState = this.coachMarks.BuildNoTilesEmptyState();
