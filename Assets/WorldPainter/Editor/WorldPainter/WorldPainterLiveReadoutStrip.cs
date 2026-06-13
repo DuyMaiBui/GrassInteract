@@ -96,19 +96,9 @@ namespace WorldPainter.Editor
                 this.cachedMaxHeight = 0f;
             }
 
-            // Density: fraction of scatter layers that have non-null refs.
-            int totalLayers   = painter.ScatterLayers?.Count ?? 0;
-            int activeLayers  = 0;
-            if (painter.ScatterLayers != null)
-            {
-                foreach (var sl in painter.ScatterLayers)
-                    if (sl != null) activeLayers++;
-            }
-            this.cachedDensityPct = totalLayers > 0
-                ? (activeLayers / (float)totalLayers) * 100f
-                : 0f;
-
-            // Instance count: scatter layers count.
+            // Density: use unified SurfaceLayers from map (Phase 5 — ScatterLayers removed).
+            int totalLayers = painter.Map != null ? painter.Map.SurfaceLayers.Count : 0;
+            this.cachedDensityPct    = 0f; // density per-variant readout not yet wired
             this.cachedInstanceCount = totalLayers;
         }
 

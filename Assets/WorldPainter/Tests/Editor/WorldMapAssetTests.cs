@@ -157,35 +157,37 @@ namespace WorldPainter.Tests
         // â”€â”€ Layers API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         [Test]
-        public void Layers_IsEmpty_ByDefault()
+        public void SurfaceLayers_IsEmpty_ByDefault()
         {
-            Assert.AreEqual(0, this.map.Layers.Count);
+            Assert.AreEqual(0, this.map.SurfaceLayers.Count);
         }
 
         [Test]
-        public void RegisterLayer_AppendsToLayers()
+        public void RegisterSurfaceLayer_AppendsToSurfaceLayers()
         {
-            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
-            layer.name = "Layer_Meadow";
+            // Use GrassLayer (unified replacement for the removed DensityScatterLayer).
+            var layer = ScriptableObject.CreateInstance<GrassLayer>();
+            layer.name = "Grass_Meadow";
 
-            this.map.RegisterLayer(layer);
+            this.map.RegisterSurfaceLayer(layer);
 
-            Assert.AreEqual(1, this.map.Layers.Count);
-            Assert.AreSame(layer, this.map.Layers[0]);
+            Assert.AreEqual(1, this.map.SurfaceLayers.Count);
+            Assert.AreSame(layer, this.map.SurfaceLayers[0]);
 
             Object.DestroyImmediate(layer);
         }
 
         [Test]
-        public void UnregisterLayer_RemovesFromLayers()
+        public void UnregisterSurfaceLayer_RemovesFromSurfaceLayers()
         {
-            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
-            layer.name = "Layer_Meadow";
-            this.map.RegisterLayer(layer);
+            // Use GrassLayer (unified replacement for the removed DensityScatterLayer).
+            var layer = ScriptableObject.CreateInstance<GrassLayer>();
+            layer.name = "Grass_Meadow";
+            this.map.RegisterSurfaceLayer(layer);
 
-            this.map.UnregisterLayer(layer);
+            this.map.UnregisterSurfaceLayer(layer);
 
-            Assert.AreEqual(0, this.map.Layers.Count);
+            Assert.AreEqual(0, this.map.SurfaceLayers.Count);
 
             Object.DestroyImmediate(layer);
         }

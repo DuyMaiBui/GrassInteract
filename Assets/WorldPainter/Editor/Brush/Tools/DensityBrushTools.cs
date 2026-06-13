@@ -57,23 +57,6 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            // Legacy path: DensityScatterLayer global density map (single texture, no tile split).
-            var target = BrushToolTargets.ResolveDensityTarget(ctx.Painter);
-            if (target == null) return;
-
-            var legacyRT = ctx.Tool.GetOrCreateDensityRT(target, null);
-            if (legacyRT == null) return;
-
-            {
-                int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
-                ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
-                ctx.Compute.SetTexture(k, "_DensityRT", legacyRT);
-                ctx.Compute.SetInt("_DensityMode", mode);
-                ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
-
-                // Queue throttled async writeback to the legacy density target.
-                ctx.Tool.densityEncoder.RequestAsync(target, legacyRT);
-            }
         }
     }
 }

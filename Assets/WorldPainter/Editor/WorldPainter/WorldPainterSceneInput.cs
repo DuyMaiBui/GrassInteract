@@ -130,12 +130,13 @@ namespace WorldPainter.Editor
             int tileZ = Mathf.FloorToInt(hit.point.z / tileSize);
 
             // Select the biome layer at that coord if one exists.
+            // Phase 5: SplatLayers/ScatterLayers removed from WorldPainter; biome sits at index 1+.
             for (int i = 0; i < painter.Biomes.Count; i++)
             {
                 var biome = painter.Biomes[i];
                 if (biome == null) continue;
                 // Simple heuristic: if cursor is in any tile, pick the first biome.
-                int stackIdx = 1 + painter.SplatLayers.Count + painter.ScatterLayers.Count + i;
+                int stackIdx = 1 + i;
                 WorldPainterState.ActiveLayerIndex = stackIdx;
                 break;
             }

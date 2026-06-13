@@ -35,19 +35,18 @@ namespace WorldPainter
     /// sub-assets via <c>AssetDatabase.AddObjectToAsset</c> in editor-only lifecycle code.
     ///
     /// â”€â”€ Tile keying â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    /// Tiles are keyed by signed <see cref="Vector2Int"/> (unbounded N/E/S/W).
+    /// Tiles are keyed by signed <see cref=”Vector2Int”/> (unbounded N/E/S/W).
     /// Serialized as two parallel lists (coords + tiles); dictionary rebuilt on OnEnable/
-    /// OnAfterDeserialize. Editor lifecycle (<see cref="WorldMapAssetLifecycle"/>) is the
+    /// OnAfterDeserialize. Editor lifecycle (<see cref=”WorldMapAssetLifecycle”/>) is the
     /// ONLY add/remove path.
     ///
-    /// â”€â”€ Layer list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    /// <see cref="Layers"/> holds <see cref="DensityScatterLayer"/> and
-    /// <see cref="InstanceScatterLayer"/> defs (map-level); per-tile density channels
-    /// are allocated/freed by the lifecycle editor class.
+    /// â”€â”€ Surface layer list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /// <see cref=”SurfaceLayers”/> holds unified <see cref=”WorldPainterLayer”/> defs
+    /// (SplatLayer + GrassLayer + PropLayer). Editor lifecycle is the ONLY add/remove path.
     ///
     /// â”€â”€ TerrainLayerSet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     /// Splat texture references are NOT nested â€” they live in a referenced
-    /// <see cref="TerrainLayerSet"/> asset (separate file).
+    /// <see cref=”TerrainLayerSet”/> asset (separate file).
     /// </summary>
     [CreateAssetMenu(menuName = "WorldPainter/World Map", fileName = "WorldMap")]
     public sealed class WorldMapAsset : ScriptableObject, ISerializationCallbackReceiver
@@ -72,11 +71,6 @@ namespace WorldPainter
         /// <summary>Runtime lookup dictionary â€” rebuilt from parallel lists on enable/deserialize.</summary>
         [NonSerialized]
         private Dictionary<Vector2Int, TerrainTileAsset> tileDict = new();
-
-        // â”€â”€ Layer list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-        [Tooltip("Map-level scatter layer defs (DensityScatterLayer + InstanceScatterLayer sub-assets).")]
-        [SerializeField] private List<ScatterLayer> layers = new();
 
         // ── Surface layer list (unified splat + grass — WorldPainterLayer) ──────
 
@@ -138,10 +132,7 @@ namespace WorldPainter
 
         // â”€â”€ Layer API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-        /// <summary>Read-only list of scatter layer defs (density + instance).</summary>
-        public IReadOnlyList<ScatterLayer> Layers => this.layers;
-
-        /// <summary>Read-only list of unified surface layers (splat + grass).</summary>
+        /// <summary>Read-only list of unified surface layers (splat + grass + prop).</summary>
         public IReadOnlyList<WorldPainterLayer> SurfaceLayers => this.surfaceLayers;
 
         // â”€â”€ Neighbor query (used by P4 ghost quads) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -208,27 +199,6 @@ namespace WorldPainter
             this.tileCoords.RemoveAt(index);
             this.tileAssets.RemoveAt(index);
             this.tileDict.Remove(coord);
-        }
-
-        /// <summary>
-        /// Appends a layer def sub-asset. Called by <see cref="WorldMapAssetLifecycle"/> AFTER
-        /// <c>AddObjectToAsset</c>.
-        /// </summary>
-        internal void RegisterLayer(ScatterLayer layer)
-        {
-            if (this.layers.Contains(layer))
-                throw new InvalidOperationException(
-                    $"[WorldMapAsset] Layer '{layer.name}' already registered.");
-            this.layers.Add(layer);
-        }
-
-        /// <summary>
-        /// Removes a layer def from the list. Called by <see cref="WorldMapAssetLifecycle"/> BEFORE
-        /// <c>RemoveObjectFromAsset</c> + <c>DestroyImmediate</c>.
-        /// </summary>
-        internal void UnregisterLayer(ScatterLayer layer)
-        {
-            this.layers.Remove(layer);
         }
 
         /// <summary>

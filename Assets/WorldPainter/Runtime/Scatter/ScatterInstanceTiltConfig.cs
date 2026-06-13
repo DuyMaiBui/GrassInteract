@@ -5,8 +5,8 @@ using UnityEngine;
 namespace WorldPainter
 {
     /// <summary>
-    /// Whole-instance rigid tilt configuration. Composed ONLY by <see cref="InstanceScatterLayer"/>
-    /// (mesh props), never by <see cref="DensityScatterLayer"/> (grass blades). Drives the
+    /// Whole-instance rigid tilt configuration. Composed ONLY by <see cref="PropLayer"/>
+    /// (mesh props), not by <see cref="GrassLayer"/> (grass blades). Drives the
     /// C#-simulated, GPU-instanced tilt-away + spring-back response of a prop instance to a moving
     /// <see cref="GrassInteractor"/> — distinct from the per-vertex wind/bend deform in the shader.
     ///

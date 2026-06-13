@@ -90,12 +90,13 @@ namespace WorldPainter.Editor
         private int CountInstances(WorldPainter painter)
         {
             int count = 0;
-            if (painter.ScatterLayers != null)
+            var map = painter.Map;
+            if (map != null)
             {
-                foreach (var layer in painter.ScatterLayers)
+                foreach (var sl in map.SurfaceLayers)
                 {
-                    if (layer is InstanceScatterLayer il)
-                        count += il.AuthoredInstances?.Count ?? 0;
+                    if (sl is PropLayer pl)
+                        count += pl.AuthoredInstances?.Count ?? 0;
                 }
             }
             return count;

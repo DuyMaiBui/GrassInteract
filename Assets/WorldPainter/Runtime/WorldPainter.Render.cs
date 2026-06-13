@@ -89,7 +89,6 @@ namespace WorldPainter
             RenderPipelineManager.beginCameraRendering -= this.OnBeginCameraRenderingEdit;
 #endif
             this.DisposeEngines();
-            this.DisposeScatterEngines();
             this.DisposeSurfaceLayers();
             this.editScatterBuilt = false;
             this.playScatterBuilt = false;
@@ -102,26 +101,23 @@ namespace WorldPainter
             if (!this.IsBuilt) this.TryBuild();
             this.SubmitTerrain(cam);
 
-            // Live edit-mode scatter preview: build the grass/prop engines once (lazily), then
-            // submit them each camera so painted density/instance edits show in the Scene view.
+            // Live edit-mode scatter preview: build the surface (grass/prop) engines once
+            // (lazily), then submit them each camera so painted density edits show in Scene view.
             if (!this.editScatterBuilt)
             {
-                this.RebuildScatter();
                 this.RebuildSurfaceLayers();
                 this.editScatterBuilt = true;
             }
-            this.SubmitScatter(cam);
             this.SubmitSurfaceLayers(cam);
         }
 
         /// <summary>
-        /// Editor-only: forces a scatter (grass/prop) rebuild from the freshly-committed layer
-        /// data so the Scene view reflects a just-finished density/instance stroke. Called by
+        /// Editor-only: forces a surface-layer (grass/prop) rebuild from the freshly-committed
+        /// layer data so the Scene view reflects a just-finished density stroke. Called by
         /// <c>WorldPainterSculptTool</c> on mouse-up.
         /// </summary>
         internal void RebuildScatterPreview()
         {
-            this.RebuildScatter();
             this.RebuildSurfaceLayers();
             this.editScatterBuilt = true;
         }

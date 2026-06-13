@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 namespace WorldPainter
 {
     /// <summary>
-    /// GPU-indirect engine for <see cref="InstanceScatterLayer"/> mesh props. Replaces the former
+    /// GPU-indirect engine for <see cref="PropLayerScatterLayer"/> mesh props. Replaces the former
     /// MeshScatterEngine: same chunked GPU frustum-cull + per-LOD indirect draw + pooled colliders,
     /// PLUS an optional C#(Burst)-simulated whole-instance rigid tilt (<see cref="InstanceTiltSimulator"/>)
     /// that leans props away from moving interactors and springs them back.
@@ -157,9 +157,9 @@ namespace WorldPainter
             // Phase-H: pooled + culled per-instance colliders.
             this.BuildColliderRuntime(layer);
 
-            // Rigid-tilt sim (InstanceScatterLayer only, when interactor-tilt is enabled). Reads the BAKED
+            // Rigid-tilt sim (PropLayerScatterLayer only, when interactor-tilt is enabled). Reads the BAKED
             // instance order from instanceBuffer.Instances so the tilt buffer index == _Instances index.
-            var instLayer = layer as InstanceScatterLayer;
+            var instLayer = layer as PropLayerScatterLayer;
             this.tiltEnabled = instLayer != null && instLayer.Tilt.AffectedByInteractors;
             if (this.tiltEnabled && instLayer != null)
             {
@@ -427,7 +427,7 @@ namespace WorldPainter
 
         private void BuildColliderRuntime(ScatterLayer layer)
         {
-            if (layer is not InstanceScatterLayer instLayer) return;
+            if (layer is not PropLayerScatterLayer instLayer) return;
             if (!Application.isPlaying) return;
             if (!instLayer.GenerateColliders && !instLayer.AnyRecordWantsCollider()) return;
 

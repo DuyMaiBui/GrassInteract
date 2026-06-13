@@ -54,7 +54,7 @@ namespace WorldPainter
         public int SelectLod(
             Vector3           instancePos,
             Vector3           cameraPos,
-            InstanceScatterLayer layer)
+            ScatterLayer layer)
         {
             int lodCount = layer.Render.Lods.Length;
             if (lodCount <= 1) return 0;
@@ -73,11 +73,11 @@ namespace WorldPainter
         /// Returns the number of instances using the impostor LOD.
         /// </summary>
         public int SelectLodBatch(
-            Vector3[]          instancePositions,
-            int                count,
-            Vector3            cameraPos,
-            InstanceScatterLayer layer,
-            int[]              lodIndicesOut)
+            Vector3[]    instancePositions,
+            int          count,
+            Vector3      cameraPos,
+            ScatterLayer layer,
+            int[]        lodIndicesOut)
         {
             int lodCount    = layer.Render.Lods.Length;
             int lastLod     = lodCount - 1;

@@ -101,7 +101,7 @@ namespace WorldPainter.Editor
             }
 
             // Layer name.
-            string layerName = this.ResolveLayerName(painter);
+            string layerName = ResolveLayerName(painter);
             if (this.layerChipLabel != null)
                 this.layerChipLabel.text = layerName;
 
@@ -124,27 +124,19 @@ namespace WorldPainter.Editor
                 this.sizeLabel.text = $"r{size:F0}m";
         }
 
-        private string ResolveLayerName(WorldPainter painter)
+        private static string ResolveLayerName(WorldPainter painter)
         {
+            // Prefer the unified active-layer id (Phase 5 SSOT).
+            string activeId = WorldPainterState.ActiveLayerId;
+            if (!string.IsNullOrEmpty(activeId)) return activeId;
+
+            // Legacy index fallback (height only; SplatLayers/ScatterLayers removed in Phase 5).
             int idx = WorldPainterState.ActiveLayerIndex;
             if (idx < 0) return "No Layer";
             if (idx == 0) return "Height";
 
-            int splatCount = painter.SplatLayers.Count;
-            if (idx <= splatCount)
-            {
-                var def = painter.SplatLayers[idx - 1];
-                return string.IsNullOrEmpty(def.name) ? $"Splat {idx}" : def.name;
-            }
-
-            int scatterOff = idx - splatCount - 1;
-            if (scatterOff >= 0 && scatterOff < painter.ScatterLayers.Count)
-            {
-                var layer = painter.ScatterLayers[scatterOff];
-                return layer != null ? layer.name : $"Scatter {scatterOff}";
-            }
-
-            int biomeOff = idx - splatCount - painter.ScatterLayers.Count - 1;
+            // Biome name via surviving Biomes list.
+            int biomeOff = idx - 1;
             if (biomeOff >= 0 && biomeOff < painter.Biomes.Count)
             {
                 var biome = painter.Biomes[biomeOff];

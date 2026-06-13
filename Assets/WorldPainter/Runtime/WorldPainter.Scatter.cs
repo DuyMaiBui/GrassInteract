@@ -5,19 +5,13 @@ using UnityEngine;
 namespace WorldPainter
 {
     /// <summary>
-    /// WorldPainter partial — scatter orchestration (P2).
+    /// WorldPainter partial — scatter infrastructure (engine selection + GPU resources).
     ///
-    /// Absorbs ScatterField's Rebuild/StepAll/SubmitAll/engine-selection orchestration
-    /// into <see cref="RebuildScatter"/>, <see cref="StepScatter"/>, <see cref="SubmitScatter"/>.
-    ///
-    /// Reads scatter layers from the referenced <see cref="WorldMapAsset"/> (<c>this.map</c>).
-    /// Builds a <see cref="HeightmapSurfaceSampler"/> internally from the first valid tile so
-    /// no external bridge component (<c>GpuTerrainScatterGround</c>) is needed.
+    /// Provides the shared GPU resource fields, sampler construction, and engine-selection
+    /// helpers consumed by <see cref="WorldPainter.SurfaceLayers"/> (the unified SSOT partial).
     ///
     /// Engine files (GrassGpuEngine, GrassCpuEngine, InstancedPropEngine, InstanceBatchPool,
     /// IGrassEngine, IScatterPlacement) are UNTOUCHED — the ISurfaceSampler seam is identical.
-    ///
-    /// FROZEN after P2 — later phases add new partials, never touch this file.
     /// </summary>
     public sealed partial class WorldPainter
     {
@@ -67,146 +61,14 @@ namespace WorldPainter
 
         // ── Runtime scatter state ─────────────────────────────────────────────
 
-        // Pool is field-owned; lifetime spans multiple RebuildScatter calls (slab reuse).
+        // Pool is field-owned; lifetime spans multiple build calls (slab reuse).
         private InstanceBatchPool? scatterPool;
-
-        // One engine per layer slot (null = InstanceScatterLayer or failed build).
-        private readonly List<IGrassEngine?> scatterEngines = new();
 
         // Heightmap sampler built from first valid resident tile.
         private HeightmapSurfaceSampler? scatterSampler;
 
         /// <summary>Name of the last selected scatter tier (diagnostics only).</summary>
         public string ScatterActiveTierName { get; private set; } = string.Empty;
-
-        // ── RebuildScatter ────────────────────────────────────────────────────
-
-        /// <summary>
-        /// (Re)builds all scatter layer engines from <see cref="WorldMapAsset"/> layers.
-        /// Internalises the HeightmapSurfaceSampler grounding from the first resident tile.
-        /// Safe to call repeatedly.
-        /// </summary>
-        internal void RebuildScatter()
-        {
-            this.DisposeScatterEngines();
-
-            if (this.map == null) return;
-
-            IReadOnlyList<ScatterLayer> layers = this.map.Layers;
-            if (layers.Count == 0) return;
-
-            // Build the heightmap sampler from the first valid tile in the map.
-            this.scatterSampler = this.BuildScatterSampler();
-
-            // Resolve GPU resources (may be null → CPU fallback).
-            this.ResolveScatterInfra();
-
-            this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
-
-            // Tier probe — once per rebuild, shared across all Grass-kind layers.
-#if UNITY_EDITOR || !UNITY_WEBGL
-            bool gpuCapable = GrassTierProbe.TryGpu(out string probeReason);
-#else
-            bool gpuCapable  = false;
-            string probeReason = "WebGL";
-#endif
-
-            string lastTierName = string.Empty;
-
-            for (int i = 0; i < layers.Count; ++i)
-            {
-                ScatterLayer? layer = layers[i];
-                if (layer == null)
-                {
-                    Debug.LogWarning($"[WorldPainter.Scatter] Layer [{i}] is null — skipping.", this);
-                    this.scatterEngines.Add(null);
-                    continue;
-                }
-
-                Vector3 origin = this.transform.position;
-                ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
-                    ?? new RaycastSurfaceSampler(
-                        layer.Placement.GroundSnapMask, this.transform.position.y);
-
-                // InstanceScatterLayer → InstancedPropEngine route.
-                if (layer is InstanceScatterLayer instanceLayer)
-                {
-                    IGrassEngine? propEngine = this.TryBuildScatterInstancedPropEngine(
-                        i, instanceLayer, origin, sampler);
-                    this.scatterEngines.Add(propEngine);
-                    if (propEngine != null)
-                        Debug.Log(
-                            $"[WorldPainter.Scatter] Layer [{i}] '{instanceLayer.name}' → InstancedPropEngine.",
-                            this);
-                    continue;
-                }
-
-                // Density / grass pipeline.
-                if (!layer.Validate(out string validationError))
-                {
-                    Debug.LogError(
-                        $"[WorldPainter.Scatter] Layer [{i}] '{layer.name}' invalid: {validationError}",
-                        this);
-                    this.scatterEngines.Add(null);
-                    continue;
-                }
-
-                IGrassEngine engine = this.SelectAndBuildScatterEngine(
-                    i, layer, origin, sampler, gpuCapable, probeReason);
-                engine.Build(layer, origin, this.scatterPool, sampler);
-                this.scatterEngines.Add(engine);
-                lastTierName = this.ScatterActiveTierName;
-
-                Debug.Log(
-                    $"[WorldPainter.Scatter] Layer [{i}] '{layer.name}' tier={this.ScatterActiveTierName} " +
-                    $"(forceTier={this.scatterForceTier}) on {SystemInfo.graphicsDeviceName}",
-                    this);
-            }
-
-            if (lastTierName.Length > 0)
-                this.ScatterActiveTierName = lastTierName;
-        }
-
-        // ── StepScatter ───────────────────────────────────────────────────────
-
-        /// <summary>Advances scatter simulation by <paramref name="dt"/> seconds.</summary>
-        internal void StepScatter(float dt)
-        {
-            for (int i = 0; i < this.scatterEngines.Count; ++i)
-                this.scatterEngines[i]?.Step(dt);
-        }
-
-        // ── SubmitScatter ─────────────────────────────────────────────────────
-
-        /// <summary>Submits scatter draw calls for this frame.</summary>
-        internal void SubmitScatter(Camera? targetCamera)
-        {
-            if (this.scatterEngines.Count == 0) return;
-
-            Vector3 lodRef;
-            if (targetCamera != null)
-            {
-                lodRef = targetCamera.transform.position;
-            }
-            else
-            {
-                Camera? main = Camera.main;
-                lodRef = main != null ? main.transform.position : this.transform.position;
-            }
-
-            for (int i = 0; i < this.scatterEngines.Count; ++i)
-                this.scatterEngines[i]?.Submit(targetCamera, lodRef);
-        }
-
-        // ── DisposeScatterEngines ─────────────────────────────────────────────
-
-        private void DisposeScatterEngines()
-        {
-            for (int i = 0; i < this.scatterEngines.Count; ++i)
-                this.scatterEngines[i]?.Dispose();
-            this.scatterEngines.Clear();
-            this.scatterSampler = null;
-        }
 
         // ── Sampler construction ──────────────────────────────────────────────
 
@@ -333,60 +195,6 @@ namespace WorldPainter
                     $"{SystemInfo.graphicsDeviceName} → CPU tier.\n{ex.Message}", this);
                 this.ScatterActiveTierName = "CPU";
                 return new GrassCpuEngine();
-            }
-        }
-
-        private IGrassEngine? TryBuildScatterInstancedPropEngine(
-            int layerIndex,
-            InstanceScatterLayer layer,
-            Vector3 origin,
-            ISurfaceSampler sampler)
-        {
-            if (this.scatterCullCompute == null)
-            {
-                Debug.LogError(
-                    $"[WorldPainter.Scatter] Layer [{layerIndex}] '{layer.name}' (instanced-prop): " +
-                    "scatterCullCompute is not assigned. Skipping.", this);
-                return null;
-            }
-
-            if (!layer.Validate(out string error))
-            {
-                Debug.LogError(
-                    $"[WorldPainter.Scatter] Layer [{layerIndex}] '{layer.name}' (instanced-prop) invalid: {error}",
-                    this);
-                return null;
-            }
-
-            if (layer.Render.LodMeshes.Length == 0)
-            {
-                Debug.LogError(
-                    $"[WorldPainter.Scatter] Layer [{layerIndex}] '{layer.name}' (instanced-prop): " +
-                    "LodMeshes is empty.", this);
-                return null;
-            }
-
-            Material? mat = layer.Render.Material;
-            if (mat == null)
-            {
-                Debug.LogError(
-                    $"[WorldPainter.Scatter] Layer [{layerIndex}] '{layer.name}' (instanced-prop): " +
-                    "Material is not assigned.", this);
-                return null;
-            }
-
-            try
-            {
-                var engine = new InstancedPropEngine(this.scatterCullCompute, mat);
-                engine.Build(layer, origin, this.scatterPool!, sampler);
-                return engine;
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning(
-                    $"[WorldPainter.Scatter] Layer [{layerIndex}] '{layer.name}' (instanced-prop) " +
-                    $"engine threw {ex.GetType().Name}: {ex.Message}", this);
-                return null;
             }
         }
 

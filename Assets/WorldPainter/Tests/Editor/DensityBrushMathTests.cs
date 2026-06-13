@@ -178,8 +178,8 @@ namespace WorldPainter.Tests
         /// <summary>
         /// RT→bytes→map round-trip for <see cref="WorldPainterDensityEncoder"/>.
         /// Allocates a small R8_UNorm (or best supported) RT, blits a known value 0.7,
-        /// calls <see cref="WorldPainterDensityEncoder.ExecuteSync"/> with a blank
-        /// <see cref="DensityScatterLayer"/>, and asserts the map's R channel ≈ 0.7.
+        /// calls <see cref="WorldPainterDensityEncoder.ExecuteSync"/> with a blank Texture2D,
+        /// and asserts the map's R channel ≈ 0.7.
         /// Gated behind <c>SystemInfo.graphicsDeviceType != Null</c>.
         /// </summary>
         [Test]
@@ -219,15 +219,11 @@ namespace WorldPainter.Tests
             map.SetPixels(blank);
             map.Apply(false);
 
-            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
-            var so    = new UnityEditor.SerializedObject(layer);
-            var prop  = so.FindProperty("densityMap");
-            if (prop != null) { prop.objectReferenceValue = map; so.ApplyModifiedPropertiesWithoutUndo(); }
-
             try
             {
                 var encoder = new WorldPainterDensityEncoder();
-                encoder.ExecuteSync(layer, rt);
+                // Use the Texture2D overload directly (the legacy DensityScatterLayer overload is removed).
+                encoder.ExecuteSync(map, rt);
 
                 Color[] result = map.GetPixels();
                 Assert.AreEqual(SIZE * SIZE, result.Length, "Pixel count mismatch after round-trip");
@@ -245,7 +241,6 @@ namespace WorldPainter.Tests
                 Object.DestroyImmediate(rt);
                 Object.DestroyImmediate(seed);
                 Object.DestroyImmediate(map);
-                Object.DestroyImmediate(layer);
             }
         }
     }

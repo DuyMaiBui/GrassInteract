@@ -78,34 +78,6 @@ namespace WorldPainter.Tests
             Object.DestroyImmediate(painter.gameObject);
         }
 
-        [Test]
-        public void TierA_SplatLayers_MaxFour()
-        {
-            var painter = MakePainter();
-
-            for (int i = 0; i < 4; i++)
-                painter.SplatLayers.Add(new SplatLayerDef { name = $"Layer{i}" });
-
-            Assert.AreEqual(4, painter.SplatLayers.Count, "Up to 4 splat layers allowed");
-
-            // Verify names round-trip.
-            Assert.AreEqual("Layer0", painter.SplatLayers[0].name);
-            Assert.AreEqual("Layer3", painter.SplatLayers[3].name);
-
-            Object.DestroyImmediate(painter.gameObject);
-        }
-
-        [Test]
-        public void TierA_ScatterLayers_Preserved()
-        {
-            var painter = MakePainter();
-            // ScatterLayer is abstract; we verify the list is writable and count-stable.
-            Assert.AreEqual(0, painter.ScatterLayers.Count, "Starts empty");
-
-            // NOTE: cannot instantiate abstract ScatterLayer directly; count test is sufficient.
-            Object.DestroyImmediate(painter.gameObject);
-        }
-
         // ── (b) Coord-lookup (Tiles list — no GPU) ────────────────────────────
 
         [Test]

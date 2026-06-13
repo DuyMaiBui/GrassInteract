@@ -9,8 +9,7 @@ namespace WorldPainter.Editor
 {
     /// <summary>
     /// Encodes a density RenderTexture into a target density <see cref="Texture2D"/> and persists it.
-    /// The target is either a legacy <see cref="DensityScatterLayer"/>'s <c>densityMap</c> or a per-tile
-    /// <c>GrassVariant.densityTiles</c> entry — both are plain RGBA/R textures, so the encoder is target-typed.
+    /// The target is a per-tile <c>GrassVariant.densityTiles</c> entry — a plain R texture.
     ///
     /// Sits on the same throttled 0.15s pipeline as <see cref="TerrainSculptRtWriteback"/>:
     /// call <see cref="RequestAsync(Texture2D, RenderTexture)"/> during drag, <see cref="ExecuteSync(Texture2D, RenderTexture)"/> on mouse-up.
@@ -53,22 +52,6 @@ namespace WorldPainter.Editor
             Object.DestroyImmediate(tmp);
 
             WriteCpuPixelsToTarget(target, pixels, densityRT.width, densityRT.height);
-        }
-
-        // ── Back-compat overloads (DensityScatterLayer → its DensityMap) ──────
-
-        /// <summary>Legacy overload: routes to the layer's <see cref="DensityScatterLayer.DensityMap"/>.</summary>
-        public void RequestAsync(DensityScatterLayer layer, RenderTexture densityRT)
-        {
-            if (layer != null && layer.DensityMap != null)
-                this.RequestAsync(layer.DensityMap, densityRT);
-        }
-
-        /// <summary>Legacy overload: routes to the layer's <see cref="DensityScatterLayer.DensityMap"/>.</summary>
-        public void ExecuteSync(DensityScatterLayer layer, RenderTexture densityRT)
-        {
-            if (layer != null && layer.DensityMap != null)
-                this.ExecuteSync(layer.DensityMap, densityRT);
         }
 
         // ── Drain ─────────────────────────────────────────────────────────────

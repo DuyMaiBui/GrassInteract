@@ -5,7 +5,7 @@ using UnityEngine;
 namespace WorldPainter
 {
     /// <summary>
-    /// C# per-instance rigid-tilt simulator for <see cref="InstanceScatterLayer"/> props.
+    /// C# per-instance rigid-tilt simulator for prop layers.
     /// Mirrors <see cref="GrassBendSimulator"/> for whole-instance props: each frame it rebuilds a
     /// per-instance tilt quaternion that leans the WHOLE instance AWAY from nearby
     /// <see cref="GrassInteractor"/>s and recovers toward upright at <c>recoveryRate</c>. Recovery state
@@ -43,7 +43,7 @@ namespace WorldPainter
         /// <summary>
         /// Builds the simulator from the BAKED instance buffer (chunk-sorted order) + the layer's tilt config.
         /// </summary>
-        public InstanceTiltSimulator(ChunkedInstanceBuffer baked, InstanceScatterLayer layer)
+        public InstanceTiltSimulator(ChunkedInstanceBuffer baked, PropLayerScatterLayer layer)
         {
             ScatterInstanceTiltConfig tilt = layer.Tilt;
             this.tiltStrength  = tilt.TiltStrength;
@@ -63,7 +63,7 @@ namespace WorldPainter
                 this.outTilt[i] = new Vector4(0f, 0f, 0f, 1f); // identity
 
             // Deform sampling anchor = pivot + yawRot*(localOffset * scale). Mirrors the shader anchor for the
-            // common (non-oriented) InstanceScatterLayer case, where baseRot == Yaw(yaw) (the layer's
+            // common (non-oriented) prop case, where baseRot == Yaw(yaw) (the layer's
             // RotationOffsetEuler is always zero). For oriented props the shader additionally applies
             // surface-normal alignment + pitch/roll; this sim uses yaw-only, so the anchor's XZ proximity for
             // tilt is a close approximation there (documented; refine to full baseRot reconstruction if needed).

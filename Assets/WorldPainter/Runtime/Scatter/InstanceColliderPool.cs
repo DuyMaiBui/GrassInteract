@@ -6,9 +6,9 @@ namespace WorldPainter
 {
     /// <summary>
     /// Runtime pool of per-instance <see cref="MeshCollider"/> GameObjects for a single
-    /// <see cref="InstanceScatterLayer"/>. One pool instance lives as a child component on the
-    /// ScatterField's collider root during Play mode; it is destroyed via <see cref="Dispose"/>
-    /// when the engine disposes or the scene exits.
+    /// prop layer's <see cref="PropLayerScatterLayer"/> adapter. One pool instance lives as a
+    /// child component on the collider root during Play mode; it is destroyed via
+    /// <see cref="Dispose"/> when the engine disposes or the scene exits.
     ///
     /// TheOne.Pooling is not present in this project — this is a focused single-purpose pool.
     /// TODO[lib]: migrate to TheOne.Pooling.IObjectPoolManager when the shared pooling package

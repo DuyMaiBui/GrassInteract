@@ -100,16 +100,6 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Classifies a scatter layer by its ACTUAL type, never its name: an
-        /// <see cref="InstanceScatterLayer"/> is <see cref="LayerType.Props"/>; any other
-        /// (density) scatter layer is <see cref="LayerType.Grass"/>. Type-based so an instance
-        /// layer whose name lacks "prop" is still routed to the prop detail card and the
-        /// instance brush tools (Place/Erase/Single) instead of the density path.
-        /// </summary>
-        public static LayerType ScatterLayerKind(ScatterLayer? layer) =>
-            layer is InstanceScatterLayer ? LayerType.Props : LayerType.Grass;
-
-        /// <summary>
         /// The effective layer type that drives brush-tool dispatch + the contextual palette.
         ///
         /// Phase 2: combines THREE selection signals in priority order:
@@ -149,31 +139,15 @@ namespace WorldPainter.Editor
         /// </summary>
         public static int ActiveBiomeLayerIndex(WorldPainter painter)
         {
-            // Phase 2 direct path: biome was selected by setting ActiveBiomeIndex directly.
+            // Direct path: biome was selected by setting ActiveBiomeIndex directly.
             if (ActiveBiomeIndex >= 0 && ActiveBiomeIndex < painter.Biomes.Count)
                 return ActiveBiomeIndex;
 
-            // Legacy fallback: derive from raw display index + legacy list counts.
-            int idx          = ActiveLayerIndex;
-            int splatCount   = painter.SplatLayers.Count;
-            int scatterCount = painter.ScatterLayers.Count;
-            int biomeOffset  = idx - splatCount - scatterCount - 1;
+            // Legacy fallback: derive from raw display index.
+            int idx         = ActiveLayerIndex;
+            int biomeOffset = idx - 1; // index 1+ used by biome rows when no surface layers
             if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
                 return biomeOffset;
-            return -1;
-        }
-
-        /// <summary>
-        /// Returns the 0-based index into <see cref="WorldPainter.ScatterLayers"/> for the
-        /// currently active layer, or -1 when the active layer is not a scatter layer.
-        /// </summary>
-        public static int ActiveScatterIndex(WorldPainter painter)
-        {
-            int idx = ActiveLayerIndex;
-            int splatCount = painter.SplatLayers.Count;
-            int scatterOffset = idx - splatCount - 1;
-            if (scatterOffset >= 0 && scatterOffset < painter.ScatterLayers.Count)
-                return scatterOffset;
             return -1;
         }
 

@@ -135,9 +135,6 @@ namespace WorldPainter.Editor
             this.FlushAllDensityRTs();
             this.ReleaseAllDensityRTs();
 
-            // Release biome composite stamp density RTs.
-            this.biomeStamp?.ReleaseDensityRTs();
-
             this.stroke.End();
             this.rtCache.ReleaseAll();
             this.strokeTouchedCoords.Clear();

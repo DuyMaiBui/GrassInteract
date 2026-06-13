@@ -8,8 +8,8 @@ namespace WorldPainter
     /// bounds/placement/tilt) plus an <see cref="AuthoredInstancesData"/> sub-asset that stores
     /// the explicitly placed instance records.
     ///
-    /// Mirrors the exact config surface of <see cref="InstanceScatterLayer"/> so the transient
-    /// <see cref="PropLayerScatterLayer"/> adapter can forward every accessor unchanged.
+    /// Provides the config surface that the transient
+    /// <see cref="PropLayerScatterLayer"/> adapter forwards to the frozen engine.
     ///
     /// Built into a frozen <see cref="InstancedPropEngine"/> via <see cref="PropLayerScatterLayer"/>
     /// in <c>WorldPainter.SurfaceLayers.RebuildSurfaceLayers</c> — no changes to any frozen

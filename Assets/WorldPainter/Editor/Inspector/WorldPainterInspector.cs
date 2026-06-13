@@ -32,18 +32,10 @@ namespace WorldPainter.Editor
         private WorldPainterLayerStackView? layerStack;
         private WorldPainterBrushDock? brushDock;
 
-        // ── Grass sub-views ───────────────────────────────────────────────────
-
-        private WorldPainterScatterLayerCard? scatterCard;
-
         // Identity of the layer currently shown in the detail card. The 200ms poll
         // rebuilds the card ONLY when this changes — rebuilding every tick would
         // destroy+recreate the embedded layer Editor 5×/sec (flicker + lost focus).
         private string? lastCardKey;
-
-        // ── Prop sub-views (P4) ───────────────────────────────────────────────
-
-        private WorldPainterPropLayerCard? propCard;
 
         // ── Unified surface-layer detail (Phase 2) ────────────────────────────
 
@@ -133,9 +125,8 @@ namespace WorldPainter.Editor
             {
                 bool noTiles = painter.Map == null && painter.Tiles.Count == 0;
                 int surfaceLayerCount = painter.Map != null ? painter.Map.SurfaceLayers.Count : 0;
+                // Phase 5: SplatLayers/ScatterLayers removed from WorldPainter; use SurfaceLayers.
                 bool noLayers = surfaceLayerCount == 0 &&
-                                painter.SplatLayers.Count == 0 &&
-                                painter.ScatterLayers.Count == 0 &&
                                 painter.Biomes.Count == 0;
                 bool hasNoMap = painter.Map == null;
                 emptyTilesState.style.display = noTiles
@@ -168,10 +159,6 @@ namespace WorldPainter.Editor
             // ── Per-layer coach-mark zone ─────────────────────────────────────
             root.Add(this.coachMarks.BuildLayerCoachArea(painter));
 
-            // Grass sub-views (created once; shown when a Grass layer is active).
-            this.scatterCard = new WorldPainterScatterLayerCard();
-            this.propCard = new WorldPainterPropLayerCard();
-
             // Scatter layer card area — refreshed when active layer index changes.
             // Mounted at the very bottom (below the footer readout strip) further down.
             var cardArea = new VisualElement();
@@ -203,18 +190,16 @@ namespace WorldPainter.Editor
                     }
                 }
 
-                // Build a stable key: unified layer id wins; fall back to legacy scatter index key.
+                // Build a stable key: unified layer id wins; fall back to legacy index key.
+                // Phase 5: ScatterLayers/ActiveScatterIndex removed — key on ActiveLayerIndex only.
                 string key;
                 if (activeSurfaceLayer != null)
                     key = $"surface:{activeSurfaceLayer.GetInstanceID()}";
                 else
                 {
                     LayerType legacyType = WorldPainterState.ActiveLayerType(painter, out _);
-                    int si = WorldPainterState.ActiveScatterIndex(painter);
-                    int layerId = 0;
-                    if (si >= 0 && si < painter.ScatterLayers.Count && painter.ScatterLayers[si] != null)
-                        layerId = painter.ScatterLayers[si].GetInstanceID();
-                    key = $"{legacyType}:{si}:{layerId}";
+                    int idx = WorldPainterState.ActiveLayerIndex;
+                    key = $"{legacyType}:{idx}";
                 }
 
                 if (key == this.lastCardKey) return; // unchanged → keep card
@@ -249,29 +234,9 @@ namespace WorldPainter.Editor
                     });
                     cardArea.Add(imgui);
                 }
-                else
-                {
-                    // Legacy fallback: scatter/prop detail cards (still functional for legacy layers).
-                    LayerType layerType = WorldPainterState.ActiveLayerType(painter, out _);
-                    int si = WorldPainterState.ActiveScatterIndex(painter);
-
-                    if (layerType == LayerType.Grass)
-                    {
-                        if (si >= 0 && this.scatterCard != null)
-                        {
-                            var card = this.scatterCard.Build(painter, si);
-                            if (card != null) cardArea.Add(card);
-                        }
-                    }
-                    else if (layerType == LayerType.Props)
-                    {
-                        if (si >= 0 && this.propCard != null)
-                        {
-                            var card = this.propCard.Build(painter, si);
-                            if (card != null) cardArea.Add(card);
-                        }
-                    }
-                }
+                // Legacy scatter/prop cards removed (Phase 5 SSOT consolidation).
+                // Unified surface-layer detail (activeSurfaceLayer != null branch above) is the
+                // sole authoring path; no fallback card needed for legacy layer types.
             }).Every(200);
 
             // ── P6 Footer zone: live readout strip ────────────────────────────

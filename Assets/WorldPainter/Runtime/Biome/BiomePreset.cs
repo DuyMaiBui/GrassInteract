@@ -61,16 +61,16 @@ namespace WorldPainter
         [Tooltip("When enabled, paints grass density onto the referenced layer.")]
         [SerializeField] private bool grassEnabled = false;
 
-        [Tooltip("Grass scatter layer asset to paint density on.")]
-        [SerializeField] private DensityScatterLayer? grassLayer = null;
+        [Tooltip("Grass layer asset to paint density on.")]
+        [SerializeField] private GrassLayer? grassLayer = null;
 
         [Tooltip("Target density to paint [0..1].")]
         [Range(0f, 1f)]
         [SerializeField] private float grassDensity = 0.8f;
 
-        public bool                GrassEnabled   => this.grassEnabled;
-        public DensityScatterLayer? GrassLayer    => this.grassLayer;
-        public float               GrassDensity   => this.grassDensity;
+        public bool        GrassEnabled   => this.grassEnabled;
+        public GrassLayer? GrassLayer     => this.grassLayer;
+        public float       GrassDensity   => this.grassDensity;
 
         // ── Channel 4 — Prop scatter ──────────────────────────────────────────
 
@@ -78,16 +78,16 @@ namespace WorldPainter
         [Tooltip("When enabled, stamps prop instances from the referenced palette layer.")]
         [SerializeField] private bool propEnabled = false;
 
-        [Tooltip("Prop instance scatter layer to stamp from.")]
-        [SerializeField] private InstanceScatterLayer? propLayer = null;
+        [Tooltip("Prop layer asset to stamp instances from.")]
+        [SerializeField] private PropLayer? propLayer = null;
 
         [Tooltip("Scatter density multiplier for prop stamps [0..1].")]
         [Range(0f, 1f)]
         [SerializeField] private float propDensity = 0.5f;
 
-        public bool                  PropEnabled  => this.propEnabled;
-        public InstanceScatterLayer? PropLayer    => this.propLayer;
-        public float                 PropDensity  => this.propDensity;
+        public bool       PropEnabled  => this.propEnabled;
+        public PropLayer? PropLayer    => this.propLayer;
+        public float      PropDensity  => this.propDensity;
 
         // ── Channel summary ────────────────────────────────────────────────────
 

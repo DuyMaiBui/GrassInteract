@@ -43,7 +43,7 @@ namespace WorldPainter
     /// by its OWN per-tile R8 density channel via its own frozen-engine instance (built in
     /// <c>WorldPainter.SurfaceLayers</c> through the <c>GrassVariantScatterLayer</c> adapter — Phase 2).
     ///
-    /// Composes the same SSOT config structs as <see cref="DensityScatterLayer"/> so engines read
+    /// Composes the same SSOT config structs as the unified surface layers so engines read
     /// through the identical accessors.
     /// </summary>
     public sealed class GrassLayer : WorldPainterLayer
@@ -56,7 +56,7 @@ namespace WorldPainter
         [SerializeField] private ScatterBoundsConfig    bounds;
         [SerializeField] private ScatterPlacementConfig placement;
 
-        // ── Shared placement params (mirror DensityScatterLayer) ───────────────
+        // ── Shared placement params ───────────────────────────────────────────
 
         [Tooltip("World-space XZ size of the field.")]
         [SerializeField] private Vector2 fieldBounds = new Vector2(100f, 100f);

@@ -5,8 +5,7 @@ namespace WorldPainter
 {
     /// <summary>
     /// Contract for density-based placement data. <see cref="DensityPlacement"/> consumes this
-    /// interface — not the concrete <see cref="DensityScatterLayer"/> type — so alternative layer
-    /// types can reuse the density placement strategy by implementing this interface.
+    /// interface so any layer type can reuse the density placement strategy by implementing it.
     /// </summary>
     public interface IDensityPlacementSource
     {

@@ -93,7 +93,7 @@ namespace WorldPainter
 
     /// <summary>
     /// Sub-asset ScriptableObject that stores all authored per-instance data for one
-    /// <see cref="InstanceScatterLayer"/>. Created automatically when a layer is first created.
+    /// <see cref="PropLayer"/>. Created automatically when a layer is first created.
     ///
     /// Storage: a 1-byte version header followed by a flat byte[] blob (binary, fast I/O) plus a
     /// List{Object} for object references (meshes) indexed from the blob.

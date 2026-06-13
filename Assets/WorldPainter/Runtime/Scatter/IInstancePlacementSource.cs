@@ -6,8 +6,7 @@ namespace WorldPainter
 {
     /// <summary>
     /// Contract for authored-instance placement data. <see cref="InstancePlacement"/> consumes
-    /// this interface — not the concrete <see cref="InstanceScatterLayer"/> type — so alternative
-    /// layer types can reuse the authored placement strategy by implementing this interface.
+    /// this interface so any layer type can reuse the authored placement strategy by implementing it.
     /// </summary>
     public interface IInstancePlacementSource
     {

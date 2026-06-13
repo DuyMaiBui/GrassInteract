@@ -102,35 +102,27 @@ namespace WorldPainter.Editor
             }
 
             // ── Channel 3: Grass density ──────────────────────────────────────
-            if (preset.GrassEnabled && preset.GrassLayer != null
-                && !mute.HasFlag(BiomeChannelMask.Grass))
-            {
-                var dRT = this.GetOrCreateDensityRT(preset.GrassLayer);
-                if (dRT != null)
-                {
-                    brushCompute.SetFloat("_Strength", brushStrength * preset.GrassDensity);
-                    int k = brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
-                    this.falloffLut.BindToCompute(brushCompute, k);
-                    brushCompute.SetTexture(k, "_DensityRT", dRT);
-                    brushCompute.SetInt("_DensityMode", 0);
-                    brushCompute.Dispatch(k, groups, groups, 1);
-                    this.densityEncoder.RequestAsync(preset.GrassLayer, dRT);
-                }
-            }
+            // NOTE: biome-stamp grass density is omitted in the unified path — the GrassLayer
+            // uses per-tile per-variant density textures (GrassVariant.densityTiles[coord]) which
+            // require a tile coordinate. The biome stamp operates across tile boundaries, so a
+            // single-RT approach does not generalise. Use the per-tile DensityBrush tool instead
+            // for targeted density paint on individual grass variants.
+            // Removed: GetOrCreateDensityRT(DensityScatterLayer) — that type is deleted (Phase 5).
 
             // ── Channel 4: Props ──────────────────────────────────────────────
             if (preset.PropEnabled && preset.PropLayer != null
                 && !mute.HasFlag(BiomeChannelMask.Props))
             {
-                var authored = preset.PropLayer.AuthoredInstances;
+                PropLayer propLayer = preset.PropLayer;
+                var authored = propLayer.AuthoredInstances;
                 if (authored != null)
                 {
-                    int key = preset.PropLayer.GetInstanceID();
+                    int key = propLayer.GetInstanceID();
                     if (!WorldPainterAuthoring.UndoStack.CanUndoRecords(key))
                         WorldPainterAuthoring.UndoStack.PushRecords(authored, key);
 
                     this.propEmitter.Emit(
-                        preset.PropLayer,
+                        propLayer,
                         worldPos,
                         brushRadius: brushSize * 0.5f,
                         deleteMode:  false,
@@ -139,39 +131,5 @@ namespace WorldPainter.Editor
             }
         }
 
-        // ── Density RT cache (one per grass layer, kept for stroke duration) ──
-
-        private System.Collections.Generic.Dictionary<int, RenderTexture>? densityRTs;
-
-        private RenderTexture? GetOrCreateDensityRT(DensityScatterLayer layer)
-        {
-            this.densityRTs ??= new();
-            int id = layer.GetInstanceID();
-            if (this.densityRTs.TryGetValue(id, out var rt) && rt != null)
-                return rt;
-
-            var map = layer.DensityMap;
-            if (map == null) return null;
-
-            int res = Mathf.Max(map.width, map.height);
-            res = Mathf.Max(res, TerrainSculptConfig.BRUSH_RT_RES);
-            rt = new RenderTexture(res, res, 0, RenderTextureFormat.RFloat)
-            {
-                enableRandomWrite = true,
-                name = $"BiomeDensityRT_{layer.name}",
-            };
-            rt.Create();
-            this.densityRTs[id] = rt;
-            return rt;
-        }
-
-        /// <summary>Release all density RTs (call at end of each biome stroke).</summary>
-        public void ReleaseDensityRTs()
-        {
-            if (this.densityRTs == null) return;
-            foreach (var kv in this.densityRTs)
-                kv.Value?.Release();
-            this.densityRTs.Clear();
-        }
     }
 }

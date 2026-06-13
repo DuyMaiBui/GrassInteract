@@ -11,15 +11,16 @@ namespace WorldPainter
     /// and drives a per-tile LateUpdate submit scheduler guarded by residency/visibility early-outs.
     ///
     /// Render engine logic lives in WorldPainter.Render.cs (partial).
-    /// Scatter orchestration lives in WorldPainter.Scatter.cs (partial, P2).
+    /// Scatter orchestration lives in WorldPainter.Scatter.cs (partial).
+    /// Surface layer orchestration lives in WorldPainter.SurfaceLayers.cs (partial).
     /// All brush/preview/authoring code lives in <c>WorldPainter.Authoring.cs</c> under
     /// <c>#if UNITY_EDITOR</c> — this file SHIPS in player builds.
     ///
-    /// P2 wiring: LateUpdate → SubmitTerrain + StepScatter + SubmitScatter. Scatter engines are
-    /// built directly from the referenced <see cref="WorldMapAsset"/>; no <c>ScatterField</c>
-    /// or <c>GpuTerrainScatterGround</c> component is needed. ISurfaceSampler seam is unchanged.
+    /// P5 wiring: LateUpdate → SubmitTerrain + StepSurfaceLayers + SubmitSurfaceLayers +
+    /// DriveSurfaceProps. Surface engines are built from the unified SurfaceLayers system;
+    /// no legacy ScatterField or GpuTerrainScatterGround component is needed.
     ///
-    /// P4 wiring: per-prop-layer <see cref="WorldPainterImpostorLod"/> + chunk-cull early-out.
+    /// P5 wiring: per-prop-layer <see cref="WorldPainterImpostorLod"/> + chunk-cull early-out.
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -37,91 +38,31 @@ namespace WorldPainter
             if (!Application.isPlaying) return;
             if (!this.IsBuilt) this.TryBuild();
 
-            // Build scatter + surface (grass) engines once on play start, then submit each frame.
+            // Build surface (grass/prop) engines once on play start, then submit each frame.
             if (this.IsBuilt && !this.playScatterBuilt)
             {
-                this.RebuildScatter();
                 this.RebuildSurfaceLayers();
                 this.playScatterBuilt = true;
             }
 
             this.SubmitTerrain(null);
-            this.StepScatter(Time.deltaTime);
-            this.SubmitScatter(null);
             this.StepSurfaceLayers(Time.deltaTime);
             this.SubmitSurfaceLayers(null);
-            this.DrivePropLayers();
             this.DriveSurfaceProps();
-        }
-
-        // ── Prop layer driving (P4) ───────────────────────────────────────────
-
-        /// <summary>
-        /// Drives per-prop-layer impostor LOD + chunk-cull early-out each LateUpdate.
-        ///
-        /// For each <see cref="InstanceScatterLayer"/> in <see cref="ScatterLayers"/>:
-        ///   1. Lazily allocates a <see cref="WorldPainterImpostorLod"/> per layer.
-        ///   2. Chunk-cull early-out: if <see cref="ChunkedInstanceBuffer.TotalInstances"/>
-        ///      is zero, skip the layer.
-        ///   3. Camera-distance LOD selection (XZ-planar) via <see cref="WorldPainterImpostorLod"/>.
-        /// </summary>
-        private void DrivePropLayers()
-        {
-            if (this.scatterLayers == null) return;
-
-            Camera? cam = Camera.main;
-            if (cam == null) return;
-            Vector3 cameraPos = cam.transform.position;
-
-            // Ensure enough impostor-lod slots.
-            while (this.propImpostorLods.Count < this.scatterLayers.Count)
-                this.propImpostorLods.Add(new WorldPainterImpostorLod());
-
-            for (int i = 0; i < this.scatterLayers.Count; ++i)
-            {
-                var layer = this.scatterLayers[i] as InstanceScatterLayer;
-                if (layer == null) continue;
-
-                var authored = layer.AuthoredInstances;
-                if (authored == null || authored.Count == 0) continue;
-
-                var lod = this.propImpostorLods[i];
-
-                // Gather runtime records and do per-instance LOD cull.
-                var records = authored.GetRuntimeRecords();
-                if (records == null || records.Length == 0) continue;
-
-                // Chunk-cull early-out: count impostors vs near-lod.
-                // (Actual render submission is owned by GpuTerrainEngine downstream;
-                //  we only tag the LOD selection here so the render path can consume it.)
-                int impostorCount = 0;
-                for (int j = 0; j < records.Length; ++j)
-                {
-                    if (lod.IsImpostor(records[j].position, cameraPos))
-                        ++impostorCount;
-                }
-
-                // Diagnostic only — production render consumes this downstream.
-                _ = impostorCount;
-            }
         }
 
         /// <summary>
         /// Drives per-prop-layer impostor LOD for unified <see cref="PropLayer"/> adapters built
         /// in <see cref="RebuildSurfaceLayers"/>.
         ///
-        /// Mirrors <see cref="DrivePropLayers"/> — lazily allocates one
-        /// <see cref="WorldPainterImpostorLod"/> per prop adapter and performs per-instance XZ-planar
-        /// LOD cull. Collider / tilt / indirect draws are owned by the frozen
-        /// <see cref="InstancedPropEngine.Submit"/> (fed through the adapter — no change needed here).
+        /// Lazily allocates one <see cref="WorldPainterImpostorLod"/> per prop adapter and
+        /// performs per-instance XZ-planar LOD cull. Collider / tilt / indirect draws are owned
+        /// by the frozen <see cref="InstancedPropEngine.Submit"/> (fed through the adapter).
         ///
-        /// NOTE (Phase 1): impostor-LOD output is diagnostic only (same as the legacy path).
-        /// Full tilt interactor driving for the unified path (which requires casting the adapter's
-        /// layer to a concrete type the engine's tilt sim knows about) is deferred to Phase 2+,
-        /// because <see cref="InstancedPropEngine"/> internally casts <see cref="ScatterLayer"/> to
-        /// <see cref="InstanceScatterLayer"/> for tilt config — the PropLayerScatterLayer does not
-        /// inherit that type. The tilt branch inside the engine gracefully no-ops when the cast
-        /// returns null, so rendering is correct; only the optional tilt-interactor feature is absent.
+        /// NOTE: impostor-LOD output is diagnostic only. Full tilt interactor driving for the
+        /// unified path is deferred — <see cref="InstancedPropEngine"/> internally casts
+        /// <see cref="ScatterLayer"/> to <see cref="PropLayerScatterLayer"/> for tilt config;
+        /// the tilt branch gracefully no-ops when the cast returns null, so rendering is correct.
         /// </summary>
         private void DriveSurfaceProps()
         {
@@ -132,8 +73,7 @@ namespace WorldPainter
             Vector3 cameraPos = cam.transform.position;
 
             // Ensure enough impostor-lod slots for the unified prop adapters.
-            while (this.propImpostorLods.Count <
-                   this.scatterLayers.Count + this.surfacePropAdapters.Count)
+            while (this.propImpostorLods.Count < this.surfacePropAdapters.Count)
                 this.propImpostorLods.Add(new WorldPainterImpostorLod());
 
             for (int i = 0; i < this.surfacePropAdapters.Count; ++i)
@@ -142,7 +82,7 @@ namespace WorldPainter
                 var authored = adapter.AuthoredInstances;
                 if (authored == null || authored.Count == 0) continue;
 
-                int lodSlot = this.scatterLayers.Count + i;
+                int lodSlot = i;
                 var lod     = this.propImpostorLods[lodSlot];
 
                 var records = authored.GetRuntimeRecords();

@@ -10,7 +10,7 @@ namespace WorldPainter.Tests
     /// Tests for the LOD band-ruler → <see cref="ScatterLod.maxDistance"/> mapping contract:
     /// – Normalized pixel position maps linearly to maxDistance within [0, maxDist].
     /// – Clamping: a drag beyond the ruler right edge saturates at the cap.
-    /// – Writing via SerializedObject round-trips through the DensityScatterLayer asset.
+    /// – Writing via SerializedObject round-trips through a <see cref="GrassLayer"/> asset.
     ///
     /// The ruler itself is an IMGUI widget (not testable headlessly); these tests verify
     /// the mapping math and the SerializedObject round-trip in pure C#.
@@ -60,11 +60,13 @@ namespace WorldPainter.Tests
         [Test]
         public void WriteMaxDistance_ViaSerializedObject_RoundTrips()
         {
-            var layer = ScriptableObject.CreateInstance<DensityScatterLayer>();
+            // GrassLayer replaces the removed DensityScatterLayer and carries the same
+            // ScatterRenderConfig 'render' field with a 'lods' sub-property. The ruler
+            // reads/writes maxDistance via SerializedObject on the selected layer.
+            var layer = ScriptableObject.CreateInstance<GrassLayer>();
             try
             {
-                // DensityScatterLayer.render.lods is empty by default — no way to
-                // set lods via public API (struct is serialized). We verify the SO
+                // GrassLayer.render.lods is empty by default — we verify the SO
                 // property navigation path doesn't throw and that findProperty
                 // returns the expected field name when lods are present.
                 var so = new SerializedObject(layer);
@@ -72,7 +74,7 @@ namespace WorldPainter.Tests
 
                 var renderProp = so.FindProperty("render");
                 Assert.IsNotNull(renderProp,
-                    "SerializedObject must find 'render' property on DensityScatterLayer.");
+                    "SerializedObject must find 'render' property on GrassLayer.");
 
                 var lodsProp = renderProp!.FindPropertyRelative("lods");
                 Assert.IsNotNull(lodsProp,

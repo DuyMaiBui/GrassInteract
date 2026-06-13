@@ -49,7 +49,7 @@ namespace WorldPainter.Editor
         /// <see cref="WorldMapBaker.BakeTile"/> — keeping the streaming layer in sync without
         /// a full bake.
         /// </summary>
-        /// <param name="layer">Source layer holding authored records.</param>
+        /// <param name="layer">Source unified prop layer holding authored records.</param>
         /// <param name="buffer">Target buffer (modified in place).</param>
         /// <param name="fieldOrigin">World-space origin of the prop field.</param>
         /// <param name="stampPos">World-space centre of the current stamp.</param>
@@ -59,7 +59,7 @@ namespace WorldPainter.Editor
         /// <param name="bakeManifest">Existing bake manifest to update. Nullable.</param>
         /// <param name="bakeOutputFolder">Bake output folder path. Nullable.</param>
         public void BakeIncremental(
-            InstanceScatterLayer  layer,
+            PropLayer             layer,
             ChunkedInstanceBuffer buffer,
             Vector3               fieldOrigin,
             Vector3               stampPos,
@@ -187,7 +187,7 @@ namespace WorldPainter.Editor
         // ── Full bake (fallback and initial bake) ─────────────────────────────
 
         private void BakeFull(
-            InstanceScatterLayer  layer,
+            PropLayer             layer,
             ChunkedInstanceBuffer buffer,
             Vector3               fieldOrigin,
             Bounds                meshBounds)
@@ -203,7 +203,8 @@ namespace WorldPainter.Editor
             }
 
             var scatter = BuildScatterResult(records, fieldOrigin);
-            float scaleMax = Mathf.Max(layer.ScaleRange.y, 0.01f);
+            Vector2 scaleRangeVal = layer.OverrideScaleRange ? layer.ScaleRangeOverride : new Vector2(1f, 1f);
+            float scaleMax = Mathf.Max(scaleRangeVal.y, 0.01f);
             var fieldBounds = ComputeFieldBoundsXZ(records, fieldOrigin);
 
             buffer.Bake(scatter, fieldOrigin, fieldBounds, scaleMax, meshBounds,

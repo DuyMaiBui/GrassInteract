@@ -44,14 +44,12 @@ namespace WorldPainter
         // ── ScatterLayer abstract placement data ─────────────────────────────────
 
         /// <summary>
-        /// XZ bounds computed from authored instance positions, matching
-        /// <see cref="InstanceScatterLayer.FieldBounds"/> calculation.
+        /// XZ bounds computed from authored instance positions.
         /// </summary>
         public override Vector2 FieldBounds => this.ComputeFieldBoundsFromAuthored();
 
         /// <summary>
-        /// Scale range from authored records (or override when enabled), matching
-        /// <see cref="InstanceScatterLayer.ScaleRange"/>.
+        /// Scale range from authored records (or override when enabled).
         /// </summary>
         public override Vector2 ScaleRange =>
             this.layer.OverrideScaleRange
@@ -72,6 +70,31 @@ namespace WorldPainter
 
         public float MaxBladeHeight => this.layer.Bounds.MaxBladeHeight;
         public float BendHeadroom   => this.layer.Bounds.BendHeadroom;
+
+        // ── Prop-engine accessors (forwarded from PropLayer for InstancedPropEngine) ─
+
+        public ScatterInstanceTiltConfig Tilt             => this.layer.Tilt;
+        public Vector3                   AnchorOffsetLocal => this.layer.AnchorOffsetLocal;
+        public bool                      GenerateColliders         => this.layer.GenerateColliders;
+        public int                       MaxCollidersPerFrame      => this.layer.MaxCollidersPerFrame;
+        public Mesh?                     DefaultColliderMesh       => this.layer.DefaultColliderMesh;
+        public bool                      DefaultColliderConvex     => this.layer.DefaultColliderConvex;
+        public UnityEngine.PhysicsMaterial? DefaultColliderMaterial => this.layer.DefaultColliderMaterial;
+        public bool                      PoolColliders             => this.layer.PoolColliders;
+        public int                       PoolCap                   => this.layer.PoolCap;
+        public bool                      CullColliders             => this.layer.CullColliders;
+
+        public bool AnyRecordWantsCollider()
+        {
+            var authored = this.layer.AuthoredInstances;
+            if (authored == null) return false;
+            var records = authored.GetRuntimeRecords();
+            for (int i = 0; i < records.Length; ++i)
+            {
+                if (records[i].generateCollider) return true;
+            }
+            return false;
+        }
 
         // ── Validation ───────────────────────────────────────────────────────────
 
