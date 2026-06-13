@@ -237,9 +237,17 @@ namespace WorldPainter.Editor
             layer.SetLayerSet(set);
             map.SetSplatSet(set);
 
+            // Create a blank albedo texture as a sub-asset and assign it into the set
+            // so BuildArray() returns a valid Texture2DArray immediately (not null).
+            // Albedo is sRGB (linear: false). Normal maps are intentionally NOT added here.
+            Texture2D albedo = CreateBlankAlbedo($"{layer.name}_Albedo0");
+            AssetDatabase.AddObjectToAsset(albedo, mapPath);
+            AssignLayerAlbedos(set, albedo);
+
             map.RegisterSurfaceLayer(layer);
             EditorUtility.SetDirty(map);
             EditorUtility.SetDirty(layer);
+            EditorUtility.SetDirty(set);
             AssetDatabase.SaveAssets();
             return layer;
         }
@@ -309,6 +317,16 @@ namespace WorldPainter.Editor
                 TerrainLayerSet? set = splat.LayerSet;
                 if (set != null && AssetDatabase.GetAssetPath(set) == mapPath)
                 {
+                    // Remove albedo sub-assets that are owned by this map before destroying the set.
+                    foreach (Texture2D albedo in set.EditorAlbedos)
+                    {
+                        if (albedo != null && AssetDatabase.GetAssetPath(albedo) == mapPath)
+                        {
+                            AssetDatabase.RemoveObjectFromAsset(albedo);
+                            Object.DestroyImmediate(albedo, allowDestroyingAssets: true);
+                        }
+                    }
+
                     if (map.SplatSet == set) map.SetSplatSet(null);
                     AssetDatabase.RemoveObjectFromAsset(set);
                     Object.DestroyImmediate(set, allowDestroyingAssets: true);
@@ -441,6 +459,44 @@ namespace WorldPainter.Editor
             tex.SetPixels(new Color[res * res]); // default (0,0,0,0) → zero density
             tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
             return tex;
+        }
+
+        // ── Albedo sub-asset factory ──────────────────────────────────────────
+
+        /// <summary>
+        /// Creates a 4×4 white, sRGB (non-linear) blank albedo texture for a new splat layer.
+        /// Small size keeps asset overhead negligible; the user replaces it with their art.
+        /// RGBA32 ensures <c>SetPixels32</c> support and compatibility with <see cref="TerrainLayerSet.BuildArray"/>.
+        /// </summary>
+        private static Texture2D CreateBlankAlbedo(string texName)
+        {
+            const int SIZE = 4;
+            var tex = new Texture2D(SIZE, SIZE, TextureFormat.RGBA32, mipChain: false, linear: false)
+            {
+                name       = texName,
+                wrapMode   = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+            };
+            var pixels = new Color32[SIZE * SIZE];
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = new Color32(255, 255, 255, 255);
+            tex.SetPixels32(pixels);
+            tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            return tex;
+        }
+
+        /// <summary>
+        /// Assigns <paramref name="albedo"/> as the first entry of <see cref="TerrainLayerSet.layerAlbedos"/>
+        /// via <see cref="SerializedObject"/>, mirroring the <see cref="AssignDensityMap"/> pattern.
+        /// </summary>
+        private static void AssignLayerAlbedos(TerrainLayerSet set, Texture2D albedo)
+        {
+            using var so = new SerializedObject(set);
+            var prop = so.FindProperty("layerAlbedos");
+            if (prop == null) return;
+            prop.arraySize = 1;
+            prop.GetArrayElementAtIndex(0).objectReferenceValue = albedo;
+            so.ApplyModifiedPropertiesWithoutUndo();
         }
 
         /// <summary>Assigns <paramref name="densityMap"/> to the layer's private serialized field.</summary>

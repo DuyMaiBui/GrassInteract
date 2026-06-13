@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace WorldPainter
@@ -41,6 +42,14 @@ namespace WorldPainter
             this.layerAlbedos == null
                 ? 0
                 : Mathf.Min(this.layerAlbedos.Length, TerrainShadingConfig.MAX_SPLAT_LAYERS);
+
+        /// <summary>
+        /// Editor-only read accessor for the albedo array.
+        /// Used by <see cref="WorldPainter.Editor.WorldMapAssetLifecycle"/> to enumerate
+        /// albedo sub-assets for cleanup on layer removal.
+        /// </summary>
+        internal IReadOnlyList<Texture2D> EditorAlbedos =>
+            this.layerAlbedos ?? Array.Empty<Texture2D>();
 
         // ── Array build ───────────────────────────────────────────────────────
 

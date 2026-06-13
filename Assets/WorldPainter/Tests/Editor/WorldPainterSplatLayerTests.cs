@@ -1,7 +1,11 @@
 #nullable enable
+using System.IO;
+using System.Linq;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using WorldPainter;
+using WorldPainter.Editor;
 
 namespace WorldPainter.Tests
 {
@@ -148,6 +152,121 @@ namespace WorldPainter.Tests
                 Assert.AreEqual("Ground", painter.SplatLayers[1].name);
             }
             finally { DestroyPainter(painter); }
+        }
+
+        // ── Albedo sub-asset creation (Phase 1) ───────────────────────────────
+
+        private const string TEMP_DIR  = "Assets/WorldPainter/Tests/Temp";
+        private const string MAP_PATH  = TEMP_DIR + "/SplatAlbedoTestMap.asset";
+
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
+        {
+            if (!AssetDatabase.IsValidFolder(TEMP_DIR))
+            {
+                string parent = Path.GetDirectoryName(TEMP_DIR)!.Replace('\\', '/');
+                string folder = Path.GetFileName(TEMP_DIR);
+                AssetDatabase.CreateFolder(parent, folder);
+            }
+        }
+
+        [OneTimeTearDown]
+        public void OneTimeTearDown()
+        {
+            if (AssetDatabase.IsValidFolder(TEMP_DIR))
+                AssetDatabase.DeleteAsset(TEMP_DIR);
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// After <see cref="WorldMapAssetLifecycle.AddSplatLayer"/> the created
+        /// <see cref="TerrainLayerSet"/> must have at least one albedo assigned
+        /// (<see cref="TerrainLayerSet.ActiveLayerCount"/> ≥ 1) AND the albedo
+        /// Texture2D must be a sub-asset of the map file (not a standalone asset).
+        /// </summary>
+        [Test]
+        public void AddSplatLayer_CreatesBlankAlbedoSubAsset()
+        {
+            // Create a fresh saved map for this test.
+            string testMapPath = TEMP_DIR + "/SplatAlbedoTestMap_Run.asset";
+            var map = ScriptableObject.CreateInstance<WorldMapAsset>();
+            AssetDatabase.CreateAsset(map, testMapPath);
+            AssetDatabase.SaveAssets();
+            map = AssetDatabase.LoadAssetAtPath<WorldMapAsset>(testMapPath)!;
+
+            try
+            {
+                SplatLayer splatLayer = WorldMapAssetLifecycle.AddSplatLayer(map, "TestGround");
+
+                // The set must have at least 1 active layer.
+                TerrainLayerSet? set = splatLayer.LayerSet;
+                Assert.IsNotNull(set, "AddSplatLayer must create a TerrainLayerSet.");
+                Assert.GreaterOrEqual(set!.ActiveLayerCount, 1,
+                    "TerrainLayerSet.ActiveLayerCount must be >= 1 after AddSplatLayer.");
+
+                // The albedo must be a sub-asset of the map (same path).
+                AssetDatabase.ImportAsset(testMapPath, ImportAssetOptions.ForceUpdate);
+                var allAssets = AssetDatabase.LoadAllAssetsAtPath(testMapPath);
+                var albedos   = allAssets.OfType<Texture2D>().ToArray();
+
+                Assert.IsTrue(albedos.Length >= 1,
+                    "At least one Texture2D sub-asset (albedo) must exist in the map asset.");
+
+                foreach (Texture2D albedo in albedos)
+                {
+                    string albedoPath = AssetDatabase.GetAssetPath(albedo);
+                    Assert.AreEqual(testMapPath, albedoPath,
+                        $"Albedo sub-asset '{albedo.name}' must be a child of the map asset, " +
+                        $"not a standalone asset at '{albedoPath}'.");
+                }
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(testMapPath);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        /// <summary>
+        /// After <see cref="WorldMapAssetLifecycle.RemoveSurfaceLayer"/> for a splat layer,
+        /// no Texture2D sub-assets must remain in the map (albedos cleaned up).
+        /// </summary>
+        [Test]
+        public void RemoveSplatLayer_RemovesAlbedoSubAssets()
+        {
+            string testMapPath = TEMP_DIR + "/SplatRemoveTestMap_Run.asset";
+            var map = ScriptableObject.CreateInstance<WorldMapAsset>();
+            AssetDatabase.CreateAsset(map, testMapPath);
+            AssetDatabase.SaveAssets();
+            map = AssetDatabase.LoadAssetAtPath<WorldMapAsset>(testMapPath)!;
+
+            try
+            {
+                SplatLayer splatLayer = WorldMapAssetLifecycle.AddSplatLayer(map, "RemoveMe");
+
+                // Confirm albedo was created.
+                AssetDatabase.ImportAsset(testMapPath, ImportAssetOptions.ForceUpdate);
+                var before = AssetDatabase.LoadAllAssetsAtPath(testMapPath).OfType<Texture2D>().ToArray();
+                Assert.IsTrue(before.Length >= 1, "Albedo sub-asset must exist before removal.");
+
+                // Remove the splat layer.
+                map = AssetDatabase.LoadAssetAtPath<WorldMapAsset>(testMapPath)!;
+                var layers = map.SurfaceLayers;
+                WorldPainterLayer? toRemove = layers.Count > 0 ? layers[0] : null;
+                if (toRemove != null)
+                    WorldMapAssetLifecycle.RemoveSurfaceLayer(map, toRemove);
+
+                // No Texture2D sub-assets should remain.
+                AssetDatabase.ImportAsset(testMapPath, ImportAssetOptions.ForceUpdate);
+                var after = AssetDatabase.LoadAllAssetsAtPath(testMapPath).OfType<Texture2D>().ToArray();
+                Assert.AreEqual(0, after.Length,
+                    "All albedo Texture2D sub-assets must be removed with the splat layer.");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(testMapPath);
+                AssetDatabase.Refresh();
+            }
         }
 
         // ── ActiveSplatLayerIndex clamping ────────────────────────────────────
