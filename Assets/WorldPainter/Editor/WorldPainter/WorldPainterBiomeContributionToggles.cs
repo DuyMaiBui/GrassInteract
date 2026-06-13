@@ -54,8 +54,9 @@ namespace WorldPainter.Editor
                 "Height channel — sculpt delta per stamp"));
             row.Add(this.MakeChannelToggle(BiomeChannelMask.Splat,  "🎨",
                 "Splat channel — paint texture weight per stamp"));
-            row.Add(this.MakeChannelToggle(BiomeChannelMask.Grass,  "🌿",
-                "Grass channel — paint density per stamp"));
+            // Grass density channel not shown: biome-stamp grass density is not supported in the
+            // unified SurfaceLayers path (per-variant density textures are per-tile; biome stamps
+            // cross tile boundaries). Use the density brush tool directly on a GrassLayer variant.
             row.Add(this.MakeChannelToggle(BiomeChannelMask.Props,  "🌳",
                 "Props channel — scatter prop instances per stamp"));
 

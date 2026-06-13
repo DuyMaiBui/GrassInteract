@@ -93,6 +93,9 @@ namespace WorldPainter.Editor
             // Subscribe: Ctrl+Z triggers our custom per-tile snapshot revert.
             Undo.undoRedoPerformed += this.OnUndoRedoPerformed;
 
+            // Subscribe: reset prop transform selection when the active layer changes away from Prop.
+            WorldPainterState.ActiveLayerChanged += this.OnActiveLayerChangedForTransform;
+
             EditorApplication.update += this.OnEditorUpdate;
         }
 
@@ -100,6 +103,7 @@ namespace WorldPainter.Editor
         {
             WorldPainterState.BrushFalloffDirty -= this.OnBrushFalloffDirty;
             Undo.undoRedoPerformed -= this.OnUndoRedoPerformed;
+            WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChangedForTransform;
             EditorApplication.update -= this.OnEditorUpdate;
 
             if (this.stroke.InStroke)
@@ -121,6 +125,16 @@ namespace WorldPainter.Editor
         private void OnBrushFalloffDirty()
         {
             this.falloffLut.Upload(WorldPainterState.Brush.falloff);
+        }
+
+        // ── Prop transform mode — reset selection on layer change ─────────────
+
+        private void OnActiveLayerChangedForTransform(string layerId, WorldPainterState.PaintLayerKind kind)
+        {
+            // When the user selects any layer that is not a Prop layer, reset the transform
+            // selection so the gizmo doesn't linger on a stale instance.
+            if (kind != WorldPainterState.PaintLayerKind.Prop)
+                WorldPainterPropTransformEdit.Instance.Reset();
         }
 
         // ── Ctrl+Z stroke revert (finding #2) ────────────────────────────────
@@ -161,7 +175,7 @@ namespace WorldPainter.Editor
 
         public override void OnToolGUI(EditorWindow window)
         {
-            if (window is not SceneView) return;
+            if (window is not SceneView sceneView) return;
             if (this.brushCompute == null) return;
 
             var painter = WorldPainterState.ActivePainter;
@@ -172,6 +186,22 @@ namespace WorldPainter.Editor
 
             if (e.type == EventType.Layout)
                 HandleUtility.AddDefaultControl(controlId);
+
+            // ── Prop Transform mode — delegate scene input; skip brush logic ──────
+
+            if (WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop &&
+                WorldPainterPropTransformEdit.PropTransformModeActive)
+            {
+                PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
+                if (propLayer != null)
+                {
+                    WorldPainterPropTransformEdit.Instance.OnSceneGUI(propLayer, sceneView);
+                    this.DrawHud();
+                    return;
+                }
+            }
+
+            // ── Normal brush-stroke path ──────────────────────────────────────────
 
             Ray  ray    = HandleUtility.GUIPointToWorldRay(e.mousePosition);
             bool hasHit = this.TryGetBrushWorldPoint(ray, painter, out Vector3 worldPoint);
@@ -272,13 +302,27 @@ namespace WorldPainter.Editor
 
         private void DrawHud()
         {
+            bool isPropActive = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
+            bool isTransform  = WorldPainterPropTransformEdit.PropTransformModeActive;
+
             Handles.BeginGUI();
-            var area = new Rect(8, 8, 230, 52);
+            // Taller HUD when the prop transform toggle is shown.
+            var area = new Rect(8, 8, 240, isPropActive ? 74 : 52);
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label("WorldPainter Sculpt", EditorStyles.boldLabel);
             var brush = WorldPainterState.Brush;
             GUILayout.Label($"Size: {brush.size:F1}m  Strength: {brush.strength:F2}",
                 EditorStyles.miniLabel);
+
+            if (isPropActive)
+            {
+                string modeLabel = isTransform
+                    ? "Mode: Transform  [T = scatter]"
+                    : "Mode: Scatter  [T = transform]";
+                if (GUILayout.Button(modeLabel, EditorStyles.miniButton))
+                    WorldPainterPropTransformEdit.ToggleMode();
+            }
+
             GUILayout.EndArea();
             Handles.EndGUI();
         }
