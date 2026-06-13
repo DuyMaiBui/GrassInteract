@@ -131,11 +131,9 @@ namespace WorldPainter.Editor
                 }
             }
 
-            // Flush density encoder on mouse-up (synchronous final persist).
-            if (this.activeDensityMap != null && this.densityRT != null)
-                this.densityEncoder.ExecuteSync(this.activeDensityMap, this.densityRT);
-
-            this.ReleaseDensityRT();
+            // Flush all per-tile density RTs on mouse-up (synchronous final persist).
+            this.FlushAllDensityRTs();
+            this.ReleaseAllDensityRTs();
 
             // Release biome composite stamp density RTs.
             this.biomeStamp?.ReleaseDensityRTs();

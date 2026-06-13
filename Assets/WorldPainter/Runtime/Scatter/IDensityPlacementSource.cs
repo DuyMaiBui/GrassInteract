@@ -14,6 +14,15 @@ namespace WorldPainter
         Texture2D? DensityMap { get; }
         int TargetInstances { get; }
 
+        // ── Bounds override ───────────────────────────────────────────────────
+        /// <summary>
+        /// When true, <see cref="DensityPlacement"/> uses <see cref="FieldBounds"/> directly
+        /// regardless of the active <see cref="ISurfaceSampler"/> type (per-tile adapters set this).
+        /// When false (default), terrain-driven bounds from <see cref="TerrainSurfaceSampler"/>
+        /// override <see cref="FieldBounds"/> for full-terrain scatter.
+        /// </summary>
+        bool UseExplicitFieldBounds { get; }
+
         // ── Procedural placement ──────────────────────────────────────────────
         Vector2 FieldBounds { get; }
         Vector2 ScaleRange { get; }

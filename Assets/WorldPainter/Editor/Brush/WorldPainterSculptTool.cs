@@ -36,11 +36,8 @@ namespace WorldPainter.Editor
         internal readonly WorldPainterStroke         stroke          = new WorldPainterStroke();
         internal readonly BrushFalloffLut            falloffLut      = new BrushFalloffLut();
 
-        // ── Density RT (per scatter-layer, one per stroke) ────────────────────
-        // Allocated on first Grass-layer stamp; released on TeardownActiveStroke.
-
-        internal RenderTexture?        densityRT          = null;
-        internal Texture2D?            activeDensityMap   = null;
+        // ── Density RT (per-tile RT cache, managed in WorldPainterSculptTool.Density.cs) ──
+        // densityRT / activeDensityMap properties live in the Density partial (legacy compat shims).
 
         // ── Prop stamp emitter (P4 task 2) ────────────────────────────────────
 

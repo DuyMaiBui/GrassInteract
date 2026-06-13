@@ -18,22 +18,56 @@ namespace WorldPainter
         private static readonly int ID_BaseMap = Shader.PropertyToID("_BaseMap");
 
         private GrassLayer layer = null!;
-        private Material?  variantMaterial; // runtime clone, owned + disposed here
-        private Texture2D? densityMap;      // variant field density (referenced, not owned)
+        private Material?  variantMaterial;     // runtime clone, owned + disposed here
+        private Texture2D? densityMap;           // variant tile density (referenced, not owned)
         private string     variantId = string.Empty;
+        private bool       useExplicitBounds;    // true for per-tile adapters
+        private Vector2    explicitFieldBounds;  // tile-sized bounds when useExplicitBounds == true
 
         /// <summary>
-        /// Builds a transient adapter for one variant. Clones the layer material and overrides
-        /// <c>_BaseMap</c> with the variant texture. Caller owns the lifetime (destroy with the engine).
+        /// Builds a transient adapter for one variant (field-wide, global density).
+        /// Clones the layer material and overrides <c>_BaseMap</c> with the variant texture.
+        /// Caller owns the lifetime (destroy with the engine).
         /// </summary>
         public static GrassVariantScatterLayer Create(GrassLayer layer, int variantIndex, Texture2D? densityMap)
         {
             var adapter = CreateInstance<GrassVariantScatterLayer>();
-            adapter.hideFlags  = HideFlags.HideAndDontSave; // transient, never persisted
-            adapter.layer      = layer;
-            adapter.variantId  = $"{layer.name}#{variantIndex}";
-            adapter.densityMap = densityMap;
-            adapter.name       = adapter.variantId;
+            adapter.hideFlags          = HideFlags.HideAndDontSave;
+            adapter.layer              = layer;
+            adapter.variantId          = $"{layer.name}#{variantIndex}";
+            adapter.densityMap         = densityMap;
+            adapter.name               = adapter.variantId;
+            adapter.useExplicitBounds  = false;
+            adapter.explicitFieldBounds = layer.FieldBounds;
+
+            GrassVariant v = layer.Palette[variantIndex];
+            Material? baseMat = layer.Render.Material;
+            if (baseMat != null)
+            {
+                adapter.variantMaterial = new Material(baseMat) { name = $"{adapter.variantId}_Mat" };
+                if (v.texture != null)
+                    adapter.variantMaterial.SetTexture(ID_BaseMap, v.texture);
+            }
+            return adapter;
+        }
+
+        /// <summary>
+        /// Builds a tile-aware transient adapter for one (variant, tile). Uses a tile-sized
+        /// <see cref="FieldBounds"/> and sets <see cref="UseExplicitFieldBounds"/> = true so
+        /// <see cref="DensityPlacement"/> does not override bounds with terrain size.
+        /// </summary>
+        public static GrassVariantScatterLayer Create(
+            GrassLayer layer, int variantIndex, Vector2Int tileCoord, Texture2D? tileDensityTex)
+        {
+            var adapter = CreateInstance<GrassVariantScatterLayer>();
+            adapter.hideFlags          = HideFlags.HideAndDontSave;
+            adapter.layer              = layer;
+            adapter.variantId          = $"{layer.name}#{variantIndex}@{tileCoord}";
+            adapter.densityMap         = tileDensityTex;
+            adapter.name               = adapter.variantId;
+            adapter.useExplicitBounds  = true;
+            adapter.explicitFieldBounds = new Vector2(
+                TerrainWorldGrid.TILE_SIZE_M, TerrainWorldGrid.TILE_SIZE_M);
 
             GrassVariant v = layer.Palette[variantIndex];
             Material? baseMat = layer.Render.Material;
@@ -65,7 +99,7 @@ namespace WorldPainter
 
         // ── Abstract placement data (shared, also satisfies IDensityPlacementSource) ──
 
-        public override Vector2 FieldBounds         => this.layer.FieldBounds;
+        public override Vector2 FieldBounds         => this.explicitFieldBounds;
         public override Vector2 ScaleRange          => this.layer.ScaleRange;
         public override Vector3 RotationOffsetEuler => this.layer.RotationOffsetEuler;
         public override bool    IsOriented          => this.layer.IsOriented;
@@ -90,6 +124,7 @@ namespace WorldPainter
 
         // ── IDensityPlacementSource (variant density + shared placement params) ──
 
+        public bool       UseExplicitFieldBounds => this.useExplicitBounds;
         public Texture2D? DensityMap     => this.densityMap;
         public int        TargetInstances => this.layer.TargetInstances;
         public int        Seed            => this.layer.Seed;

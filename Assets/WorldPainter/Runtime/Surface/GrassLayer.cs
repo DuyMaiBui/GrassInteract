@@ -6,9 +6,22 @@ using UnityEngine;
 namespace WorldPainter
 {
     /// <summary>
+    /// Per-tile density texture entry for a <see cref="GrassVariant"/>. Keyed by tile grid coordinate.
+    /// </summary>
+    [Serializable]
+    public struct TileDensityTexture
+    {
+        [Tooltip("Tile grid coordinate this density texture belongs to.")]
+        public Vector2Int coord;
+
+        [Tooltip("R8/RGBA32 density Texture2D sub-asset for this tile. Null if not yet created.")]
+        public Texture2D? tex;
+    }
+
+    /// <summary>
     /// One grass appearance variant within a <see cref="GrassLayer"/>. Variants share the layer's
     /// mesh/material/wind/bend config and differ ONLY by texture; each owns its own per-tile R8
-    /// density channel (keyed by <c>layerId#index</c>) painted independently.
+    /// density texture (one per tile) painted independently.
     /// </summary>
     [Serializable]
     public struct GrassVariant
@@ -19,9 +32,9 @@ namespace WorldPainter
         [Tooltip("Albedo (_BaseMap) override applied to the shared material for this variant.")]
         public Texture2D? texture;
 
-        [Tooltip("This variant's own field-level R-channel density map (painted independently). " +
-                 "Created/assigned by the editor lifecycle; null = variant not yet authored (skipped).")]
-        public Texture2D? densityMap;
+        [Tooltip("Per-tile density textures — one entry per registered tile. " +
+                 "Created/assigned by the editor lifecycle; empty = variant has no tiles yet (valid, renders nothing).")]
+        public TileDensityTexture[] densityTiles;
     }
 
     /// <summary>
@@ -118,6 +131,19 @@ namespace WorldPainter
 
         /// <summary>Replaces the palette. Editor lifecycle only.</summary>
         internal void EditorSetPalette(GrassVariant[] variants) => this.palette = variants;
+
+        /// <summary>
+        /// Returns the density <see cref="Texture2D"/> for the given tile coordinate in variant
+        /// <paramref name="v"/>, or null if no entry exists for that coord.
+        /// </summary>
+        public static Texture2D? GetTileDensity(in GrassVariant v, Vector2Int coord)
+        {
+            var tiles = v.densityTiles;
+            if (tiles == null) return null;
+            for (int i = 0; i < tiles.Length; ++i)
+                if (tiles[i].coord == coord) return tiles[i].tex;
+            return null;
+        }
 
         /// <summary>Sets the shared render material (keeps LODs/shadow/cull). Editor lifecycle only.</summary>
         internal void EditorSetMaterial(Material material)

@@ -275,6 +275,137 @@ namespace WorldPainter.Tests
             Assert.AreEqual(WorldPainterState.PaintLayerKind.None, WorldPainterState.ActiveLayerKind);
         }
 
+        // ── G6 Per-tile grass density alloc/remove tests ──────────────────────
+
+        [Test]
+        public void TwoTiles_AddGrassVariant_EachVariantHasTwoDensityTiles()
+        {
+            var map = this.LoadMap();
+
+            var c0 = new Vector2Int(0, 0);
+            var c1 = new Vector2Int(1, 0);
+            WorldMapAssetLifecycle.AddTile(map, c0);
+            WorldMapAssetLifecycle.AddTile(map, c1);
+
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "TestGrass", variantCount: 2);
+
+            // Each of the 2 variants should have 2 densityTiles (one per tile).
+            foreach (var v in grass.Palette)
+            {
+                Assert.IsNotNull(v.densityTiles,
+                    $"Variant '{v.name}' densityTiles must not be null.");
+                Assert.AreEqual(2, v.densityTiles.Length,
+                    $"Variant '{v.name}' must have exactly 2 densityTiles (one per tile).");
+
+                // Both textures must be sub-assets of the map.
+                string mapPath = AssetDatabase.GetAssetPath(map);
+                foreach (var entry in v.densityTiles)
+                {
+                    Assert.IsNotNull(entry.tex,
+                        $"Variant '{v.name}' tile {entry.coord} density tex must not be null.");
+                    Assert.AreEqual(mapPath, AssetDatabase.GetAssetPath(entry.tex),
+                        $"Variant '{v.name}' tile {entry.coord} density tex must be a sub-asset of the map.");
+                }
+            }
+        }
+
+        [Test]
+        public void AddGrassVariant_ZeroTiles_VariantHasEmptyDensityTiles()
+        {
+            var map = this.LoadMap();
+            // No tiles — AddGrassVariant must produce an empty densityTiles array (valid state).
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "NoTileGrass", variantCount: 1);
+
+            Assert.AreEqual(1, grass.Palette.Count, "Layer should have 1 variant.");
+            Assert.IsNotNull(grass.Palette[0].densityTiles,
+                "densityTiles must not be null even with 0 tiles.");
+            Assert.AreEqual(0, grass.Palette[0].densityTiles.Length,
+                "densityTiles must be empty when map has no tiles.");
+        }
+
+        [Test]
+        public void AddTileAfterGrassVariant_VariantGainsThirdDensityTile()
+        {
+            var map = this.LoadMap();
+
+            // Start with 2 tiles, add a grass layer.
+            var c0 = new Vector2Int(0, 0);
+            var c1 = new Vector2Int(1, 0);
+            WorldMapAssetLifecycle.AddTile(map, c0);
+            WorldMapAssetLifecycle.AddTile(map, c1);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "ExpandGrass", variantCount: 1);
+
+            // Add a third tile after the variant exists.
+            var c2 = new Vector2Int(0, 1);
+            WorldMapAssetLifecycle.AddTile(map, c2);
+
+            // Reload from asset to get the persisted state.
+            AssetDatabase.ImportAsset(MAP_PATH, ImportAssetOptions.ForceUpdate);
+            var reloaded = this.LoadMap();
+            GrassLayer? reloadedGrass = reloaded.SurfaceLayers.OfType<GrassLayer>().FirstOrDefault();
+            Assert.IsNotNull(reloadedGrass, "GrassLayer must survive reimport.");
+
+            var variant = reloadedGrass!.Palette[0];
+            Assert.AreEqual(3, variant.densityTiles.Length,
+                "After AddTile, variant must have 3 densityTiles.");
+            bool hasC2 = false;
+            foreach (var e in variant.densityTiles)
+                if (e.coord == c2) { hasC2 = true; break; }
+            Assert.IsTrue(hasC2, "Third tile coord must appear in densityTiles.");
+        }
+
+        [Test]
+        public void RemoveSurfaceLayer_Grass_LeavesNoOrphanDensityTextures()
+        {
+            var map = this.LoadMap();
+
+            var c0 = new Vector2Int(0, 0);
+            var c1 = new Vector2Int(1, 0);
+            WorldMapAssetLifecycle.AddTile(map, c0);
+            WorldMapAssetLifecycle.AddTile(map, c1);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "RemoveGrass", variantCount: 2);
+
+            WorldMapAssetLifecycle.RemoveSurfaceLayer(map, grass);
+
+            AssetDatabase.ImportAsset(MAP_PATH, ImportAssetOptions.ForceUpdate);
+            var allAssets = AssetDatabase.LoadAllAssetsAtPath(MAP_PATH);
+            int texCount  = allAssets.OfType<Texture2D>().Count();
+            Assert.AreEqual(0, texCount,
+                $"After RemoveSurfaceLayer, zero Texture2D sub-assets must remain, found {texCount}.");
+        }
+
+        [Test]
+        public void RemoveTile_RemovesVariantDensityTextureForThatCoord()
+        {
+            var map = this.LoadMap();
+
+            var c0 = new Vector2Int(0, 0);
+            var c1 = new Vector2Int(1, 0);
+            WorldMapAssetLifecycle.AddTile(map, c0);
+            WorldMapAssetLifecycle.AddTile(map, c1);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "TileRemoveGrass", variantCount: 1);
+
+            // Should have 2 density textures before removal.
+            Assert.AreEqual(2, grass.Palette[0].densityTiles.Length, "Pre-condition: 2 density tiles.");
+
+            WorldMapAssetLifecycle.RemoveTile(map, c1);
+
+            AssetDatabase.ImportAsset(MAP_PATH, ImportAssetOptions.ForceUpdate);
+            var reloaded = this.LoadMap();
+            GrassLayer? rg = reloaded.SurfaceLayers.OfType<GrassLayer>().FirstOrDefault();
+            Assert.IsNotNull(rg);
+            Assert.AreEqual(1, rg!.Palette[0].densityTiles.Length,
+                "After RemoveTile, variant must have 1 density tile remaining.");
+            Assert.AreEqual(c0, rg.Palette[0].densityTiles[0].coord,
+                "Remaining density tile must be coord c0.");
+
+            // No orphan Texture2D for the removed tile.
+            var allAssets = AssetDatabase.LoadAllAssetsAtPath(MAP_PATH);
+            int texCount  = allAssets.OfType<Texture2D>().Count();
+            Assert.AreEqual(1, texCount,
+                $"Only 1 Texture2D (c0's density) must remain, found {texCount}.");
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static Mesh MakeMesh()

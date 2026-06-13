@@ -35,23 +35,45 @@ namespace WorldPainter.Editor
     {
         public static void Run(in BrushToolContext ctx, int mode)
         {
-            // Target = the active GrassLayer variant's density map (unified SurfaceLayers) if one is
-            // selected, else the legacy DensityScatterLayer's density map.
+            // Per-tile path: when a GrassLayer variant is active, resolve the density target
+            // from the tile currently under the brush (ctx.Tile.tileCoord).
+            if (WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow)
+            {
+                var tileDensityTex = BrushToolTargets.ResolveGrassVariantDensityForTile(
+                    ctx.Painter, ctx.Tile.tileCoord);
+                if (tileDensityTex == null) return; // no texture for this tile — skip
+
+                var dRT = ctx.Tool.GetOrCreateDensityRT(tileDensityTex, ctx.Tile.tileCoord);
+                if (dRT == null) return;
+
+                int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
+                ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+                ctx.Compute.SetTexture(k, "_DensityRT", dRT);
+                ctx.Compute.SetInt("_DensityMode", mode);
+                ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
+
+                // Queue throttled async writeback to this tile's density texture.
+                ctx.Tool.densityEncoder.RequestAsync(tileDensityTex, dRT);
+                return;
+            }
+
+            // Legacy path: DensityScatterLayer global density map (single texture, no tile split).
             var target = BrushToolTargets.ResolveDensityTarget(ctx.Painter);
             if (target == null) return;
 
-            var dRT = ctx.Tool.GetOrCreateDensityRT(target);
-            if (dRT == null) return;
+            var legacyRT = ctx.Tool.GetOrCreateDensityRT(target, null);
+            if (legacyRT == null) return;
 
-            int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
-            ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
-            ctx.Compute.SetTexture(k, "_DensityRT", dRT);
-            ctx.Compute.SetInt("_DensityMode", mode);
-            ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
+            {
+                int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
+                ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+                ctx.Compute.SetTexture(k, "_DensityRT", legacyRT);
+                ctx.Compute.SetInt("_DensityMode", mode);
+                ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
 
-            // Queue throttled async writeback to the density target (matches legacy dispatch).
-            if (ctx.Tool.activeDensityMap != null)
-                ctx.Tool.densityEncoder.RequestAsync(ctx.Tool.activeDensityMap, dRT);
+                // Queue throttled async writeback to the legacy density target.
+                ctx.Tool.densityEncoder.RequestAsync(target, legacyRT);
+            }
         }
     }
 }

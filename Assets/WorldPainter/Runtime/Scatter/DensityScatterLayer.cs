@@ -87,6 +87,8 @@ namespace WorldPainter
 
         // ── IDensityPlacementSource ────────────────────────────────────────────
 
+        // Global layer: bounds are driven by terrain size when a TerrainSurfaceSampler is bound.
+        public bool UseExplicitFieldBounds => false;
         public Texture2D? DensityMap => this.densityMap;
         public int TargetInstances => this.targetInstances;
         public int Seed => this.seed;

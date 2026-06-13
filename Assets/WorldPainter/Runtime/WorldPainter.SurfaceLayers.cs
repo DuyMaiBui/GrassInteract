@@ -44,7 +44,7 @@ namespace WorldPainter
             string probeReason = "WebGL";
 #endif
 
-            Vector3 origin = this.transform.position;
+            Vector3 painterOrigin = this.transform.position;
 
             for (int i = 0; i < layers.Count; ++i)
             {
@@ -53,27 +53,58 @@ namespace WorldPainter
                 IReadOnlyList<GrassVariant> palette = grass.Palette;
                 for (int v = 0; v < palette.Count; ++v)
                 {
-                    var adapter = GrassVariantScatterLayer.Create(grass, v, palette[v].densityMap);
+                    GrassVariant variant = palette[v];
 
-                    if (!adapter.Validate(out string err))
+                    // Per-tile: build one engine per (variant, tile). Each tile gets its own
+                    // adapter at the tile center origin with that tile's density texture.
+                    bool anyTile = false;
+                    if (this.map != null)
                     {
-                        Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {err} — skipped.", this);
-                        DestroyAdapter(adapter);
-                        continue;
+                        foreach (TerrainTileAsset tile in this.map.EnumerateTiles())
+                        {
+                            Texture2D? tileTex = GrassLayer.GetTileDensity(variant, tile.tileCoord);
+                            // tileTex == null means no density painted yet → skip (valid state).
+                            if (tileTex == null) continue;
+
+                            var adapter = GrassVariantScatterLayer.Create(grass, v, tile.tileCoord, tileTex);
+
+                            if (!adapter.Validate(out string tileErr))
+                            {
+                                Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {tileErr} — skipped.", this);
+                                DestroyAdapter(adapter);
+                                continue;
+                            }
+
+                            // Per-tile origin = tile center world XZ at the painter's Y.
+                            Vector2 tileOriginXZ = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
+                            float halfTile = TerrainWorldGrid.TILE_SIZE_M * 0.5f;
+                            var tileOrigin = new Vector3(
+                                tileOriginXZ.x + halfTile,
+                                painterOrigin.y,
+                                tileOriginXZ.y + halfTile);
+
+                            ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
+                                ?? new RaycastSurfaceSampler(adapter.Placement.GroundSnapMask, tileOrigin.y);
+
+                            IGrassEngine engine = this.SelectAndBuildScatterEngine(
+                                i, adapter, tileOrigin, sampler, gpuCapable, probeReason);
+                            engine.Build(adapter, tileOrigin, this.scatterPool!, sampler);
+
+                            this.surfaceEngines.Add(engine);
+                            this.surfaceAdapters.Add(adapter);
+                            anyTile = true;
+
+                            Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name} → " +
+                                      $"tier={this.ScatterActiveTierName}.", this);
+                        }
                     }
 
-                    ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
-                        ?? new RaycastSurfaceSampler(adapter.Placement.GroundSnapMask, origin.y);
-
-                    IGrassEngine engine = this.SelectAndBuildScatterEngine(
-                        i, adapter, origin, sampler, gpuCapable, probeReason);
-                    engine.Build(adapter, origin, this.scatterPool!, sampler);
-
-                    this.surfaceEngines.Add(engine);
-                    this.surfaceAdapters.Add(adapter);
-
-                    Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name} → " +
-                              $"tier={this.ScatterActiveTierName}.", this);
+                    // Fallback: if map is null or has no tiles, use the global adapter (0-tile case).
+                    if (!anyTile && this.map == null)
+                    {
+                        // No tiles → nothing to scatter; log once and skip.
+                        Debug.Log($"[WorldPainter.SurfaceLayers] {grass.name}#{v}: no tiles — skipped.", this);
+                    }
                 }
             }
         }

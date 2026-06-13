@@ -71,11 +71,35 @@ namespace WorldPainter.Editor
             string mapPath = AssetDatabase.GetAssetPath(map);
             AssetDatabase.AddObjectToAsset(tile, mapPath);
 
-            // Allocate density channels for all existing layers.
+            // Allocate density channels for all existing scatter layers.
             foreach (var layer in map.Layers)
                 tile.AllocateDensityChannel(layer.name);
 
             map.RegisterTile(coord, tile);
+
+            // For each GrassLayer variant, create a density texture sub-asset for this new tile
+            // and append it to the variant's densityTiles array.
+            foreach (var surfaceLayer in map.SurfaceLayers)
+            {
+                if (surfaceLayer is not GrassLayer grass) continue;
+                GrassVariant[] palette = grass.EditorPalette;
+                for (int vi = 0; vi < palette.Length; ++vi)
+                {
+                    Texture2D tex = CreateDensityMap(
+                        $"{grass.name}#{vi}@{TileSubAssetName(coord)}",
+                        seedFull: false);
+                    AssetDatabase.AddObjectToAsset(tex, mapPath);
+
+                    var prevTiles = palette[vi].densityTiles ?? System.Array.Empty<TileDensityTexture>();
+                    var newTiles = new TileDensityTexture[prevTiles.Length + 1];
+                    prevTiles.CopyTo(newTiles, 0);
+                    newTiles[prevTiles.Length] = new TileDensityTexture { coord = coord, tex = tex };
+                    palette[vi].densityTiles = newTiles;
+                }
+                grass.EditorSetPalette(palette);
+                EditorUtility.SetDirty(grass);
+            }
+
             EditorUtility.SetDirty(map);
             EditorUtility.SetDirty(tile);
             AssetDatabase.SaveAssets();
@@ -92,6 +116,49 @@ namespace WorldPainter.Editor
         {
             var tile = map.GetTile(coord);
             if (tile == null) return;
+
+            string mapPath = AssetDatabase.GetAssetPath(map);
+
+            // Remove per-tile density textures for all GrassLayer variants at this coord.
+            foreach (var surfaceLayer in map.SurfaceLayers)
+            {
+                if (surfaceLayer is not GrassLayer grass) continue;
+                GrassVariant[] palette = grass.EditorPalette;
+                bool changed = false;
+                for (int vi = 0; vi < palette.Length; ++vi)
+                {
+                    var existing = palette[vi].densityTiles;
+                    if (existing == null || existing.Length == 0) continue;
+
+                    var kept = new List<TileDensityTexture>(existing.Length);
+                    foreach (var entry in existing)
+                    {
+                        if (entry.coord == coord)
+                        {
+                            if (entry.tex != null &&
+                                AssetDatabase.GetAssetPath(entry.tex) == mapPath)
+                            {
+                                AssetDatabase.RemoveObjectFromAsset(entry.tex);
+                                Object.DestroyImmediate(entry.tex, allowDestroyingAssets: true);
+                            }
+                        }
+                        else
+                        {
+                            kept.Add(entry);
+                        }
+                    }
+                    if (kept.Count != existing.Length)
+                    {
+                        palette[vi].densityTiles = kept.ToArray();
+                        changed = true;
+                    }
+                }
+                if (changed)
+                {
+                    grass.EditorSetPalette(palette);
+                    EditorUtility.SetDirty(grass);
+                }
+            }
 
             map.UnregisterTile(coord);
             AssetDatabase.RemoveObjectFromAsset(tile);
@@ -280,9 +347,11 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Appends a variant (texture + own density map sub-asset) to a <see cref="GrassLayer"/>.
-        /// <paramref name="seedFullDensity"/> fills the density map so the variant scatters across the
-        /// whole field immediately (visual verification before paint-routing exists).
+        /// Appends a variant to a <see cref="GrassLayer"/>, creating one density <see cref="Texture2D"/>
+        /// sub-asset per existing tile. <paramref name="seedFullDensity"/> fills each tile's density
+        /// texture so the variant scatters everywhere immediately (visual verification).
+        /// If the map has no tiles yet the variant is created with an empty <c>densityTiles</c> array
+        /// (valid — renders nothing until a tile exists).
         /// </summary>
         public static void AddGrassVariant(WorldMapAsset map, GrassLayer layer, string variantName,
             bool seedFullDensity = false)
@@ -290,12 +359,25 @@ namespace WorldPainter.Editor
             string mapPath = AssetDatabase.GetAssetPath(map);
             int index = layer.PaletteCount;
 
-            Texture2D density = CreateDensityMap($"{layer.name}#{index}", seedFullDensity);
-            AssetDatabase.AddObjectToAsset(density, mapPath);
+            // Build one density texture per existing tile.
+            var tileDensities = new List<TileDensityTexture>();
+            foreach (var tile in map.EnumerateTiles())
+            {
+                Texture2D tex = CreateDensityMap(
+                    $"{layer.name}#{index}@{TileSubAssetName(tile.tileCoord)}",
+                    seedFullDensity);
+                AssetDatabase.AddObjectToAsset(tex, mapPath);
+                tileDensities.Add(new TileDensityTexture { coord = tile.tileCoord, tex = tex });
+            }
 
             var variants = new List<GrassVariant>(layer.EditorPalette)
             {
-                new GrassVariant { name = variantName, texture = null, densityMap = density },
+                new GrassVariant
+                {
+                    name         = variantName,
+                    texture      = null,
+                    densityTiles = tileDensities.ToArray(),
+                },
             };
             layer.EditorSetPalette(variants.ToArray());
 
@@ -336,11 +418,15 @@ namespace WorldPainter.Editor
             {
                 foreach (var v in grass.Palette)
                 {
-                    if (v.densityMap != null &&
-                        AssetDatabase.GetAssetPath(v.densityMap) == mapPath)
+                    if (v.densityTiles == null) continue;
+                    foreach (var entry in v.densityTiles)
                     {
-                        AssetDatabase.RemoveObjectFromAsset(v.densityMap);
-                        Object.DestroyImmediate(v.densityMap, allowDestroyingAssets: true);
+                        if (entry.tex != null &&
+                            AssetDatabase.GetAssetPath(entry.tex) == mapPath)
+                        {
+                            AssetDatabase.RemoveObjectFromAsset(entry.tex);
+                            Object.DestroyImmediate(entry.tex, allowDestroyingAssets: true);
+                        }
                     }
                 }
 

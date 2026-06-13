@@ -21,10 +21,12 @@ namespace WorldPainter
         {
             Texture2D densityMap = this.source.DensityMap!;    // caller validated readable + uncompressed
 
-            // Terrain-driven bounds: when a terrain is bound, the field rect = the terrain's XZ size
-            // (origin is the terrain center, set by ScatterField). The layer's manual FieldBounds is the
-            // fallback for non-terrain (raycast) fields only.
-            Vector2 bounds = sampler is TerrainSurfaceSampler tss ? tss.TerrainSizeXZ : this.source.FieldBounds;
+            // Bounds selection: per-tile adapters set UseExplicitFieldBounds = true and own a
+            // tile-sized FieldBounds, so terrain size must not override them. For global layers the
+            // terrain-driven bounds still take priority when a TerrainSurfaceSampler is bound.
+            Vector2 bounds = this.source.UseExplicitFieldBounds
+                ? this.source.FieldBounds
+                : (sampler is TerrainSurfaceSampler tss ? tss.TerrainSizeXZ : this.source.FieldBounds);
 
             // Flat draw-order accumulation (no spatial buckets) + tracked min/max snapped Y for a cull-safe AABB.
             var matrices  = new List<Matrix4x4>(this.source.TargetInstances);
