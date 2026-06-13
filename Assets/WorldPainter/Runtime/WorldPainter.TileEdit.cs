@@ -47,6 +47,10 @@ namespace WorldPainter
             }
 
 #if UNITY_EDITOR
+            // AddTileToRender only built the new tile's TERRAIN engine. Force the edit-mode scatter
+            // to rebuild so the new tile's grass engine is also built (RebuildSurfaceLayers iterates
+            // every tile) — otherwise the new tile renders ground but no grass until a density stroke.
+            this.editScatterBuilt = false;
             UnityEditor.SceneView.RepaintAll();
 #endif
         }
@@ -76,6 +80,8 @@ namespace WorldPainter
             this.IsBuilt = this.engines.Count > 0;
 
 #if UNITY_EDITOR
+            // Rebuild edit-mode scatter so the removed tile's grass engine is disposed too.
+            this.editScatterBuilt = false;
             UnityEditor.SceneView.RepaintAll();
 #endif
         }
