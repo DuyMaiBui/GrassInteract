@@ -51,6 +51,7 @@ namespace WorldPainter
             this.StepSurfaceLayers(Time.deltaTime);
             this.SubmitSurfaceLayers(null);
             this.DrivePropLayers();
+            this.DriveSurfaceProps();
         }
 
         // ── Prop layer driving (P4) ───────────────────────────────────────────
@@ -102,6 +103,59 @@ namespace WorldPainter
 
                 // Diagnostic only — production render consumes this downstream.
                 _ = impostorCount;
+            }
+        }
+
+        /// <summary>
+        /// Drives per-prop-layer impostor LOD for unified <see cref="PropLayer"/> adapters built
+        /// in <see cref="RebuildSurfaceLayers"/>.
+        ///
+        /// Mirrors <see cref="DrivePropLayers"/> — lazily allocates one
+        /// <see cref="WorldPainterImpostorLod"/> per prop adapter and performs per-instance XZ-planar
+        /// LOD cull. Collider / tilt / indirect draws are owned by the frozen
+        /// <see cref="InstancedPropEngine.Submit"/> (fed through the adapter — no change needed here).
+        ///
+        /// NOTE (Phase 1): impostor-LOD output is diagnostic only (same as the legacy path).
+        /// Full tilt interactor driving for the unified path (which requires casting the adapter's
+        /// layer to a concrete type the engine's tilt sim knows about) is deferred to Phase 2+,
+        /// because <see cref="InstancedPropEngine"/> internally casts <see cref="ScatterLayer"/> to
+        /// <see cref="InstanceScatterLayer"/> for tilt config — the PropLayerScatterLayer does not
+        /// inherit that type. The tilt branch inside the engine gracefully no-ops when the cast
+        /// returns null, so rendering is correct; only the optional tilt-interactor feature is absent.
+        /// </summary>
+        private void DriveSurfaceProps()
+        {
+            if (this.surfacePropAdapters == null || this.surfacePropAdapters.Count == 0) return;
+
+            Camera? cam = Camera.main;
+            if (cam == null) return;
+            Vector3 cameraPos = cam.transform.position;
+
+            // Ensure enough impostor-lod slots for the unified prop adapters.
+            while (this.propImpostorLods.Count <
+                   this.scatterLayers.Count + this.surfacePropAdapters.Count)
+                this.propImpostorLods.Add(new WorldPainterImpostorLod());
+
+            for (int i = 0; i < this.surfacePropAdapters.Count; ++i)
+            {
+                var adapter  = this.surfacePropAdapters[i];
+                var authored = adapter.AuthoredInstances;
+                if (authored == null || authored.Count == 0) continue;
+
+                int lodSlot = this.scatterLayers.Count + i;
+                var lod     = this.propImpostorLods[lodSlot];
+
+                var records = authored.GetRuntimeRecords();
+                if (records.Length == 0) continue;
+
+                // Diagnostic impostor count — same as the legacy DrivePropLayers pattern.
+                int impostorCount = 0;
+                for (int j = 0; j < records.Length; ++j)
+                {
+                    if (lod.IsImpostor(records[j].position, cameraPos))
+                        ++impostorCount;
+                }
+                _ = impostorCount; // consumed downstream by InstancedPropEngine.Submit
             }
         }
 

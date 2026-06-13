@@ -26,6 +26,9 @@ namespace WorldPainter
 
             /// <summary>Density scatter: palette variants scattered by per-variant R8 density channels.</summary>
             Grass,
+
+            /// <summary>Authored instances: props placed explicitly via <see cref="AuthoredInstancesData"/>.</summary>
+            Prop,
         }
 
         [Tooltip("Display name shown in the surface-layer stack. Falls back to the asset name when empty.")]

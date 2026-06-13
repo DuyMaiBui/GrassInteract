@@ -23,6 +23,10 @@ namespace WorldPainter
         private readonly List<IGrassEngine>             surfaceEngines  = new();
         private readonly List<GrassVariantScatterLayer> surfaceAdapters = new();
 
+        // One engine + its adapter per PropLayer (layer-global, not per-tile).
+        private readonly List<IGrassEngine>            surfacePropEngines  = new();
+        private readonly List<PropLayerScatterLayer>   surfacePropAdapters = new();
+
         /// <summary>(Re)builds one frozen engine per grass-variant from <see cref="WorldMapAsset.SurfaceLayers"/>.</summary>
         internal void RebuildSurfaceLayers()
         {
@@ -48,6 +52,13 @@ namespace WorldPainter
 
             for (int i = 0; i < layers.Count; ++i)
             {
+                // Prop layers: one InstancedPropEngine per PropLayer (layer-global, not per-tile).
+                if (layers[i] is PropLayer prop)
+                {
+                    this.TryBuildPropLayerEngine(i, prop, painterOrigin);
+                    continue;
+                }
+
                 if (layers[i] is not GrassLayer grass) continue; // splat layers don't scatter
 
                 IReadOnlyList<GrassVariant> palette = grass.Palette;
@@ -105,27 +116,36 @@ namespace WorldPainter
             }
         }
 
-        /// <summary>Advances surface-layer scatter simulation.</summary>
+        /// <summary>Advances surface-layer scatter simulation (grass + props).</summary>
         internal void StepSurfaceLayers(float dt)
         {
             for (int i = 0; i < this.surfaceEngines.Count; ++i)
                 this.surfaceEngines[i].Step(dt);
+            for (int i = 0; i < this.surfacePropEngines.Count; ++i)
+                this.surfacePropEngines[i].Step(dt);
         }
 
-        /// <summary>Submits surface-layer scatter draws for this frame.</summary>
+        /// <summary>Submits surface-layer scatter draws for this frame (grass + props).</summary>
         internal void SubmitSurfaceLayers(Camera? targetCamera)
         {
-            if (this.surfaceEngines.Count == 0) return;
-
             Vector3 lodRef = targetCamera != null
                 ? targetCamera.transform.position
                 : (Camera.main != null ? Camera.main.transform.position : this.transform.position);
 
-            for (int i = 0; i < this.surfaceEngines.Count; ++i)
-                this.surfaceEngines[i].Submit(targetCamera, lodRef);
+            if (this.surfaceEngines.Count > 0)
+            {
+                for (int i = 0; i < this.surfaceEngines.Count; ++i)
+                    this.surfaceEngines[i].Submit(targetCamera, lodRef);
+            }
+
+            if (this.surfacePropEngines.Count > 0)
+            {
+                for (int i = 0; i < this.surfacePropEngines.Count; ++i)
+                    this.surfacePropEngines[i].Submit(targetCamera, lodRef);
+            }
         }
 
-        /// <summary>Disposes all surface-layer engines + their transient adapters.</summary>
+        /// <summary>Disposes all surface-layer engines + their transient adapters (grass + props).</summary>
         internal void DisposeSurfaceLayers()
         {
             for (int i = 0; i < this.surfaceEngines.Count; ++i)
@@ -135,9 +155,90 @@ namespace WorldPainter
             for (int i = 0; i < this.surfaceAdapters.Count; ++i)
                 DestroyAdapter(this.surfaceAdapters[i]);
             this.surfaceAdapters.Clear();
+
+            for (int i = 0; i < this.surfacePropEngines.Count; ++i)
+                this.surfacePropEngines[i].Dispose();
+            this.surfacePropEngines.Clear();
+
+            for (int i = 0; i < this.surfacePropAdapters.Count; ++i)
+                DestroyPropAdapter(this.surfacePropAdapters[i]);
+            this.surfacePropAdapters.Clear();
+        }
+
+        /// <summary>
+        /// Builds one <see cref="InstancedPropEngine"/> for a <see cref="PropLayer"/> via the
+        /// transient <see cref="PropLayerScatterLayer"/> adapter, mirroring the guards in the
+        /// frozen <c>TryBuildScatterInstancedPropEngine</c> (which can't accept the adapter type).
+        /// </summary>
+        private void TryBuildPropLayerEngine(int layerIndex, PropLayer prop, Vector3 origin)
+        {
+            if (this.scatterCullCompute == null)
+            {
+                Debug.LogError(
+                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
+                    "scatterCullCompute is not assigned. Skipping.", this);
+                return;
+            }
+
+            if (prop.Render.LodMeshes.Length == 0)
+            {
+                Debug.LogWarning(
+                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
+                    "LodMeshes is empty — no props will render.", this);
+                return;
+            }
+
+            Material? mat = prop.Render.Material;
+            if (mat == null)
+            {
+                Debug.LogWarning(
+                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
+                    "Material is not assigned — no props will render.", this);
+                return;
+            }
+
+            var adapter = PropLayerScatterLayer.Create(prop);
+
+            if (!adapter.Validate(out string error))
+            {
+                Debug.Log(
+                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
+                    $"{error} — skipped.", this);
+                DestroyPropAdapter(adapter);
+                return;
+            }
+
+            ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
+                ?? new RaycastSurfaceSampler(prop.Placement.GroundSnapMask, origin.y);
+
+            try
+            {
+                var engine = new InstancedPropEngine(this.scatterCullCompute, mat);
+                engine.Build(adapter, origin, this.scatterPool!, sampler);
+
+                this.surfacePropEngines.Add(engine);
+                this.surfacePropAdapters.Add(adapter);
+
+                Debug.Log(
+                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}' → InstancedPropEngine.", this);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning(
+                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}' engine threw " +
+                    $"{ex.GetType().Name}: {ex.Message}", this);
+                DestroyPropAdapter(adapter);
+            }
         }
 
         private static void DestroyAdapter(GrassVariantScatterLayer? adapter)
+        {
+            if (adapter == null) return;
+            if (Application.isPlaying) Destroy(adapter);
+            else DestroyImmediate(adapter);
+        }
+
+        private static void DestroyPropAdapter(PropLayerScatterLayer? adapter)
         {
             if (adapter == null) return;
             if (Application.isPlaying) Destroy(adapter);

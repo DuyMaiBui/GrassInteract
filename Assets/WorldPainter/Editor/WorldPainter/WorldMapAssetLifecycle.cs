@@ -446,12 +446,67 @@ namespace WorldPainter.Editor
                     }
                 }
             }
+            else if (layer is PropLayer prop)
+            {
+                // Remove companion AuthoredInstancesData sub-asset if owned by this map.
+                AuthoredInstancesData? authored = prop.AuthoredInstances;
+                if (authored != null && AssetDatabase.GetAssetPath(authored) == mapPath)
+                {
+                    AssetDatabase.RemoveObjectFromAsset(authored);
+                    Object.DestroyImmediate(authored, allowDestroyingAssets: true);
+                }
+
+                // Remove material if owned by this map.
+                Material? propMat = prop.Render.Material;
+                if (propMat != null && AssetDatabase.GetAssetPath(propMat) == mapPath)
+                {
+                    AssetDatabase.RemoveObjectFromAsset(propMat);
+                    Object.DestroyImmediate(propMat, allowDestroyingAssets: true);
+                }
+
+                // Remove LOD meshes if owned by this map.
+                foreach (var lod in prop.Render.Lods)
+                {
+                    if (lod.mesh != null && AssetDatabase.GetAssetPath(lod.mesh) == mapPath)
+                    {
+                        AssetDatabase.RemoveObjectFromAsset(lod.mesh);
+                        Object.DestroyImmediate(lod.mesh, allowDestroyingAssets: true);
+                    }
+                }
+            }
 
             map.UnregisterSurfaceLayer(layer);
             AssetDatabase.RemoveObjectFromAsset(layer);
             Object.DestroyImmediate(layer, allowDestroyingAssets: true);
             EditorUtility.SetDirty(map);
             AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Adds a <see cref="PropLayer"/> to <see cref="WorldMapAsset.SurfaceLayers"/> and creates a
+        /// companion <see cref="AuthoredInstancesData"/> sub-asset, wiring it into the layer.
+        /// Assign LOD meshes, a material, and author instance records before runtime builds the engine.
+        /// </summary>
+        public static PropLayer AddPropLayer(WorldMapAsset map, string layerName)
+        {
+            string mapPath = AssetDatabase.GetAssetPath(map);
+
+            var layer = ScriptableObject.CreateInstance<PropLayer>();
+            layer.name = $"Prop_{layerName}";
+            AssetDatabase.AddObjectToAsset(layer, mapPath);
+
+            // Create companion AuthoredInstancesData sub-asset and wire it into the layer.
+            var authoredData = ScriptableObject.CreateInstance<AuthoredInstancesData>();
+            authoredData.name = $"{layer.name}_Authored";
+            AssetDatabase.AddObjectToAsset(authoredData, mapPath);
+            layer.EditorSetAuthored(authoredData);
+
+            map.RegisterSurfaceLayer(layer);
+            EditorUtility.SetDirty(map);
+            EditorUtility.SetDirty(layer);
+            EditorUtility.SetDirty(authoredData);
+            AssetDatabase.SaveAssets();
+            return layer;
         }
 
         /// <summary>

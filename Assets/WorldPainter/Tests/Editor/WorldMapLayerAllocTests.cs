@@ -406,6 +406,65 @@ namespace WorldPainter.Tests
                 $"Only 1 Texture2D (c0's density) must remain, found {texCount}.");
         }
 
+        // ── G7 Unified PropLayer lifecycle ────────────────────────────────────
+
+        [Test]
+        public void AddPropLayer_LayerInSurfaceLayers_AuthoredDataIsSubAsset()
+        {
+            var map = this.LoadMap();
+
+            PropLayer prop = WorldMapAssetLifecycle.AddPropLayer(map, "Tree");
+
+            // PropLayer must appear in SurfaceLayers.
+            Assert.AreEqual(1, map.SurfaceLayers.Count,
+                "SurfaceLayers must have 1 entry after AddPropLayer.");
+            Assert.AreSame(prop, map.SurfaceLayers[0],
+                "SurfaceLayers[0] must be the newly created PropLayer.");
+            Assert.AreEqual(WorldPainterLayer.LayerKind.Prop, prop.Kind,
+                "PropLayer.Kind must be LayerKind.Prop.");
+
+            // AuthoredInstancesData must be a sub-asset of the map.
+            AuthoredInstancesData? authored = prop.AuthoredInstances;
+            Assert.IsNotNull(authored,
+                "PropLayer.AuthoredInstances must be set after AddPropLayer.");
+
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            Assert.AreEqual(mapPath, AssetDatabase.GetAssetPath(authored),
+                "AuthoredInstancesData must be a sub-asset of the map.");
+        }
+
+        [Test]
+        public void RemoveSurfaceLayer_Prop_LeavesNoOrphanSubAssets()
+        {
+            var map = this.LoadMap();
+
+            PropLayer prop = WorldMapAssetLifecycle.AddPropLayer(map, "Bush");
+
+            // Verify sub-assets exist before removal.
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            AssetDatabase.ImportAsset(mapPath, ImportAssetOptions.ForceUpdate);
+            var beforeAssets = AssetDatabase.LoadAllAssetsAtPath(mapPath);
+            int authoredBefore = System.Linq.Enumerable.Count(
+                beforeAssets, a => a is AuthoredInstancesData);
+            Assert.AreEqual(1, authoredBefore,
+                "Pre-condition: 1 AuthoredInstancesData sub-asset must exist before removal.");
+
+            // Remove the prop layer.
+            WorldMapAssetLifecycle.RemoveSurfaceLayer(map, prop);
+
+            // No PropLayer or AuthoredInstancesData orphans must remain.
+            AssetDatabase.ImportAsset(mapPath, ImportAssetOptions.ForceUpdate);
+            var afterAssets = AssetDatabase.LoadAllAssetsAtPath(mapPath);
+            int propCount     = System.Linq.Enumerable.Count(afterAssets, a => a is PropLayer);
+            int authoredCount = System.Linq.Enumerable.Count(afterAssets, a => a is AuthoredInstancesData);
+            Assert.AreEqual(0, propCount,
+                "Zero PropLayer sub-assets must remain after RemoveSurfaceLayer.");
+            Assert.AreEqual(0, authoredCount,
+                "Zero AuthoredInstancesData sub-assets must remain after RemoveSurfaceLayer.");
+            Assert.AreEqual(0, map.SurfaceLayers.Count,
+                "SurfaceLayers must be empty after removing the only layer.");
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static Mesh MakeMesh()
