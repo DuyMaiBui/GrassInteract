@@ -67,6 +67,12 @@ namespace WorldPainter
         // Heightmap sampler built from first valid resident tile.
         private HeightmapSurfaceSampler? scatterSampler;
 
+        /// <summary>
+        /// Exposes the map-wide heightmap sampler for editor prop-placement ground-snap.
+        /// Null until the first scatter build (or SurfaceLayers rebuild) has run.
+        /// </summary>
+        internal HeightmapSurfaceSampler? ScatterSampler => this.scatterSampler;
+
         /// <summary>Name of the last selected scatter tier (diagnostics only).</summary>
         public string ScatterActiveTierName { get; private set; } = string.Empty;
 
@@ -93,10 +99,29 @@ namespace WorldPainter
             if (this.scatterCullCompute == null)
                 this.scatterCullCompute = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
                     "Assets/WorldPainter/Shaders/GrassCull.compute");
+
             if (this.scatterIndirectMat == null)
+            {
+                // Prefer the authored asset if present (lets users tweak material settings).
                 this.scatterIndirectMat = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(
                     "Assets/WorldPainter/Materials/IndirectGrass.mat");
+            }
 #endif
+            // Final fallback (editor OR runtime): synthesize a transient material from the shader
+            // when no .mat exists. Marked HideAndDontSave so it isn't accidentally serialized
+            // into the scene from the [SerializeField] reference (which would dangle on reload).
+            if (this.scatterIndirectMat == null)
+            {
+                var shader = Shader.Find("WorldPainter/IndirectGrass");
+                if (shader != null)
+                {
+                    this.scatterIndirectMat = new Material(shader)
+                    {
+                        name      = "IndirectGrass (runtime)",
+                        hideFlags = HideFlags.HideAndDontSave,
+                    };
+                }
+            }
         }
 
         // ── Engine selection ──────────────────────────────────────────────────

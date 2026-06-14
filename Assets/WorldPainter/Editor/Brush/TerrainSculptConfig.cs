@@ -42,18 +42,13 @@ namespace WorldPainter.Editor
         /// </summary>
         public const float STROKE_STEP_M = 4f;
 
-        // ── Splat ────────────────────────────────────────────────────────────
-
-        /// <summary>Maximum number of paint layers supported (matches Phase 2 cap).</summary>
-        public const int MAX_SPLAT_LAYERS = 4;
-
         // ── Compute kernel names ─────────────────────────────────────────────
 
-        public const string KERNEL_RAISE_LOWER  = "RaiseLower";
-        public const string KERNEL_SMOOTH        = "Smooth";
+        public const string KERNEL_RAISE_LOWER    = "RaiseLower";
+        public const string KERNEL_SMOOTH         = "Smooth";
         public const string KERNEL_FLATTEN        = "Flatten";
-        public const string KERNEL_PAINT_SPLAT   = "PaintSplat";
-        public const string KERNEL_PAINT_DENSITY = "PaintDensity";
+        public const string KERNEL_PAINT_DENSITY  = "PaintDensity";
+        public const string KERNEL_PAINT_ALPHAMAP = "PaintAlphamap";
 
         // ── Compute thread group size ────────────────────────────────────────
 

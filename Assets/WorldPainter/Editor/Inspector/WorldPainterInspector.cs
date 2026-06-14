@@ -1,6 +1,5 @@
 #nullable enable
 using UnityEditor;
-using UnityEditor.EditorTools;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -51,6 +50,15 @@ namespace WorldPainter.Editor
         private WorldPainterCoachMarks?       coachMarks;
         private WorldPainterTileStrip?        tileStrip;
 
+        // ── Phase 1 — Scene-view brush driver (replaces the EditorTool) ───────
+
+        // Lifetime is the inspector's lifetime: created in CreateInspectorGUI, disposed in OnDisable.
+        // Its OnSceneGui is the SceneView.duringSceneGui subscriber.
+        private WorldPainterSculptTool? brushDriver;
+
+        // Ghost-tile click handler (Add/Remove modes — driven by WorldPainterState.TileEditMode).
+        private WorldPainterTileGhostHandler? tileGhost;
+
         // ── CreateInspectorGUI ────────────────────────────────────────────────
 
         public override VisualElement CreateInspectorGUI()
@@ -61,9 +69,30 @@ namespace WorldPainter.Editor
             WorldPainterState.ActivePainter = painter;
             WorldPainterAuthoring.ActivePainter = painter;
 
-            // Selecting a paintable layer/brush must enter paint mode: activate the sculpt
-            // EditorTool so the brush ring draws and strokes register. The tool's kernel then
-            // follows ActiveLayerKind (terrain height/splat vs scatter density/prop).
+            // Phase 1 — instantiate the brush driver and subscribe its scene-input handler to
+            // SceneView.duringSceneGui. Replaces the old EditorTool with its toolbar icon.
+            // OnSceneGui internally short-circuits when WorldPainterState.PaintModeActive is false.
+            if (this.brushDriver == null)
+            {
+                // ScriptableObject (not "new") because the type still derives from SO so Unity's
+                // script importer can find ExtensionOfNativeClass metadata. HideAndDontSave so it
+                // never accidentally serialises into the scene.
+                this.brushDriver = ScriptableObject.CreateInstance<WorldPainterSculptTool>();
+                this.brushDriver.hideFlags = HideFlags.HideAndDontSave;
+                this.brushDriver.Enable();
+                SceneView.duringSceneGui -= this.brushDriver.OnSceneGui;
+                SceneView.duringSceneGui += this.brushDriver.OnSceneGui;
+            }
+
+            // Tile ghost handler — drawn only when TileEditMode != Off; checks state internally.
+            if (this.tileGhost == null)
+            {
+                this.tileGhost = new WorldPainterTileGhostHandler();
+                SceneView.duringSceneGui -= this.tileGhost.OnSceneGui;
+                SceneView.duringSceneGui += this.tileGhost.OnSceneGui;
+            }
+
+            // Auto-enter paint mode on layer selection (replaces the old ToolManager.SetActiveTool).
             WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChanged;
             WorldPainterState.ActiveLayerChanged += this.OnActiveLayerChanged;
 
@@ -94,6 +123,16 @@ namespace WorldPainter.Editor
 
             this.perfBadge = new WorldPainterPerfBadge();
             headerRight.Add(this.perfBadge.Build(painter));
+
+            // Manual hot-rebuild — full dispose + rebuild of every tile + surface engine.
+            // Use when the render looks out of sync (e.g. after an asset import or a
+            // serialized field change that bypasses the live brush writeback path).
+            var rebuildBtn = new Button(() => RebuildPainter(painter)) { text = "↻ Rebuild World" };
+            rebuildBtn.tooltip = "Force a full rebuild of the terrain render + surface scatter engines. " +
+                                 "Use if the render looks out of sync.";
+            rebuildBtn.style.alignSelf  = Align.FlexEnd;
+            rebuildBtn.style.marginTop  = 2;
+            headerRight.Add(rebuildBtn);
 
             // Cheat-sheet button
             this.coachMarks = new WorldPainterCoachMarks();
@@ -260,6 +299,25 @@ namespace WorldPainter.Editor
         {
             WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChanged;
 
+            // Phase 1 — tear down the brush driver and its SceneView subscription.
+            if (this.brushDriver != null)
+            {
+                SceneView.duringSceneGui -= this.brushDriver.OnSceneGui;
+                this.brushDriver.Disable();
+                Object.DestroyImmediate(this.brushDriver);
+                this.brushDriver = null;
+            }
+            WorldPainterState.PaintModeActive = false;
+
+            // Tile ghost handler — drop subscription + force mode off so the next inspector
+            // open starts clean.
+            if (this.tileGhost != null)
+            {
+                SceneView.duringSceneGui -= this.tileGhost.OnSceneGui;
+                this.tileGhost = null;
+            }
+            WorldPainterState.TileEditMode = WorldPainterState.TileEditModeKind.Off;
+
             // Destroy the cached surface-layer editor to avoid leaking UnityEditor.Editor instances.
             if (this.surfaceLayerEditor != null)
             {
@@ -278,21 +336,30 @@ namespace WorldPainter.Editor
         // ── Paint-mode activation ─────────────────────────────────────────────
 
         /// <summary>
-        /// Enters/exits paint mode when the active paint layer changes. Selecting a layer
-        /// (kind != None) activates the <see cref="WorldPainterSculptTool"/> so the brush
-        /// displays and painting works; deselecting (None) restores the previous tool.
+        /// Auto-enables paint mode whenever the user selects a paintable layer; auto-disables
+        /// when the selection drops back to None. Replaces the old EditorTool activation path —
+        /// the brush driver is always subscribed to SceneView.duringSceneGui, but it
+        /// short-circuits when <see cref="WorldPainterState.PaintModeActive"/> is false.
         /// </summary>
         private void OnActiveLayerChanged(string layerId, WorldPainterState.PaintLayerKind kind)
         {
-            if (kind != WorldPainterState.PaintLayerKind.None)
-            {
-                if (ToolManager.activeToolType != typeof(WorldPainterSculptTool))
-                    ToolManager.SetActiveTool(typeof(WorldPainterSculptTool));
-            }
-            else if (ToolManager.activeToolType == typeof(WorldPainterSculptTool))
-            {
-                ToolManager.RestorePreviousTool();
-            }
+            WorldPainterState.PaintModeActive = kind != WorldPainterState.PaintLayerKind.None;
+        }
+
+        // ── Manual rebuild ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Hot rebuild: full dispose + rebuild of every tile + every surface scatter engine.
+        /// Mirrors the inline path the deleted scene overlay used; the inspector's "↻ Rebuild
+        /// World" button is the canonical entry point now.
+        /// </summary>
+        private static void RebuildPainter(WorldPainter painter)
+        {
+            if (painter == null) return;
+            painter.TryBuild();
+            painter.RebuildScatterPreview();
+            SceneView.RepaintAll();
+            Debug.Log("[WorldPainter] Manual rebuild complete.", painter);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

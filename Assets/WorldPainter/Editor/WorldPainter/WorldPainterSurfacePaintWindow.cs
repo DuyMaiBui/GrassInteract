@@ -43,10 +43,13 @@ namespace WorldPainter.Editor
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Add Splat"))   WorldMapAssetLifecycle.AddSplatLayer(map, "Ground");
                 if (GUILayout.Button("Add Grass"))   WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "Grass");
                 if (GUILayout.Button("Create Demo")) WorldMapAssetLifecycle.CreateDemoSurfaceLayers(map);
             }
+            EditorGUILayout.HelpBox(
+                "Splat painting is now driven by the WorldMap TerrainPalette: open the WorldPainter " +
+                "inspector and use the TerrainLayer palette strip in the BrushDock.",
+                MessageType.None);
             EditorGUILayout.Space();
 
             this.scroll = EditorGUILayout.BeginScrollView(this.scroll);
@@ -65,12 +68,7 @@ namespace WorldPainter.Editor
                     if (GUILayout.Button("Remove", GUILayout.Width(62f))) toRemove = sl;
                 }
 
-                if (sl is SplatLayer splat)
-                {
-                    if (GUILayout.Button("Edit TerrainLayerSet (assign albedos)"))
-                        Selection.activeObject = splat.LayerSet;
-                }
-                else if (sl is GrassLayer g)
+                if (sl is GrassLayer g)
                 {
                     bool active =
                         WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Meadow &&
@@ -94,9 +92,9 @@ namespace WorldPainter.Editor
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "Grass: click a grass layer row to select it, activate the WorldPainter sculpt tool, " +
-                "then paint (Paint adds, Erase removes); release rebuilds the scatter. " +
-                "Splat: assign albedos to a Splat layer's TerrainLayerSet, then paint with the splat tool.",
+                "Grass: click a grass layer row to select it, then paint (Paint adds, Erase removes); " +
+                "release rebuilds the scatter. " +
+                "Splat: use the BrushDock TerrainLayer palette strip in the WorldPainter inspector.",
                 MessageType.None);
         }
     }

@@ -61,7 +61,7 @@ namespace WorldPainter.Editor
             // For splat: reset the active channel so the stack shows albedo-slot sub-rows but
             // no specific channel is active until the user clicks one.
             if (layer.Kind == WorldPainterLayer.LayerKind.Splat)
-                WorldPainterState.ActiveSplatChannel = -1;
+                // (Phase 3 cleanup — ActiveSplatChannel removed.)
 
             // Clear the legacy index and biome selection.
             WorldPainterState.ActiveLayerIndex = -1;

@@ -70,10 +70,8 @@ namespace WorldPainter
             hit.Normal = this.ComputeNormal(tile, worldX, worldZ, worldY);
             hit.SlopeDeg = Vector3.Angle(hit.Normal, Vector3.up);
 
-            // Splat weights from RGBA32 Phase 0 data (4 layers max).
-            hit.SplatWeights = tile.IsSplatValid
-                ? SampleSplat(tile, worldX, worldZ)
-                : null;
+            // (Phase 3 cleanup — SampleSplat removed alongside tile.splatData; SplatWeights stays null.)
+            hit.SplatWeights = null;
 
             return true;
         }
@@ -103,26 +101,5 @@ namespace WorldPainter
             return fallback;
         }
 
-        // ── Splat sampling ────────────────────────────────────────────────────
-
-        private static float[] SampleSplat(TerrainTileAsset tile, float wx, float wz)
-        {
-            // Nearest-neighbour read from RGBA32 splatData (Phase 0 channel SSOT).
-            Vector2 origin = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
-            float u = (wx - origin.x) / TerrainWorldGrid.TILE_SIZE_M;
-            float v = (wz - origin.y) / TerrainWorldGrid.TILE_SIZE_M;
-            u = Mathf.Clamp01(u);
-            v = Mathf.Clamp01(v);
-
-            int sx = Mathf.Clamp(Mathf.FloorToInt(u * tile.splatRes), 0, tile.splatRes - 1);
-            int sz = Mathf.Clamp(Mathf.FloorToInt(v * tile.splatRes), 0, tile.splatRes - 1);
-            int idx = (sz * tile.splatRes + sx) * 4; // RGBA32
-
-            float r = tile.splatData[idx]     / 255f;
-            float g = tile.splatData[idx + 1] / 255f;
-            float b = tile.splatData[idx + 2] / 255f;
-            float a = tile.splatData[idx + 3] / 255f;
-            return new[] { r, g, b, a };
-        }
     }
 }

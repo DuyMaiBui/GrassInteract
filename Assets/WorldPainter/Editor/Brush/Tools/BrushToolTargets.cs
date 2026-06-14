@@ -65,5 +65,36 @@ namespace WorldPainter.Editor
 
             return null;
         }
+
+        /// <summary>
+        /// Phase 2b: resolves the per-tile alphamap that owns the active palette layer for
+        /// painting/erasing. Returns the tuple (texture, channel) where channel ∈ [0,3] is
+        /// the RGBA index within the alphamap; null when no palette layer is selected, the
+        /// painter has no map, or the tile lacks the necessary alphamap slot.
+        /// </summary>
+        public static (Texture2D Texture, int AlphamapIndex, int Channel)? ResolveActiveAlphamap(
+            WorldPainter painter, Vector2Int coord)
+        {
+            int paletteIndex = WorldPainterState.ActivePaletteIndex;
+            if (paletteIndex < 0) return null;
+
+            WorldMapAsset? map = painter.Map;
+            if (map == null) return null;
+
+            // Guard against the palette shrinking after a stroke started.
+            if (paletteIndex >= map.TerrainPalette.Count) return null;
+
+            TerrainTileAsset? tile = map.GetTile(coord);
+            if (tile == null) return null;
+
+            int alphamapIndex = paletteIndex / 4;
+            int channel       = paletteIndex % 4;
+            if (alphamapIndex >= tile.AlphamapCount) return null;
+
+            Texture2D? tex = tile.Alphamaps[alphamapIndex];
+            if (tex == null) return null;
+
+            return (tex, alphamapIndex, channel);
+        }
     }
 }

@@ -10,8 +10,8 @@
 #pragma kernel RaiseLower
 #pragma kernel Smooth
 #pragma kernel Flatten
-#pragma kernel PaintSplat
 #pragma kernel PaintDensity
+#pragma kernel PaintAlphamap
 
 #include "BrushMask.hlsl"
 
@@ -19,9 +19,6 @@
 
 /// Height working texture (RFloat, read+write). Normalized [0,1].
 RWTexture2D<float>  _HeightRT;
-
-/// Splat working texture (RGBA float, read+write). Each channel = layer weight [0,1].
-RWTexture2D<float4> _SplatRT;
 
 /// Brush center in tile UV space [0,1].
 float2 _BrushCenterUV;
@@ -48,13 +45,19 @@ float _RaiseSign;
 /// Target normalized height for Flatten kernel.
 float _FlattenTarget;
 
-// ── PaintSplat parameters ────────────────────────────────────────────────────
+// ── PaintAlphamap parameters (TerrainPalette path) ───────────────────────────
 
-/// Layer index [0,3] to paint.
-int _SplatLayer;
+/// Per-tile alphamap working RT (RGBA float, read+write) — channels carry palette weights.
+/// Caller binds the alphamap (k = ActivePaletteIndex / 4); the kernel writes channel
+/// (ActivePaletteIndex % 4) and proportionally rebalances the other channels so the
+/// per-texel weights stay ≤ 1 (paint mode).
+RWTexture2D<float4> _AlphamapRT;
 
-/// Splat paint mode: 0 = Paint (add + renormalize), 1 = Erase (subtract from active channel).
-int _SplatMode;
+/// Channel [0,3] within _AlphamapRT to paint (= ActivePaletteIndex % 4).
+int _AlphamapChannel;
+
+/// Alphamap paint mode: 0 = Paint (add + renormalize), 1 = Erase (subtract from active channel).
+int _AlphamapMode;
 
 // ── PaintDensity parameters ───────────────────────────────────────────────────
 
@@ -149,70 +152,6 @@ void Flatten(uint3 id : SV_DispatchThreadID)
     _HeightRT[id.xy] = lerp(cur, _FlattenTarget, _Strength * weight);
 }
 
-// ── PaintSplat kernel ──────────────────────────────────────────────────────────
-// Paints _SplatLayer weight within the brush radius using BrushMask.hlsl weight.
-// After adding to the active channel, all 4 channels are renormalized so that
-// the sum stays ≤ 1 (blend normalization).  The inactive channels are scaled
-// down proportionally so painting layer B reduces overlapping A weight.
-
-[numthreads(8, 8, 1)]
-void PaintSplat(uint3 id : SV_DispatchThreadID)
-{
-    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
-
-    float2 uv     = TexelToUV(id.xy);
-    float  weight = TexelWeight(uv);
-    if (weight <= 0.0f) return;
-
-    float4 splat = _SplatRT[id.xy];
-    float  paint = _Strength * weight;
-
-    float4 target = splat;
-
-    // Erase mode: subtract from the active channel only (no renormalization).
-    if (_SplatMode == 1)
-    {
-        if (_SplatLayer == 0) target.x = saturate(target.x - paint);
-        if (_SplatLayer == 1) target.y = saturate(target.y - paint);
-        if (_SplatLayer == 2) target.z = saturate(target.z - paint);
-        if (_SplatLayer == 3) target.w = saturate(target.w - paint);
-        _SplatRT[id.xy] = target;
-        return;
-    }
-
-    // Paint mode: accumulate into the active layer channel (clamped to 1).
-    if (_SplatLayer == 0) target.x = saturate(target.x + paint);
-    if (_SplatLayer == 1) target.y = saturate(target.y + paint);
-    if (_SplatLayer == 2) target.z = saturate(target.z + paint);
-    if (_SplatLayer == 3) target.w = saturate(target.w + paint);
-
-    // Renormalize: if the total exceeds 1, scale down non-active channels
-    // proportionally so the sum is clamped to 1.
-    float total = target.x + target.y + target.z + target.w;
-    if (total > 1.0f)
-    {
-        // Determine active channel value.
-        float activeVal = 0.0f;
-        if (_SplatLayer == 0) activeVal = target.x;
-        if (_SplatLayer == 1) activeVal = target.y;
-        if (_SplatLayer == 2) activeVal = target.z;
-        if (_SplatLayer == 3) activeVal = target.w;
-
-        // Budget available for non-active channels.
-        float budget   = saturate(1.0f - activeVal);
-        float otherSum = total - activeVal;
-
-        float scale = (otherSum > 1e-6f) ? (budget / otherSum) : 0.0f;
-
-        if (_SplatLayer != 0) target.x *= scale;
-        if (_SplatLayer != 1) target.y *= scale;
-        if (_SplatLayer != 2) target.z *= scale;
-        if (_SplatLayer != 3) target.w *= scale;
-    }
-
-    _SplatRT[id.xy] = target;
-}
-
 // ── PaintDensity kernel ────────────────────────────────────────────────────────
 // Folds DensityPaintGPU paint/erase/smooth math over BrushMask.hlsl weight.
 // Mirrors the three modes from the legacy shader path so DensityBrushMathTests
@@ -262,4 +201,71 @@ void PaintDensity(uint3 id : SV_DispatchThreadID)
         float avg = (cnt > 0.0f) ? (sum / cnt) : cur;
         _DensityRT[id.xy] = lerp(cur, avg, delta);
     }
+}
+
+// ── PaintAlphamap kernel ──────────────────────────────────────────────────────
+// Phase 2b: writes the per-tile alphamap that owns the active TerrainPalette index.
+// Mirrors the PaintSplat math (paint = accumulate + renormalize, erase = subtract)
+// but on the channel selected by _AlphamapChannel instead of the fixed RGBA-to-layer
+// SSOT. The C# caller picks the right alphamap RT (k = paletteIndex / 4) and channel
+// (paletteIndex % 4); the kernel itself is identical for all four channels.
+//
+// Note: when the palette has more than 4 entries, every active palette layer lives on
+// some alphamap. Painting touches ONLY the alphamap that owns the active layer; weights
+// on the OTHER alphamaps are not normalised against this one (intentional — Unity-Terrain
+// behaviour). The shader-side blend in TerrainPalette.hlsl handles cross-alphamap
+// normalisation by dividing by the sum of all sampled weights.
+
+[numthreads(8, 8, 1)]
+void PaintAlphamap(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _RTRes || (int)id.y >= _RTRes) return;
+
+    float2 uv     = TexelToUV(id.xy);
+    float  weight = TexelWeight(uv);
+    if (weight <= 0.0f) return;
+
+    float4 alphas = _AlphamapRT[id.xy];
+    float  paint  = _Strength * weight;
+    float4 target = alphas;
+
+    // Erase: subtract from the active channel; other channels untouched.
+    if (_AlphamapMode == 1)
+    {
+        if (_AlphamapChannel == 0) target.x = saturate(target.x - paint);
+        if (_AlphamapChannel == 1) target.y = saturate(target.y - paint);
+        if (_AlphamapChannel == 2) target.z = saturate(target.z - paint);
+        if (_AlphamapChannel == 3) target.w = saturate(target.w - paint);
+        _AlphamapRT[id.xy] = target;
+        return;
+    }
+
+    // Paint: accumulate into the active channel.
+    if (_AlphamapChannel == 0) target.x = saturate(target.x + paint);
+    if (_AlphamapChannel == 1) target.y = saturate(target.y + paint);
+    if (_AlphamapChannel == 2) target.z = saturate(target.z + paint);
+    if (_AlphamapChannel == 3) target.w = saturate(target.w + paint);
+
+    // Renormalise: when paint pushes the total above 1, scale the OTHER channels down
+    // proportionally so the sum stays ≤ 1. Active channel's new value is preserved.
+    float total = target.x + target.y + target.z + target.w;
+    if (total > 1.0f)
+    {
+        float activeVal = 0.0f;
+        if (_AlphamapChannel == 0) activeVal = target.x;
+        if (_AlphamapChannel == 1) activeVal = target.y;
+        if (_AlphamapChannel == 2) activeVal = target.z;
+        if (_AlphamapChannel == 3) activeVal = target.w;
+
+        float budget   = saturate(1.0f - activeVal);
+        float otherSum = total - activeVal;
+        float scale    = (otherSum > 1e-6f) ? (budget / otherSum) : 0.0f;
+
+        if (_AlphamapChannel != 0) target.x *= scale;
+        if (_AlphamapChannel != 1) target.y *= scale;
+        if (_AlphamapChannel != 2) target.z *= scale;
+        if (_AlphamapChannel != 3) target.w *= scale;
+    }
+
+    _AlphamapRT[id.xy] = target;
 }

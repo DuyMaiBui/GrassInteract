@@ -173,16 +173,12 @@ namespace WorldPainter.Editor
             dst.heightRes = src.heightRes;
             dst.minHeight = src.minHeight;
             dst.maxHeight = src.maxHeight;
-            dst.splatRes  = src.splatRes;
 
             // Deep-copy byte arrays.
             dst.heightData = src.heightData != null
                 ? (byte[])src.heightData.Clone()
                 : Array.Empty<byte>();
-
-            dst.splatData = src.splatData != null
-                ? (byte[])src.splatData.Clone()
-                : Array.Empty<byte>();
+            // (Phase 3 cleanup — splatData copy removed; per-tile palette weights live in alphamaps[].)
 
             // Deep-copy density channels via JsonUtility round-trip (safe for plain-data structs).
             // We cannot call AllocateDensityChannel on dst because it's internal to lifecycle.

@@ -116,17 +116,20 @@ namespace WorldPainter.Editor
 
             // WorldPainter.BuildOneTileAsset silently skips it — the tile never renders.
 
-            // splatData is left empty (optional in TerrainTileGpuResources.Upload; lazily
-
-            // allocated by the splat brush on first paint).
-
             tile.heightData = new byte[tile.ExpectedHeightBytes];
+            // (Phase 3 cleanup — splatData seeding removed; per-tile palette weights live in alphamaps[].)
 
             string mapPath = AssetDatabase.GetAssetPath(map);
 
             AssetDatabase.AddObjectToAsset(tile, mapPath);
 
             map.RegisterTile(coord, tile);
+
+            // Phase-1 alphamaps — one RGBA32 sub-asset per ceil(palette.Count / 4). First
+            // alphamap is seeded full-R so palette[0] paints the whole tile by default;
+            // subsequent alphamaps and channels start at zero. Called after the tile is
+            // attached so the new sub-assets nest correctly under mapPath.
+            AllocateAndSeedTileAlphamaps(map, tile, mapPath);
 
             // For each GrassLayer, create a density texture sub-asset for this new tile
 
@@ -170,6 +173,124 @@ namespace WorldPainter.Editor
 
         }
 
+        // ── Phase 1: terrain-layer palette + per-tile alphamap lifecycle ──────────
+
+        /// <summary>Default resolution for newly-created per-tile alphamap textures.</summary>
+        internal const int DEFAULT_ALPHAMAP_RES = 512;
+
+        /// <summary>
+        /// Appends <paramref name="terrainLayer"/> to <c>map.TerrainPalette</c> and grows EVERY
+        /// existing tile's <c>alphamaps[]</c> if the new palette count crosses a multiple of 4
+        /// (an extra RGBA32 sub-asset is needed). Returns the new palette index.
+        /// </summary>
+        public static int AddTerrainLayer(WorldMapAsset map, TerrainLayer terrainLayer)
+        {
+            if (map == null || terrainLayer == null) return -1;
+
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            int    prevCount    = map.TerrainPalette.Count;
+            int    prevAlphamaps = Mathf.CeilToInt(prevCount / 4f);
+
+            int newIndex = map.EditorAppendTerrainLayer(terrainLayer);
+            if (newIndex < 0) return -1;
+
+            int newAlphamaps = Mathf.CeilToInt(map.TerrainPalette.Count / 4f);
+
+            // Crossed a 4-boundary → every tile needs one MORE alphamap sub-asset. Index 0
+            // of the new alphamap is the new palette layer's channel (since it's the first
+            // entry in the new alphamap group), but we seed it ZERO — the existing
+            // alphamaps[0] keeps full-R weight so the world doesn't suddenly recolour.
+            if (newAlphamaps > prevAlphamaps)
+            {
+                foreach (var coord in map.EnumerateTileCoords())
+                {
+                    var tile = map.GetTile(coord);
+                    if (tile == null) continue;
+                    GrowTileAlphamaps(tile, newAlphamaps, mapPath);
+                    EditorUtility.SetDirty(tile);
+                }
+            }
+
+            EditorUtility.SetDirty(map);
+            AssetDatabase.SaveAssets();
+            return newIndex;
+        }
+
+        /// <summary>
+        /// Removes the TerrainLayer at <paramref name="index"/> from the palette. Existing
+        /// tile alphamaps are NOT trimmed — the channel is simply ignored by the shader (cheap
+        /// + non-destructive in case the user re-adds a layer later).
+        /// </summary>
+        public static void RemoveTerrainLayer(WorldMapAsset map, int index)
+        {
+            if (map == null) return;
+            map.EditorRemoveTerrainLayerAt(index);
+            EditorUtility.SetDirty(map);
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Called from <see cref="AddTile"/>. Creates <c>map.AlphamapCountForPalette</c>
+        /// RGBA32 sub-assets, seeds alphamap 0 to (R=255, 0, 0, 0) so palette[0] paints
+        /// fully by default. No-op when the palette is empty.
+        /// </summary>
+        private static void AllocateAndSeedTileAlphamaps(WorldMapAsset map, TerrainTileAsset tile, string mapPath)
+        {
+            int needed = map.AlphamapCountForPalette;
+            if (needed <= 0) { tile.EditorSetAlphamaps(System.Array.Empty<Texture2D>()); return; }
+
+            int res = DEFAULT_ALPHAMAP_RES;
+            var maps = new Texture2D[needed];
+            for (int k = 0; k < needed; k++)
+            {
+                bool seedFullR = k == 0; // first alphamap → palette[0] full weight default.
+                maps[k] = CreateBlankAlphamap($"{tile.name}_Alphamap{k}", res,
+                    seedFullR ? new Color32(255, 0, 0, 0) : new Color32(0, 0, 0, 0));
+                AssetDatabase.AddObjectToAsset(maps[k], mapPath);
+            }
+            tile.EditorSetAlphamaps(maps);
+        }
+
+        /// <summary>
+        /// Grows a tile's alphamap array to <paramref name="targetCount"/>. Existing entries
+        /// are preserved verbatim. New entries are blank (channel weights all zero), so a
+        /// palette grow does NOT change the rendered terrain — only adds capacity.
+        /// </summary>
+        private static void GrowTileAlphamaps(TerrainTileAsset tile, int targetCount, string mapPath)
+        {
+            var prev = tile.EditorAlphamaps ?? System.Array.Empty<Texture2D>();
+            if (prev.Length >= targetCount) return;
+
+            int res = DEFAULT_ALPHAMAP_RES;
+            var next = new Texture2D[targetCount];
+            System.Array.Copy(prev, next, prev.Length);
+            for (int k = prev.Length; k < targetCount; k++)
+            {
+                next[k] = CreateBlankAlphamap($"{tile.name}_Alphamap{k}", res, new Color32(0, 0, 0, 0));
+                AssetDatabase.AddObjectToAsset(next[k], mapPath);
+            }
+            tile.EditorSetAlphamaps(next);
+        }
+
+        /// <summary>
+        /// Builds a fresh RGBA32 alphamap texture filled with <paramref name="fill"/>. Tagged
+        /// linear because the weights are NOT colour data — they're per-layer mix coefficients.
+        /// </summary>
+        private static Texture2D CreateBlankAlphamap(string texName, int size, Color32 fill)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, mipChain: false, linear: true)
+            {
+                name       = texName,
+                wrapMode   = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            var pixels = new Color32[size * size];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = fill;
+            tex.SetPixels32(pixels);
+            tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            return tex;
+        }
+
         /// <summary>
 
         /// Removes the <see cref="TerrainTileAsset"/> at <paramref name="coord"/> from <paramref name="map"/>.
@@ -189,6 +310,22 @@ namespace WorldPainter.Editor
             if (tile == null) return;
 
             string mapPath = AssetDatabase.GetAssetPath(map);
+
+            // Remove per-tile alphamap textures (palette weights) before destroying the parent.
+
+            var tileAlphas = tile.EditorAlphamaps;
+            if (tileAlphas != null)
+            {
+                foreach (var alpha in tileAlphas)
+                {
+                    if (alpha != null && AssetDatabase.GetAssetPath(alpha) == mapPath)
+                    {
+                        AssetDatabase.RemoveObjectFromAsset(alpha);
+                        Object.DestroyImmediate(alpha, allowDestroyingAssets: true);
+                    }
+                }
+                tile.EditorSetAlphamaps(System.Array.Empty<Texture2D>());
+            }
 
             // Remove per-tile density textures for all GrassLayers at this coord.
 
@@ -264,65 +401,11 @@ namespace WorldPainter.Editor
 
         }
 
-        // ── Surface layer lifecycle (unified SplatLayer + GrassLayer) ─────────
+        // ── Surface layer lifecycle (Phase 3 cleanup — SplatLayer removed) ─────
 
-        /// <summary>
-
-        /// Adds a <see cref="SplatLayer"/> to <see cref="WorldMapAsset.SurfaceLayers"/> and creates
-
-        /// its <see cref="TerrainLayerSet"/> palette sub-asset, wiring it to BOTH the layer and the
-
-        /// map-level splatSet that <c>GpuTerrainEngine</c> binds. Assign albedo textures on the set.
-
-        /// </summary>
-
-        public static SplatLayer AddSplatLayer(WorldMapAsset map, string layerName)
-
-        {
-
-            string mapPath = AssetDatabase.GetAssetPath(map);
-
-            var layer = ScriptableObject.CreateInstance<SplatLayer>();
-
-            layer.name = $"Splat_{layerName}";
-
-            AssetDatabase.AddObjectToAsset(layer, mapPath);
-
-            var set = ScriptableObject.CreateInstance<TerrainLayerSet>();
-
-            set.name = $"{layer.name}_LayerSet";
-
-            AssetDatabase.AddObjectToAsset(set, mapPath);
-
-            layer.SetLayerSet(set);
-
-            map.SetSplatSet(set);
-
-            // Create a blank albedo texture as a sub-asset and assign it into the set
-
-            // so BuildArray() returns a valid Texture2DArray immediately (not null).
-
-            // Albedo is sRGB (linear: false). Normal maps are intentionally NOT added here.
-
-            Texture2D albedo = CreateBlankAlbedo($"{layer.name}_Albedo0");
-
-            AssetDatabase.AddObjectToAsset(albedo, mapPath);
-
-            AssignLayerAlbedos(set, albedo);
-
-            map.RegisterSurfaceLayer(layer);
-
-            EditorUtility.SetDirty(map);
-
-            EditorUtility.SetDirty(layer);
-
-            EditorUtility.SetDirty(set);
-
-            AssetDatabase.SaveAssets();
-
-            return layer;
-
-        }
+        // (Phase 3 cleanup — AddSplatLayer / CreateBlankAlbedo / AssignLayerAlbedos /
+        //  DEFAULT_ALBEDO_TINTS / DEFAULT_ALBEDO_RES / IsValidAlbedoRes removed.
+        //  WorldMap.TerrainPalette + AddTerrainLayer replace the entire codepath.)
 
         /// <summary>
 
@@ -414,45 +497,7 @@ namespace WorldPainter.Editor
 
             string mapPath = AssetDatabase.GetAssetPath(map);
 
-            if (layer is SplatLayer splat)
-
-            {
-
-                TerrainLayerSet? set = splat.LayerSet;
-
-                if (set != null && AssetDatabase.GetAssetPath(set) == mapPath)
-
-                {
-
-                    // Remove albedo sub-assets that are owned by this map before destroying the set.
-
-                    foreach (Texture2D albedo in set.EditorAlbedos)
-
-                    {
-
-                        if (albedo != null && AssetDatabase.GetAssetPath(albedo) == mapPath)
-
-                        {
-
-                            AssetDatabase.RemoveObjectFromAsset(albedo);
-
-                            Object.DestroyImmediate(albedo, allowDestroyingAssets: true);
-
-                        }
-
-                    }
-
-                    if (map.SplatSet == set) map.SetSplatSet(null);
-
-                    AssetDatabase.RemoveObjectFromAsset(set);
-
-                    Object.DestroyImmediate(set, allowDestroyingAssets: true);
-
-                }
-
-            }
-
-            else if (layer is GrassLayer grass)
+            if (layer is GrassLayer grass)
 
             {
 
@@ -600,6 +645,16 @@ namespace WorldPainter.Editor
 
             AssetDatabase.AddObjectToAsset(layer, mapPath);
 
+            // Create a default material so InstancedPropEngine actually renders. Without one,
+            // TryBuildPropLayerEngine bails with "Material is not assigned — no props will render".
+
+            Material? propMat = CreatePropMaterial(layer.name);
+            if (propMat != null)
+            {
+                AssetDatabase.AddObjectToAsset(propMat, mapPath);
+                layer.EditorSetMaterial(propMat);
+            }
+
             // Create companion AuthoredInstancesData sub-asset and wire it into the layer.
 
             var authoredData = ScriptableObject.CreateInstance<AuthoredInstancesData>();
@@ -617,11 +672,29 @@ namespace WorldPainter.Editor
             EditorUtility.SetDirty(layer);
 
             EditorUtility.SetDirty(authoredData);
+            if (propMat != null) EditorUtility.SetDirty(propMat);
 
             AssetDatabase.SaveAssets();
 
             return layer;
 
+        }
+
+        /// <summary>
+        /// Builds a default indirect-instanced material for a PropLayer. Reuses the same
+        /// "WorldPainter/IndirectGrass" shader that grass uses (it consumes the BladeInstance
+        /// StructuredBuffer that InstancedPropEngine binds). Marked as a sub-asset of the map.
+        /// </summary>
+        private static Material? CreatePropMaterial(string layerName)
+        {
+            var shader = Shader.Find("WorldPainter/IndirectGrass");
+            if (shader == null)
+            {
+                Debug.LogWarning("[WorldPainter] WorldPainter/IndirectGrass shader missing — " +
+                                 "PropLayer material left unassigned. Assign one manually.");
+                return null;
+            }
+            return new Material(shader) { name = $"{layerName}_Material" };
         }
 
         /// <summary>
@@ -658,17 +731,17 @@ namespace WorldPainter.Editor
 
         /// <summary>
 
-        /// One-click demo: a splat layer (assign albedos to its TerrainLayerSet) + a grass layer with
+        /// One-click demo: a grass layer with procedural blades. Renders immediately on a map
 
-        /// procedural blades. Renders immediately on a map that has tiles.
+        /// that has tiles. (Phase 3 cleanup — splat seeding removed; add ground textures via the
+
+        /// BrushDock TerrainPalette strip instead.)
 
         /// </summary>
 
         public static void CreateDemoSurfaceLayers(WorldMapAsset map)
 
         {
-
-            AddSplatLayer(map, "Ground");
 
             AddGrassLayerWithBlades(map, "Meadow");
 
@@ -746,75 +819,7 @@ namespace WorldPainter.Editor
 
         }
 
-        // ── Albedo sub-asset factory ──────────────────────────────────────────
-
-        /// <summary>
-
-        /// Creates a 4×4 white, sRGB (non-linear) blank albedo texture for a new splat layer.
-
-        /// Small size keeps asset overhead negligible; the user replaces it with their art.
-
-        /// RGBA32 ensures <c>SetPixels32</c> support and compatibility with <see cref="TerrainLayerSet.BuildArray"/>.
-
-        /// </summary>
-
-        private static Texture2D CreateBlankAlbedo(string texName)
-
-        {
-
-            const int SIZE = 4;
-
-            var tex = new Texture2D(SIZE, SIZE, TextureFormat.RGBA32, mipChain: false, linear: false)
-
-            {
-
-                name       = texName,
-
-                wrapMode   = TextureWrapMode.Repeat,
-
-                filterMode = FilterMode.Bilinear,
-
-            };
-
-            var pixels = new Color32[SIZE * SIZE];
-
-            for (int i = 0; i < pixels.Length; i++)
-
-                pixels[i] = new Color32(255, 255, 255, 255);
-
-            tex.SetPixels32(pixels);
-
-            tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
-
-            return tex;
-
-        }
-
-        /// <summary>
-
-        /// Assigns <paramref name="albedo"/> as the first entry of <see cref="TerrainLayerSet.layerAlbedos"/>
-
-        /// via <see cref="SerializedObject"/>, mirroring the <see cref="AssignDensityMap"/> pattern.
-
-        /// </summary>
-
-        private static void AssignLayerAlbedos(TerrainLayerSet set, Texture2D albedo)
-
-        {
-
-            using var so = new SerializedObject(set);
-
-            var prop = so.FindProperty("layerAlbedos");
-
-            if (prop == null) return;
-
-            prop.arraySize = 1;
-
-            prop.GetArrayElementAtIndex(0).objectReferenceValue = albedo;
-
-            so.ApplyModifiedPropertiesWithoutUndo();
-
-        }
+        // (Phase 3 cleanup — albedo / TerrainLayerSet factory removed.)
 
         // ── Grass material sub-asset factory ──────────────────────────────────
 

@@ -23,10 +23,13 @@ namespace WorldPainter.Editor
             new HeightFlattenTool(),
         };
 
+        // Phase 2b: TerrainPalette path (per-tile alphamaps + Unity TerrainLayer assets).
+        // The legacy SplatPaintTool/SplatEraseTool entries are still defined in
+        // SplatBrushTools.cs but are no longer wired here — they get deleted in Phase 3.
         private static readonly IBrushTool[] SplatTools =
         {
-            new SplatPaintTool(),
-            new SplatEraseTool(),
+            new TerrainLayerPaintTool(),
+            new TerrainLayerEraseTool(),
         };
 
         private static readonly IBrushTool[] DensityTools =

@@ -124,13 +124,24 @@ namespace WorldPainter.Editor
             float midScale = (scaleRange.x + scaleRange.y) * 0.5f;
             if (midScale <= 0f) midScale = 1f;
 
-            float maxSlopeDeg = 45f;
+            // ScatterPlacementConfig (consumed via GetSlopeMaskDegForPropLayer) doesn't carry a
+            // real slopeRange field — the helper falls back to (0, 45). Plumbing the sampler in
+            // Phase 5 caused slopeDeg to actually compute (it used to always be 0 because the
+            // sampler was null), so ANY non-flat brush stamp now rejected ~all jittered records
+            // except whichever happened to land on the flattest spot. That made InstancePlace
+            // look like it placed exactly one instance. Default to 90° (never reject) so the
+            // user sees every emit unless they explicitly tighten it.
+            float maxSlopeDeg = 90f;
             var slopeRange = GetSlopeMaskDegForPropLayer(propLayer);
             if (slopeRange.y > 0f) maxSlopeDeg = slopeRange.y;
 
             bool groundSnap    = propLayer.PropGroundSnap;
             bool alignToNormal = propLayer.PropAlignToNormal;
             Vector3 pivotOffset = propLayer.PropPivotOffset;
+
+            int requested  = this.DensityPerStamp;
+            int placed     = 0;
+            int slopeReject = 0;
 
             for (int i = 0; i < this.DensityPerStamp; ++i)
             {
@@ -155,7 +166,7 @@ namespace WorldPainter.Editor
                     }
                 }
 
-                if (slopeDeg > maxSlopeDeg) continue;
+                if (slopeDeg > maxSlopeDeg) { slopeReject++; continue; }
 
                 pos += rot * pivotOffset;
 
@@ -169,6 +180,13 @@ namespace WorldPainter.Editor
                     scale        = scale,
                     overrideMask = InstanceOverrideMask.None,
                 });
+                placed++;
+            }
+
+            if (placed < requested)
+            {
+                Debug.Log($"[PropStampEmitter] {propLayer.name}: stamp placed {placed}/{requested} " +
+                          $"(slope-rejected={slopeReject}). Total authored now: {authored.Count}.");
             }
         }
 
@@ -221,12 +239,11 @@ namespace WorldPainter.Editor
             foreach (var coord in coords)
                 authored.UnregisterTileBucket(coord);
 
-            // Rebuild: group working-list indices by tile coord and register contiguous ranges.
-            // Because swap-pop can interleave records from different tiles, we must do a
-            // full pass rather than assuming contiguity.
+            // Sort by tile coord first — contiguous grouping is what makes (first, count) ranges valid.
             var list = authored.WorkingList;
+            list.Sort(TileCoordComparer.Instance);
 
-            // Collect index lists per tile.
+            // Rebuild: iterate sorted list; adjacent same-coord records form a contiguous range.
             var perTile = new Dictionary<Vector2Int, (int first, int count)>();
             for (int i = 0; i < list.Count; i++)
             {
@@ -239,6 +256,20 @@ namespace WorldPainter.Editor
 
             foreach (var kv in perTile)
                 authored.RegisterTileBucket(kv.Key, kv.Value.first, kv.Value.count);
+        }
+
+        /// <summary>Stable tile-coord comparator: sorts by X then Y so same-tile records are contiguous.</summary>
+        private sealed class TileCoordComparer : IComparer<InstanceRecord>
+        {
+            public static readonly TileCoordComparer Instance = new();
+
+            public int Compare(InstanceRecord a, InstanceRecord b)
+            {
+                var ca = TerrainWorldGrid.WorldToTileCoord(a.position.x, a.position.z);
+                var cb = TerrainWorldGrid.WorldToTileCoord(b.position.x, b.position.z);
+                int cmp = ca.x.CompareTo(cb.x);
+                return cmp != 0 ? cmp : ca.y.CompareTo(cb.y);
+            }
         }
     }
 }

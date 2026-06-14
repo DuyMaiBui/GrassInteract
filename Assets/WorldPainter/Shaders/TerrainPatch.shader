@@ -6,11 +6,17 @@ Shader "WorldPainter/TerrainPatch"
         _MaxHeight ("Max Height", Float) = 512
         [NoScaleOffset] _HeightTex ("Height Texture", 2D) = "black" {}
 
-        // ── Phase 2: splat shading properties ───────────────────────────────
-        [NoScaleOffset] _SplatTex ("Splat Weights (RGBA)", 2D) = "red" {}
-        _LayerAlbedoArray ("Layer Albedo Array", 2DArray) = "" {}
-        _LayerTiling ("Layer Tiling", Float) = 8
         _NormalEpsilon ("Normal Epsilon", Float) = 0.00195
+
+        // ── TerrainPalette properties ────────────────────────────────────────
+        // These are populated by TerrainPaletteBinder (palette array) and
+        // GpuTerrainEngine (per-tile alphamaps + count). Defaults are inert so a
+        // material missing the binder simply shows the fallback colour.
+        [NoScaleOffset] _TerrainPaletteArray   ("Terrain Palette Array",  2DArray) = "" {}
+        [NoScaleOffset] _TerrainAlphamap0      ("Alphamap 0 (R=L0 G=L1 B=L2 A=L3)", 2D) = "black" {}
+        [NoScaleOffset] _TerrainAlphamap1      ("Alphamap 1 (L4..L7)", 2D) = "black" {}
+        [NoScaleOffset] _TerrainAlphamap2      ("Alphamap 2 (L8..L11)", 2D) = "black" {}
+        [NoScaleOffset] _TerrainAlphamap3      ("Alphamap 3 (L12..L15)", 2D) = "black" {}
 
         // Fallback base color used when no LayerAlbedoArray is bound.
         _BaseColor ("Base Color (Fallback)", Color) = (0.4, 0.55, 0.3, 1)
@@ -41,10 +47,12 @@ Shader "WorldPainter/TerrainPatch"
             // ── TerrainVtf (height decode + morph helpers, SSOT) ────────────
             #include "TerrainVtf.hlsl"
 
-            // ── Phase 2: splat + normal helpers ─────────────────────────────
+            // ── Normal + palette helpers ────────────────────────────────────
             // TerrainVtf.hlsl included above → DecodeHeight / SampleHeightVTF available.
             #include "TerrainNormals.hlsl"
-            #include "TerrainSplat.hlsl"
+            // Palette-driven (Unity-Terrain-style) blend with up to 16 layers
+            // across 4 alphamaps.
+            #include "TerrainPalette.hlsl"
 
             // ── Node buffer ──────────────────────────────────────────────────
             // RenderNode layout must match CdlodNode.STRIDE = 32 B EXACTLY.
@@ -77,6 +85,7 @@ Shader "WorldPainter/TerrainPatch"
                 float4 positionCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
                 float2 tileUV     : TEXCOORD1;
+                float2 worldXZ    : TEXCOORD2; // for per-layer palette UV
             };
 
             // ── Vertex shader ────────────────────────────────────────────────
@@ -120,6 +129,7 @@ Shader "WorldPainter/TerrainPatch"
                 OUT.positionCS = TransformWorldToHClip(posWS);
                 OUT.positionWS = posWS;
                 OUT.tileUV     = tileUV;
+                OUT.worldXZ    = float2(worldX, worldZ);
 
                 return OUT;
             }
@@ -131,11 +141,14 @@ Shader "WorldPainter/TerrainPatch"
                 // TerrainNormals.hlsl: DeriveNormalWS uses SampleHeightVTF + _NormalEpsilon.
                 float3 normalWS = DeriveNormalWS(IN.tileUV);
 
-                // ── Albedo: splat-blended texture array ───────────────────────
-                // TerrainSplat.hlsl: SplatBlend samples _SplatTex (RGBA weights)
-                // then blends _LayerAlbedoArray slices.
-                // SSOT channel→layer: R=0(ground) G=1(grass) B=2(rock) A=3(path).
-                float4 albedo = SplatBlend(IN.tileUV);
+                // ── Albedo: TerrainPalette-blended texture array ──────────────
+                // TerrainPalette.hlsl: BlendTerrainPalette samples N alphamaps
+                // (RGBA = 4 palette weights each) and accumulates per-layer
+                // diffuse samples scaled by the layer's tileSize/tileOffset.
+                // Phase 3 cleanup will delete the legacy SplatBlend path; for
+                // now we keep the SplatBlend call out of the active codepath
+                // so an unconfigured palette doesn't crash existing scenes.
+                float4 albedo = BlendTerrainPalette(IN.tileUV, IN.worldXZ);
 
                 // ── URP Lit output ────────────────────────────────────────────
                 InputData inputData;

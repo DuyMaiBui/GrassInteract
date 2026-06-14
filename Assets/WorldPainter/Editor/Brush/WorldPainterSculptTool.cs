@@ -2,13 +2,21 @@
 using System.Collections.Generic;
 using WorldPainter;
 using UnityEditor;
-using UnityEditor.EditorTools;
 using UnityEngine;
 
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Scene-view EditorTool for WorldPainter sculpt (Task 8).
+    /// Scene-view brush driver for WorldPainter (Phase 1 — no longer a Unity EditorTool but still
+    /// a <see cref="ScriptableObject"/> so Unity's script-import metadata stays consistent with
+    /// the type's history — switching to a plain C# class would trigger Unity's
+    /// "is missing the class attribute 'ExtensionOfNativeClass'" import error).
+    ///
+    /// Owned by <see cref="WorldPainterInspector"/>, which subscribes <see cref="OnSceneGui"/>
+    /// to <see cref="SceneView.duringSceneGui"/> while a WorldPainter is selected. The
+    /// inspector calls <see cref="Enable"/> on mount and <see cref="Disable"/> on disable.
+    ///
+    /// Instantiate with <see cref="ScriptableObject.CreateInstance{T}()"/>; never <c>new</c>.
     ///
     /// Reuses the stroke plumbing (<see cref="TileRtCache"/>,
     /// <see cref="WorldPainterStroke"/>, <see cref="TerrainSculptRtWriteback"/>)
@@ -16,7 +24,7 @@ namespace WorldPainter.Editor
     ///
     /// Spacing-stamping path: <see cref="WorldPainterStroke"/> interpolates the
     /// drag path and stamps every spacing metres.  The falloff LUT is uploaded
-    /// once on tool activate and re-uploaded whenever the CurveField changes.
+    /// once on Enable and re-uploaded whenever the CurveField changes.
     ///
     /// Stroke undo: a single Ctrl+Z reverts one full stroke per Unity Undo group.
     /// On Ctrl+Z, <see cref="Undo.undoRedoPerformed"/> fires; the handler pops the
@@ -24,14 +32,14 @@ namespace WorldPainter.Editor
     ///
     /// Stroke code is in <c>WorldPainterSculptTool.Stroke.cs</c> (partial).
     /// </summary>
-    [EditorTool("WorldPainter Sculpt")]
-    internal sealed partial class WorldPainterSculptTool : EditorTool
+    internal sealed partial class WorldPainterSculptTool : ScriptableObject
     {
         // ── Tool resources ────────────────────────────────────────────────────
 
         internal ComputeShader? brushCompute;
         internal readonly TerrainSculptRtWriteback   writeback       = new TerrainSculptRtWriteback();
         internal readonly WorldPainterDensityEncoder densityEncoder  = new WorldPainterDensityEncoder();
+        internal readonly WorldPainterAlphamapEncoder alphamapEncoder = new WorldPainterAlphamapEncoder();
         internal readonly TileRtCache                rtCache         = new TileRtCache();
         internal readonly WorldPainterStroke         stroke          = new WorldPainterStroke();
         internal readonly BrushFalloffLut            falloffLut      = new BrushFalloffLut();
@@ -67,14 +75,10 @@ namespace WorldPainter.Editor
 
         internal int undoGroupId = -1;
 
-        // ── Toolbar icon ──────────────────────────────────────────────────────
-
-        public override GUIContent toolbarIcon =>
-            EditorGUIUtility.IconContent("TerrainInspector.TerrainToolRaise");
-
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
-        public override void OnActivated()
+        /// <summary>Wires up event subscriptions + uploads the falloff LUT. Called by the inspector on mount.</summary>
+        public void Enable()
         {
             this.brushCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Assets/WorldPainter/Shaders/TerrainBrush.compute");
@@ -99,7 +103,8 @@ namespace WorldPainter.Editor
             EditorApplication.update += this.OnEditorUpdate;
         }
 
-        public override void OnWillBeDeactivated()
+        /// <summary>Unsubscribes events + tears down any in-flight stroke. Called by the inspector on disable.</summary>
+        public void Disable()
         {
             WorldPainterState.BrushFalloffDirty -= this.OnBrushFalloffDirty;
             Undo.undoRedoPerformed -= this.OnUndoRedoPerformed;
@@ -118,6 +123,7 @@ namespace WorldPainter.Editor
         {
             this.writeback.Tick();
             this.densityEncoder.Tick();
+            this.alphamapEncoder.Tick();
         }
 
         // ── LUT re-upload (finding #3) ────────────────────────────────────────
@@ -162,20 +168,24 @@ namespace WorldPainter.Editor
                 var gpu = this.FindGpu(painter, coord);
                 if (gpu == null) continue;
 
-                if (!this.rtCache.GetOrCreate(coord, gpu, out var heightRT, out var splatRT))
+                if (!this.rtCache.GetOrCreate(coord, gpu, out var heightRT))
                     continue;
 
                 // Write restored CPU bytes back to the RT and commit synchronously.
-                this.writeback.ExecuteSync(tile, gpu, heightRT, splatRT);
+                this.writeback.ExecuteSync(tile, gpu, heightRT);
                 painter.CommitHeight(coord);
             }
         }
 
         // ── Scene view GUI ────────────────────────────────────────────────────
 
-        public override void OnToolGUI(EditorWindow window)
+        /// <summary>
+        /// Subscribed to <see cref="SceneView.duringSceneGui"/> by the inspector. Bails out
+        /// when paint mode is off, no painter is bound, or the brush compute hasn't loaded.
+        /// </summary>
+        public void OnSceneGui(SceneView sceneView)
         {
-            if (window is not SceneView sceneView) return;
+            if (!WorldPainterState.PaintModeActive) return;
             if (this.brushCompute == null) return;
 
             var painter = WorldPainterState.ActivePainter;
@@ -305,11 +315,40 @@ namespace WorldPainter.Editor
             bool isPropActive = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
             bool isTransform  = WorldPainterPropTransformEdit.PropTransformModeActive;
 
+            // Build a 1-line target descriptor so the user can see WHAT will be painted.
+            // Empty layer + Height fallback is the silent-failure case we surface here.
+            var painter = WorldPainterState.ActivePainter;
+            LayerType effective = painter != null
+                ? WorldPainterState.EffectiveLayerType(painter)
+                : LayerType.Height;
+            string layerLabel = !string.IsNullOrEmpty(WorldPainterState.ActiveLayerId)
+                ? WorldPainterState.ActiveLayerId
+                : (effective == LayerType.Height ? "Height (base)" : "—");
+            bool noLayerSelected =
+                WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.None &&
+                WorldPainterState.ActiveBiomeIndex < 0 &&
+                WorldPainterState.ActiveLayerIndex < 0;
+            bool splatNoChannel =
+                WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Splat &&
+                WorldPainterState.ActivePaletteIndex < 0;
+
             Handles.BeginGUI();
-            // Taller HUD when the prop transform toggle is shown.
-            var area = new Rect(8, 8, 240, isPropActive ? 74 : 52);
+            // Taller HUD when the prop transform toggle is shown OR a warning needs space.
+            int baseHeight = (noLayerSelected || splatNoChannel) ? 72 : 64;
+            var area = new Rect(8, 8, 260, isPropActive ? baseHeight + 22 : baseHeight);
             GUILayout.BeginArea(area, GUI.skin.box);
-            GUILayout.Label("WorldPainter Sculpt", EditorStyles.boldLabel);
+            GUILayout.Label("WorldPainter Brush", EditorStyles.boldLabel);
+            GUILayout.Label($"Target: {effective}  ({layerLabel})", EditorStyles.miniLabel);
+            if (noLayerSelected)
+            {
+                var warn = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = new Color(1f, 0.7f, 0.2f) } };
+                GUILayout.Label("⚠ Select a layer in the stack to paint.", warn);
+            }
+            else if (splatNoChannel)
+            {
+                var warn = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = new Color(1f, 0.7f, 0.2f) } };
+                GUILayout.Label("⚠ Click a TerrainLayer in the BrushDock palette to paint.", warn);
+            }
             var brush = WorldPainterState.Brush;
             GUILayout.Label($"Size: {brush.size:F1}m  Strength: {brush.strength:F2}",
                 EditorStyles.miniLabel);

@@ -80,11 +80,42 @@ namespace WorldPainter
 
         // â”€â”€ Splat texture set (referenced, not nested) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-        [Tooltip("Splat texture set (TerrainLayerSet) referenced by this map. Not a sub-asset.")]
-        [SerializeField] private TerrainLayerSet? splatSet;
+        // (Phase 3 cleanup — legacy splatSet field removed. The TerrainPalette below replaces it.)
 
-        /// <summary>Splat texture set for this map (not nested as sub-asset).</summary>
-        public TerrainLayerSet? SplatSet => this.splatSet;
+        // ── Terrain layer palette (Unity TerrainLayer asset references) ──────────
+        //
+        // Unlimited Unity-Terrain-style palette of paint inks. Each entry consumes:
+        //   - palette[i].diffuseTexture for sampling at rendering time
+        //   - palette[i].tileSize / tileOffset for per-layer UV scaling
+        // Tiles allocate ceil(palette.Count / 4) per-tile alphamap textures; channel
+        // (i % 4) of alphamap (i / 4) carries layer i's weight. Replaces the legacy
+        // SplatLayer + TerrainLayerSet codepath in Phase 3 cleanup.
+
+        [Tooltip("Unity TerrainLayer palette consumed by the splat brush. Each entry's " +
+                 "diffuseTexture is sampled by the terrain shader; tileSize / tileOffset " +
+                 "drive per-layer UV scaling.")]
+        [SerializeField] private List<TerrainLayer> terrainPalette = new();
+
+        /// <summary>Read-only palette of authored Unity TerrainLayer assets.</summary>
+        public IReadOnlyList<TerrainLayer> TerrainPalette => this.terrainPalette;
+
+        /// <summary>Editor lifecycle: appends a TerrainLayer to the palette. Returns the new index.</summary>
+        internal int EditorAppendTerrainLayer(TerrainLayer layer)
+        {
+            if (layer == null) return -1;
+            this.terrainPalette.Add(layer);
+            return this.terrainPalette.Count - 1;
+        }
+
+        /// <summary>Editor lifecycle: removes a TerrainLayer by index. No-op on out-of-range.</summary>
+        internal void EditorRemoveTerrainLayerAt(int index)
+        {
+            if (index < 0 || index >= this.terrainPalette.Count) return;
+            this.terrainPalette.RemoveAt(index);
+        }
+
+        /// <summary>Number of RGBA32 alphamap textures a tile needs to cover the current palette.</summary>
+        public int AlphamapCountForPalette => Mathf.CeilToInt(this.terrainPalette.Count / 4f);
 
         // â”€â”€ ISerializationCallbackReceiver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -222,13 +253,9 @@ namespace WorldPainter
             this.surfaceLayers.Remove(layer);
         }
 
-        /// <summary>
-        /// Assigns the map-level splat texture set (the one GpuTerrainEngine binds). Called by
-        /// <see cref="WorldMapAssetLifecycle"/> when a <c>SplatLayer</c> is added/removed.
-        /// </summary>
-        internal void SetSplatSet(TerrainLayerSet? set) => this.splatSet = set;
+        // (Phase 3 cleanup — SetSplatSet removed. WorldMap.TerrainPalette is the new SSOT.)
 
-        // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private void RebuildDict()
         {

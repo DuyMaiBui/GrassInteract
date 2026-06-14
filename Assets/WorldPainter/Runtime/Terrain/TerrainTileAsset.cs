@@ -52,31 +52,39 @@ namespace WorldPainter
         /// <summary>World Y at R16 = 65535. Part of the decode formula SSOT.</summary>
         [SerializeField] public float maxHeight = 512f;
 
-        // ── Splat ──────────────────────────────────────────────────────────────
-        /// <summary>
-        /// RGBA32 splat bytes: splatRes × splatRes × 4 bytes, row-major.
-        /// Channel mapping SSOT: R=layer0, G=layer1, B=layer2, A=layer3 (see class doc).
-        /// Edit only via editor brushes — the raw array is hidden in the Inspector.
-        /// </summary>
-        [HideInInspector] [SerializeField] public byte[] splatData = System.Array.Empty<byte>();
-
-        /// <summary>Number of texels per edge in the splat map.</summary>
-        [SerializeField] public int splatRes = TerrainWorldGrid.DEFAULT_SPLAT_RES;
+        // (Phase 3 cleanup — splatData / splatRes / IsSplatValid removed. Per-tile palette
+        // weights live in the `alphamaps[]` Texture2D array below.)
 
         // ── Validation helpers ─────────────────────────────────────────────────
 
         /// <summary>Expected byte length of heightData = heightRes² × 2.</summary>
         public int ExpectedHeightBytes => this.heightRes * this.heightRes * TerrainHeightFormat.BYTES_PER_SAMPLE;
 
-        /// <summary>Expected byte length of splatData = splatRes² × 4 (RGBA32).</summary>
-        public int ExpectedSplatBytes => this.splatRes * this.splatRes * 4;
-
         /// <summary>Returns true if heightData is non-null and has the expected length.</summary>
         public bool IsHeightValid =>
             this.heightData != null && this.heightData.Length == this.ExpectedHeightBytes;
 
-        /// <summary>Returns true if splatData is non-null and has the expected length.</summary>
-        public bool IsSplatValid =>
-            this.splatData != null && this.splatData.Length == this.ExpectedSplatBytes;
+        // ── Per-tile alphamaps (TerrainLayer palette weights) ──────────────────
+        //
+        // One RGBA32 Texture2D sub-asset per 4 palette layers. alphamaps[k] holds weights
+        // for palette indices [4k .. 4k+3] on its RGBA channels respectively. The terrain
+        // shader samples these to blend palette[i].diffuseTexture into the final color.
+        // Created lazily by the editor lifecycle when the palette grows or a tile is added.
+
+        [Tooltip("Per-tile alphamap textures — one RGBA32 per 4 TerrainPalette entries.")]
+        [SerializeField] private Texture2D[] alphamaps = System.Array.Empty<Texture2D>();
+
+        /// <summary>Read-only view of this tile's alphamap textures.</summary>
+        public System.Collections.Generic.IReadOnlyList<Texture2D> Alphamaps => this.alphamaps;
+
+        /// <summary>Number of alphamap textures currently owned by this tile.</summary>
+        public int AlphamapCount => this.alphamaps != null ? this.alphamaps.Length : 0;
+
+        /// <summary>Editor lifecycle: replaces the alphamap array.</summary>
+        internal void EditorSetAlphamaps(Texture2D[] maps) =>
+            this.alphamaps = maps ?? System.Array.Empty<Texture2D>();
+
+        /// <summary>Editor lifecycle: gets the mutable alphamap array (do NOT cache).</summary>
+        internal Texture2D[] EditorAlphamaps => this.alphamaps;
     }
 }

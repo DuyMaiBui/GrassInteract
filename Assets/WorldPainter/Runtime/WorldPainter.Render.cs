@@ -36,8 +36,8 @@ namespace WorldPainter
         private readonly List<TerrainTileGpuResources> gpuResources = new();
         private readonly Dictionary<Vector2Int, int>   coordToIndex = new();
 
-        // Map-level splat albedo array (shared across all tile engines; empty when no splat set).
-        private readonly TerrainLayerSetBinder splatLayerBinder = new();
+        // Map-level TerrainLayer palette array (shared across all tile engines).
+        private readonly TerrainPaletteBinder paletteBinder = new();
 
         /// <summary>True once <see cref="TryBuild"/> has succeeded with ≥1 tile.</summary>
         internal bool IsBuilt { get; private set; }
@@ -72,6 +72,12 @@ namespace WorldPainter
 
         internal void CommitHeight(Vector2Int coord)
             => this.EngineForCoord(coord)?.EndSculptPreview();
+
+        internal void BeginAlphamapPreview(Vector2Int coord, int alphamapIdx, Texture rt)
+            => this.EngineForCoord(coord)?.BeginAlphamapPreview(alphamapIdx, rt);
+
+        internal void EndAlphamapPreview(Vector2Int coord, int alphamapIdx)
+            => this.EngineForCoord(coord)?.EndAlphamapPreview(alphamapIdx);
 
         // ── Unity lifecycle ───────────────────────────────────────────────────
 
@@ -139,8 +145,8 @@ namespace WorldPainter
 
             if (!this.ResolveInfra()) return;
 
-            // Build the map-level splat albedo array once (shared across all tile engines).
-            this.splatLayerBinder.Build(this.map != null ? this.map.SplatSet : null);
+            // Build the map-level TerrainLayer palette array (shared across all tile engines).
+            this.paletteBinder.Build(this.map != null ? this.map.TerrainPalette : null);
 
             // P2: when a WorldMapAsset container is assigned, iterate its tiles.
             if (this.map != null)
@@ -207,7 +213,7 @@ namespace WorldPainter
 
             var engine = new GpuTerrainEngine(this.cullCompute!, this.patchMaterial!);
             engine.Build(tile, gpu, this.lodRangesM);
-            engine.BindSplatLayers(this.splatLayerBinder.Array, this.splatLayerBinder.Tiling);
+            engine.BindPalette(this.paletteBinder);
 
             bool ok = engine.SelfTest(out string msg);
             Debug.Log($"[WorldPainter] Tile {tile.tileCoord}: {msg}");
@@ -253,7 +259,7 @@ namespace WorldPainter
 
             var engine = new GpuTerrainEngine(this.cullCompute!, this.patchMaterial!);
             engine.Build(tile, gpu, this.lodRangesM);
-            engine.BindSplatLayers(this.splatLayerBinder.Array, this.splatLayerBinder.Tiling);
+            engine.BindPalette(this.paletteBinder);
 
             bool ok = engine.SelfTest(out string msg);
             Debug.Log($"[WorldPainter] Tile[{tileIndex}] {tile.tileCoord}: {msg}");
@@ -286,7 +292,7 @@ namespace WorldPainter
             this.engines.Clear();
             this.gpuResources.Clear();
             this.coordToIndex.Clear();
-            this.splatLayerBinder.Dispose();
+            this.paletteBinder.Dispose();
             this.IsBuilt = false;
         }
 

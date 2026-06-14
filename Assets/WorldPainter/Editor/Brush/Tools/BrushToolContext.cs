@@ -30,33 +30,36 @@ namespace WorldPainter.Editor
         /// <summary>Per-tile working height RenderTexture (RFloat, random-write).</summary>
         public readonly RenderTexture HeightRT;
 
-        /// <summary>Per-tile working splat RenderTexture (RGBA, random-write).</summary>
-        public readonly RenderTexture SplatRT;
-
         /// <summary>The brush compute shader (kernels already share the common uniforms).</summary>
         public readonly ComputeShader Compute;
 
         /// <summary>Dispatch thread-group count per edge (ceil(RTRes / threadGroupSize)).</summary>
         public readonly int Groups;
 
+        /// <summary>
+        /// Map-wide heightmap surface sampler for prop ground-snap. Null when no tiles are loaded.
+        /// Sourced from <see cref="WorldPainter.ScatterSampler"/> so it spans all tiles.
+        /// </summary>
+        public readonly HeightmapSurfaceSampler? Sampler;
+
         public BrushToolContext(
-            WorldPainterSculptTool tool,
-            WorldPainter           painter,
-            Vector3                worldPos,
-            TerrainTileAsset       tile,
-            RenderTexture          heightRT,
-            RenderTexture          splatRT,
-            ComputeShader          compute,
-            int                    groups)
+            WorldPainterSculptTool   tool,
+            WorldPainter             painter,
+            Vector3                  worldPos,
+            TerrainTileAsset         tile,
+            RenderTexture            heightRT,
+            ComputeShader            compute,
+            int                      groups,
+            HeightmapSurfaceSampler? sampler = null)
         {
             this.Tool     = tool;
             this.Painter  = painter;
             this.WorldPos = worldPos;
             this.Tile     = tile;
             this.HeightRT = heightRT;
-            this.SplatRT  = splatRT;
             this.Compute  = compute;
             this.Groups   = groups;
+            this.Sampler  = sampler;
         }
     }
 }

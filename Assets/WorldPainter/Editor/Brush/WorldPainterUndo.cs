@@ -39,24 +39,18 @@ namespace WorldPainter.Editor
         {
             public readonly Vector2Int TileCoord;
             public readonly byte[]     HeightData;
-            public readonly byte[]     SplatData;
 
-            /// <summary>
-            /// Monotonic insertion counter assigned at Push time.
-            /// Lower value = older snapshot; used by <see cref="EvictToMemoryCap"/>
-            /// to find the globally oldest entry across all tile stacks.
-            /// </summary>
+            /// <summary>Monotonic insertion counter assigned at Push time.</summary>
             public readonly long Sequence;
 
-            public TileSnapshot(Vector2Int coord, byte[] heightData, byte[] splatData, long sequence)
+            public TileSnapshot(Vector2Int coord, byte[] heightData, long sequence)
             {
                 this.TileCoord  = coord;
                 this.HeightData = heightData ?? throw new ArgumentNullException(nameof(heightData));
-                this.SplatData  = splatData  ?? throw new ArgumentNullException(nameof(splatData));
                 this.Sequence   = sequence;
             }
 
-            public long ByteSize => this.HeightData.LongLength + this.SplatData.LongLength;
+            public long ByteSize => this.HeightData.LongLength;
         }
 
         // ── Per-tile stacks ───────────────────────────────────────────────────
@@ -122,7 +116,6 @@ namespace WorldPainter.Editor
             var snap = new TileSnapshot(
                 tile.tileCoord,
                 CopyBytes(tile.heightData),
-                CopyBytes(tile.splatData),
                 this.nextSequence++);
 
             stack.AddLast(snap);
@@ -151,10 +144,6 @@ namespace WorldPainter.Editor
             stack.RemoveLast();
 
             Array.Copy(snap.HeightData, tile.heightData, snap.HeightData.Length);
-            if (snap.SplatData.Length > 0 && tile.splatData != null &&
-                tile.splatData.Length == snap.SplatData.Length)
-                Array.Copy(snap.SplatData, tile.splatData, snap.SplatData.Length);
-
             return snap;
         }
 

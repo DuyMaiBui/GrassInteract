@@ -115,6 +115,7 @@ namespace WorldPainter.Editor
         {
             this.writeback.CancelPending();
             this.densityEncoder.CancelPending();
+            this.alphamapEncoder.CancelPending();
             UnityEngine.Rendering.AsyncGPUReadback.WaitAllRequests();
 
             if (painter != null)
@@ -124,16 +125,21 @@ namespace WorldPainter.Editor
                     var tile = this.FindTile(painter, coord);
                     var gpu  = this.FindGpu(painter, coord);
                     if (tile != null && gpu != null &&
-                        this.rtCache.TryGet(coord, out var hRT, out var sRT))
+                        this.rtCache.TryGet(coord, out var hRT))
                     {
-                        this.writeback.ExecuteSync(tile, gpu, hRT, sRT);
+                        this.writeback.ExecuteSync(tile, gpu, hRT);
                     }
                 }
             }
 
-            // Flush all per-tile density RTs on mouse-up (synchronous final persist).
+            // Flush all per-tile density + alphamap RTs on mouse-up (synchronous final persist).
             this.FlushAllDensityRTs();
             this.ReleaseAllDensityRTs();
+            this.FlushAllAlphamapRTs();
+            // Restore the committed Texture2D alphamap bindings before releasing the RTs so the
+            // terrain shader doesn't keep sampling a soon-to-be-disposed RenderTexture.
+            this.RestoreAllAlphamapBindings(painter);
+            this.ReleaseAllAlphamapRTs();
 
             this.stroke.End();
             this.rtCache.ReleaseAll();
@@ -165,7 +171,7 @@ namespace WorldPainter.Editor
             var gpu  = this.FindGpu(painter, coord);
             if (tile == null || gpu == null) return;
 
-            if (!this.rtCache.GetOrCreate(coord, gpu, out var heightRT, out var splatRT))
+            if (!this.rtCache.GetOrCreate(coord, gpu, out var heightRT))
                 return;
 
             bool isFirstTouch = !this.strokeTouchedCoords.Contains(coord);
@@ -187,10 +193,10 @@ namespace WorldPainter.Editor
                     TerrainPaintTargetResolver.PinnedCoords.Add(coord);
             }
 
-            this.BindAndDispatch(worldPos, tile, heightRT, splatRT);
+            this.BindAndDispatch(worldPos, tile, heightRT);
 
             // Throttled live writeback (for VTF preview).
-            this.writeback.RequestAsync(tile, gpu, heightRT, splatRT);
+            this.writeback.RequestAsync(tile, gpu, heightRT);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

@@ -43,10 +43,18 @@ namespace WorldPainter
         // Also resolves MINOR-2: TILE_SIZE_M is no longer a hardcoded literal in the shader.
         private static readonly int ID_TileOriginWS       = Shader.PropertyToID("_TileOriginWS");
         private static readonly int ID_TileSizeM          = Shader.PropertyToID("_TileSizeM");
-        // Splat blend bindings (property names are SSOT in TerrainShadingConfig).
-        private static readonly int ID_SplatTex           = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_SPLAT_TEX);
-        private static readonly int ID_LayerAlbedoArray   = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_LAYER_ARRAY);
-        private static readonly int ID_LayerTiling        = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_LAYER_TILING);
+        // Phase 2a — TerrainPalette + alphamap bindings.
+        private static readonly int ID_TerrainPaletteArray  = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_PALETTE_ARRAY);
+        private static readonly int ID_TerrainPaletteCount  = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_PALETTE_COUNT);
+        private static readonly int ID_TerrainPaletteTilings = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_PALETTE_TILINGS);
+        private static readonly int ID_TerrainAlphamapCount = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_ALPHAMAP_COUNT);
+        private static readonly int[] ID_TerrainAlphamap    =
+        {
+            Shader.PropertyToID(TerrainShadingConfig.PROPERTY_ALPHAMAP_0),
+            Shader.PropertyToID(TerrainShadingConfig.PROPERTY_ALPHAMAP_1),
+            Shader.PropertyToID(TerrainShadingConfig.PROPERTY_ALPHAMAP_2),
+            Shader.PropertyToID(TerrainShadingConfig.PROPERTY_ALPHAMAP_3),
+        };
 
         // ── Injected ──────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -122,6 +130,33 @@ namespace WorldPainter
                 this.patchMaterial.SetTexture(ID_HeightTex, this.gpuResources.HeightTexture);
         }
 
+        /// <summary>
+        /// Bind the live-painted alphamap RenderTexture at slot <paramref name="alphamapIdx"/>
+        /// so the terrain shader samples it directly during a brush stroke. Without this the
+        /// shader would still see the stale committed <see cref="Texture2D"/> until the
+        /// throttled async readback completes — making fast drags look like sparse dots.
+        /// </summary>
+        internal void BeginAlphamapPreview(int alphamapIdx, Texture rt)
+        {
+            if (this.patchMaterial == null) return;
+            if (alphamapIdx < 0 || alphamapIdx >= ID_TerrainAlphamap.Length) return;
+            this.patchMaterial.SetTexture(ID_TerrainAlphamap[alphamapIdx], rt);
+        }
+
+        /// <summary>Restore the committed Texture2D alphamap binding after a stroke ends.</summary>
+        internal void EndAlphamapPreview(int alphamapIdx)
+        {
+            if (this.patchMaterial == null || this.tileAsset == null) return;
+            if (alphamapIdx < 0 || alphamapIdx >= ID_TerrainAlphamap.Length) return;
+
+            var alphamaps = this.tileAsset.Alphamaps;
+            Texture tex = (alphamaps != null && alphamapIdx < this.tileAsset.AlphamapCount
+                           && alphamaps[alphamapIdx] != null)
+                ? (Texture)alphamaps[alphamapIdx]
+                : Texture2D.blackTexture;
+            this.patchMaterial.SetTexture(ID_TerrainAlphamap[alphamapIdx], tex);
+        }
+
         // ── Build ─────────────────────────────────────────────────────────────
 
         public void Build(TerrainTileAsset tile, TerrainTileGpuResources gpuRes, float[] lodRangesM)
@@ -189,10 +224,10 @@ namespace WorldPainter
             if (gpuRes.HeightTexture != null)
                 this.patchMaterial.SetTexture(ID_HeightTex, gpuRes.HeightTexture);
 
-            // Per-tile splat-weight RGBA map. The map-level albedo array (_LayerAlbedoArray)
-            // is bound separately via BindSplatLayers (it is shared across all tiles).
-            if (gpuRes.SplatTexture != null)
-                this.patchMaterial.SetTexture(ID_SplatTex, gpuRes.SplatTexture);
+            // Phase 2a — per-tile alphamaps (one RGBA32 per 4 palette layers). Bound here
+            // so the tile material clone carries its own per-tile binding; the map-level
+            // palette array is set by BindPalette (shared across tiles).
+            BindTileAlphamaps(this.patchMaterial, tile);
 
             // B1 fix + MINOR-2: bind tile-local UV uniforms.
             // origin is already computed above; pass it as a Vector4 for SetVector
@@ -205,20 +240,40 @@ namespace WorldPainter
             this.isBuilt = true;
         }
 
-        // ── Splat layer binding ────────────────────────────────────────────────
+        // ── Terrain palette binding (Phase 2a) ────────────────────────────────
 
         /// <summary>
-        /// Binds the map-level splat albedo array + tiling onto this tile's material clone.
-        /// Call AFTER <see cref="Build"/> (the clone is created there). The array is map-level
-        /// (shared across tiles) and owned by <see cref="TerrainLayerSetBinder"/> — this engine
-        /// only references it. Null array → leave the material's existing albedo binding untouched.
+        /// Binds the map-level TerrainLayer palette array + per-layer tilings onto this
+        /// tile's material clone. Call AFTER <see cref="Build"/>. The array is owned by
+        /// <see cref="TerrainPaletteBinder"/>; this engine only references it.
         /// </summary>
-        internal void BindSplatLayers(Texture2DArray? layerArray, float layerTiling)
+        internal void BindPalette(TerrainPaletteBinder binder)
         {
-            if (this.patchMaterial == null) return;
-            this.patchMaterial.SetFloat(ID_LayerTiling, layerTiling);
-            if (layerArray != null)
-                this.patchMaterial.SetTexture(ID_LayerAlbedoArray, layerArray);
+            if (this.patchMaterial == null || binder == null) return;
+            if (binder.Array != null)
+                this.patchMaterial.SetTexture(ID_TerrainPaletteArray, binder.Array);
+            this.patchMaterial.SetInt(ID_TerrainPaletteCount, binder.ActiveCount);
+            this.patchMaterial.SetVectorArray(ID_TerrainPaletteTilings, binder.Tilings);
+        }
+
+        /// <summary>
+        /// Pushes <paramref name="tile"/>.alphamaps[] onto <paramref name="material"/>.
+        /// Slots beyond the tile's count are bound to <c>Texture2D.blackTexture</c> so the
+        /// shader can safely read them when the loop body short-circuits on count.
+        /// </summary>
+        private static void BindTileAlphamaps(Material material, TerrainTileAsset tile)
+        {
+            int count = tile.AlphamapCount;
+            material.SetInt(ID_TerrainAlphamapCount, Mathf.Min(count, ID_TerrainAlphamap.Length));
+
+            var alphamaps = tile.Alphamaps;
+            for (int i = 0; i < ID_TerrainAlphamap.Length; i++)
+            {
+                Texture tex = (i < count && alphamaps[i] != null)
+                    ? (Texture)alphamaps[i]
+                    : Texture2D.blackTexture;
+                material.SetTexture(ID_TerrainAlphamap[i], tex);
+            }
         }
 
         // ── Step ─────────────────────────────────────────────────────────────

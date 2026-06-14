@@ -28,7 +28,7 @@ namespace WorldPainter.Editor
             InstanceUndo.PushOnce(propLayer);
             ctx.Tool.propEmitter.Emit(
                 propLayer, ctx.WorldPos, WorldPainterState.Brush.size * 0.5f,
-                deleteMode: deleteMode, surfaceSampler: null);
+                deleteMode: deleteMode, surfaceSampler: ctx.Sampler);
         }
     }
 
@@ -46,7 +46,7 @@ namespace WorldPainter.Editor
             InstanceUndo.PushOnce(propLayer);
             ctx.Tool.propEmitter.Emit(
                 propLayer, ctx.WorldPos, WorldPainterState.Brush.size * 0.5f,
-                deleteMode: true, surfaceSampler: null);
+                deleteMode: true, surfaceSampler: ctx.Sampler);
         }
     }
 
@@ -62,7 +62,7 @@ namespace WorldPainter.Editor
             if (propLayer == null) return;
 
             InstanceUndo.PushOnce(propLayer);
-            ctx.Tool.propEmitter.EmitSingle(propLayer, ctx.WorldPos, surfaceSampler: null);
+            ctx.Tool.propEmitter.EmitSingle(propLayer, ctx.WorldPos, surfaceSampler: ctx.Sampler);
         }
     }
 

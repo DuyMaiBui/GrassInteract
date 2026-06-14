@@ -21,8 +21,7 @@ namespace WorldPainter.Editor
         private void BindAndDispatch(
             Vector3 worldPos,
             TerrainTileAsset tile,
-            RenderTexture heightRT,
-            RenderTexture splatRT)
+            RenderTexture heightRT)
         {
             if (this.brushCompute == null) return;
 
@@ -44,10 +43,6 @@ namespace WorldPainter.Editor
             this.brushCompute.SetFloat("_Strength",        brush.strength);
             this.brushCompute.SetInt("_RTRes",             rtRes);
             this.brushCompute.SetInt("_BrushShape",        (int)brush.shape);
-            // Reset splat mode to Paint each dispatch. SplatEraseTool re-sets it to 1 just before
-            // its own dispatch; this default keeps the biome composite splat path (which never
-            // sets _SplatMode) from inheriting a stale Erase from a prior splat-erase stroke.
-            this.brushCompute.SetInt("_SplatMode", 0);
 
             LayerType activeType = WorldPainterState.EffectiveLayerType(painter);
 
@@ -66,7 +61,6 @@ namespace WorldPainter.Editor
                             worldPos,
                             tile,
                             heightRT,
-                            splatRT,
                             this.brushCompute!,
                             brush.size,
                             brush.strength,
@@ -76,13 +70,14 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            // Generic brush-tool dispatch (height / splat / density / instance).
+            // Generic brush-tool dispatch (height / palette / density / instance).
             var tool = BrushToolRegistry.ResolveActiveTool(
                 activeType, WorldPainterState.ActiveBrushToolId);
             if (tool == null) return;
 
             var ctx = new BrushToolContext(
-                this, painter, worldPos, tile, heightRT, splatRT, this.brushCompute, groups);
+                this, painter, worldPos, tile, heightRT, this.brushCompute, groups,
+                sampler: painter.ScatterSampler);
             tool.Apply(in ctx);
         }
     }

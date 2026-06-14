@@ -56,7 +56,6 @@ namespace WorldPainter.Editor
             Vector3              worldPos,
             TerrainTileAsset     tile,
             RenderTexture        heightRT,
-            RenderTexture        splatRT,
             ComputeShader        brushCompute,
             float                brushSize,
             float                brushStrength,
@@ -89,17 +88,8 @@ namespace WorldPainter.Editor
                 brushCompute.Dispatch(k, groups, groups, 1);
             }
 
-            // ── Channel 2: Splat ──────────────────────────────────────────────
-            if (preset.SplatEnabled && !mute.HasFlag(BiomeChannelMask.Splat))
-            {
-                brushCompute.SetFloat("_Strength", brushStrength * preset.SplatWeight);
-                int k = brushCompute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_SPLAT);
-                this.falloffLut.BindToCompute(brushCompute, k);
-                brushCompute.SetTexture(k, "_SplatRT", splatRT);
-                brushCompute.SetInt("_SplatLayer",
-                    Mathf.Clamp(preset.SplatLayerIndex, 0, TerrainSculptConfig.MAX_SPLAT_LAYERS - 1));
-                brushCompute.Dispatch(k, groups, groups, 1);
-            }
+            // (Phase 3 cleanup — biome composite splat channel removed. BiomePreset.Splat*
+            // fields are inert until a per-tile alphamap composite is reintroduced.)
 
             // ── Channel 3: Grass density ──────────────────────────────────────
             // NOTE: biome-stamp grass density is omitted in the unified path — the GrassLayer

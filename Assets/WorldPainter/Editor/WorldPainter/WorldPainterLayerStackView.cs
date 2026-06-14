@@ -107,23 +107,16 @@ namespace WorldPainter.Editor
 
                     LayerType rowType = sl.Kind switch
                     {
-                        WorldPainterLayer.LayerKind.Splat => LayerType.Splat,
                         WorldPainterLayer.LayerKind.Grass => LayerType.Grass,
                         WorldPainterLayer.LayerKind.Prop  => LayerType.Props,
-                        _ => LayerType.Splat,
+                        _ => LayerType.Grass,
                     };
 
                     if (!this.chips.Passes(rowType)) continue;
 
-                    // Thumbnail: albedo swatch for Splat, LOD0 preview for Grass/Props.
+                    // Thumbnail: LOD0 preview for Grass/Props.
                     Texture2D? thumb = null;
-                    if (sl is SplatLayer splat && splat.LayerSet != null)
-                    {
-                        var albedos = splat.LayerSet.EditorAlbedos;
-                        if (albedos != null && albedos.Count > 0)
-                            thumb = AssetPreview.GetAssetPreview(albedos[0]) ?? albedos[0];
-                    }
-                    else if (sl is GrassLayer grass)
+                    if (sl is GrassLayer grass)
                     {
                         var lods = grass.Render.Lods;
                         if (lods != null && lods.Length > 0 && lods[0].mesh != null)
@@ -140,54 +133,8 @@ namespace WorldPainter.Editor
 
                     this.stackContainer.Add(row);
 
-                    // For SplatLayer: show albedo-slot sub-rows for paint-channel selection.
-                    if (sl is SplatLayer splatLayerExpanded && this.chips.Passes(LayerType.Splat))
-                    {
-                        bool isSplatActive =
-                            WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Splat &&
-                            WorldPainterState.ActiveLayerId == sl.name;
-
-                        if (isSplatActive || IsRowSelected(sl))
-                        {
-                            var layerSet = splatLayerExpanded.LayerSet;
-                            int slotCount = layerSet != null ? layerSet.ActiveLayerCount : 0;
-                            // Always show at least one slot row even if the set is empty,
-                            // so the user can see the channel and click to activate painting.
-                            if (slotCount == 0) slotCount = 1;
-
-                            for (int ci = 0; ci < slotCount; ci++)
-                            {
-                                bool isActiveChannel = isSplatActive &&
-                                    WorldPainterState.ActiveSplatChannel == ci;
-
-                                // Build a display name from the albedo asset, or fall back to "Channel N".
-                                string slotName = $"Channel {ci}";
-                                if (layerSet != null)
-                                {
-                                    var albedos = layerSet.EditorAlbedos;
-                                    if (ci < albedos.Count && albedos[ci] != null)
-                                        slotName = albedos[ci].name;
-                                }
-
-                                int capturedCi = ci;
-                                var crow = this.BuildVariantRow(
-                                    displayIndex++, slotName, isActiveChannel,
-                                    onClick: () =>
-                                    {
-                                        WorldPainterState.ActiveSplatChannel = capturedCi;
-                                        WorldPainterState.SetActiveLayer(
-                                            splatLayerExpanded.name,
-                                            WorldPainterState.PaintLayerKind.Splat);
-                                        WorldPainterState.SetActiveBrushTool("splat.paint");
-                                        this.RefreshStack();
-                                    });
-                                this.stackContainer.Add(crow);
-                            }
-                        }
-                    }
-
                     // GrassLayer: clicking the row activates density painting directly.
-                    // No variant sub-rows — one density texture per tile per layer.
+                    // (Phase 3 cleanup — SplatLayer rows + albedo sub-rows removed.)
                 }
             }
 

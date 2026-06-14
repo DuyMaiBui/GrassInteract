@@ -1,5 +1,4 @@
 #nullable enable
-using System.IO;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -14,9 +13,7 @@ namespace WorldPainter.Editor
     /// Position is fixed across layer selection — only the layer stack changes.
     ///
     /// P6 additions:
-    ///   - Unified always-visible 72×92 stamp thumbnail strip loaded from
-    ///     Assets/WorldPainter/Editor/Resources/Brushes/ (editor-global, not nested in WorldMapAsset).
-    ///   - Drag grayscale .png → saved to Resources/Brushes → reloads strip on next activation.
+    ///   - Contextual tool palette (Paint/Erase/Smooth etc. for the active layer kind).
     ///   - Height / Splat / Density mode toggle row (maps to WorldPainterState.PaintLayerKind).
     ///   - F1–F3 preset slots bar + X=swap shortcut label.
     ///
@@ -24,16 +21,6 @@ namespace WorldPainter.Editor
     /// </summary>
     internal sealed class WorldPainterBrushDock
     {
-        // ── Brush Resources path ──────────────────────────────────────────────
-
-        internal const string BRUSHES_RESOURCES_FOLDER = "Assets/WorldPainter/Editor/Resources/Brushes";
-
-        // ── Stamp thumbnails ──────────────────────────────────────────────────
-
-        private Texture2D[] stampTextures = System.Array.Empty<Texture2D>();
-        private string[]    stampNames    = System.Array.Empty<string>();
-        private int selectedStampIndex;
-
         // ── Contextual tool palette ───────────────────────────────────────────
 
         private VisualElement? toolPaletteRoot;
@@ -44,20 +31,12 @@ namespace WorldPainter.Editor
 
         // ── Build ─────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Called on inspector activation to reload stamp thumbnails from disk.
-        /// Editor-global: loads from <see cref="BRUSHES_RESOURCES_FOLDER"/>, not from WorldMapAsset.
-        /// </summary>
-        public void Reload()
-        {
-            this.LoadStampTextures();
-        }
+        /// <summary>Reload hook kept for inspector-activation compatibility (no-op).</summary>
+        public void Reload() { }
 
         /// <summary>Builds and returns the brush dock VisualElement.</summary>
         public VisualElement Build()
         {
-            this.LoadStampTextures();
-
             var dock = new VisualElement();
             dock.AddToClassList("wp-brush-dock");
 
@@ -65,7 +44,18 @@ namespace WorldPainter.Editor
             title.AddToClassList("wp-section-title");
             dock.Add(title);
 
+            // Paint Mode toggle — replaces the Scene-view toolbar Brush icon. When OFF the
+            // scene-input driver short-circuits (no brush ring, no strokes). Auto-flips ON
+            // when a paintable layer is selected.
+            dock.Add(this.BuildPaintModeToggle());
+
             var brush = WorldPainterState.Brush;
+
+            // Phase 2c — TerrainLayer palette strip: 64×64 diffuse thumbnails for the
+            // map's TerrainPalette + an "Add TerrainLayer" ObjectField + per-entry "×"
+            // remove. Click a thumbnail = active paint ink. Sits ABOVE the contextual
+            // tool palette because picking an ink should come before picking Paint/Erase.
+            dock.Add(this.BuildPaletteStrip());
 
             // Contextual tool palette (tools for the active layer kind)
             dock.Add(this.BuildToolPalette());
@@ -96,14 +86,258 @@ namespace WorldPainter.Editor
                 () => brush.flow,
                 v  => brush.flow = v));
 
-            // Stamp thumbnail strip (always visible)
-            dock.Add(this.BuildStampStrip());
-
             // P6: preset slots bar
             dock.Add(this.BuildPresetBar());
 
             return dock;
         }
+
+        // ── TerrainLayer palette strip (Phase 2c) ─────────────────────────────
+
+        private VisualElement? paletteStripRoot;
+
+        /// <summary>
+        /// Builds the palette strip container + wires it to repopulate whenever the
+        /// WorldMap palette mutates (AddTerrainLayer/RemoveTerrainLayer) or the active
+        /// palette index flips. The container repopulates from
+        /// <see cref="WorldPainterState.ActivePainter"/>.Map.TerrainPalette on every refresh.
+        /// </summary>
+        private VisualElement BuildPaletteStrip()
+        {
+            var container = new VisualElement();
+
+            var title = new Label("TERRAIN PALETTE");
+            title.AddToClassList("wp-section-title");
+            container.Add(title);
+
+            this.paletteStripRoot = new VisualElement();
+            this.paletteStripRoot.style.flexDirection = FlexDirection.Row;
+            this.paletteStripRoot.style.flexWrap      = Wrap.Wrap;
+            this.paletteStripRoot.style.marginBottom  = 4;
+            container.Add(this.paletteStripRoot);
+
+            this.PopulatePaletteStrip();
+
+            // Repopulate when the palette changes (Add/Remove) or the active index flips —
+            // we don't have a "palette mutated" event yet, so the +/× buttons call
+            // PopulatePaletteStrip themselves. ActivePaletteIndex flips here for the
+            // highlight to follow programmatic selection (e.g. tool buttons keep paint mode on).
+            System.Action<int> onActiveIdx = _ => this.PopulatePaletteStrip();
+            WorldPainterState.ActivePaletteIndexChanged += onActiveIdx;
+            this.paletteStripRoot.RegisterCallback<DetachFromPanelEvent>(_ =>
+                WorldPainterState.ActivePaletteIndexChanged -= onActiveIdx);
+
+            return container;
+        }
+
+        private void PopulatePaletteStrip()
+        {
+            if (this.paletteStripRoot == null) return;
+            this.paletteStripRoot.Clear();
+
+            var painter = WorldPainterState.ActivePainter;
+            var map     = painter != null ? painter.Map : null;
+            if (map == null)
+            {
+                var hint = new Label("Select a WorldPainter with a Map to author the palette.");
+                hint.style.fontSize   = 9;
+                hint.style.color      = new StyleColor(new Color(0.6f, 0.6f, 0.6f));
+                hint.style.marginLeft = 4;
+                this.paletteStripRoot.Add(hint);
+                return;
+            }
+
+            var palette = map.TerrainPalette;
+            int active  = WorldPainterState.ActivePaletteIndex;
+
+            for (int i = 0; i < palette.Count; i++)
+            {
+                int    capturedIdx = i;
+                var    terrainLayer = palette[i];
+
+                var cell = new VisualElement();
+                cell.style.width  = 72;
+                cell.style.height = 72;
+                cell.style.marginTop = cell.style.marginRight =
+                    cell.style.marginBottom = cell.style.marginLeft = 2;
+                cell.style.borderTopWidth = cell.style.borderRightWidth =
+                    cell.style.borderBottomWidth = cell.style.borderLeftWidth = 2;
+
+                bool isActive = capturedIdx == active;
+                var border = isActive
+                    ? new Color(0.30f, 0.60f, 1.00f) // wp-mode-btn--active blue
+                    : new Color(0.30f, 0.30f, 0.30f);
+                cell.style.borderTopColor = cell.style.borderRightColor =
+                    cell.style.borderBottomColor = cell.style.borderLeftColor =
+                    new StyleColor(border);
+
+                // Thumbnail = palette[i].diffuseTexture; falls back to a label when null.
+                Texture2D? thumb = terrainLayer != null ? terrainLayer.diffuseTexture : null;
+                if (thumb != null)
+                {
+                    var img = new Image { image = thumb };
+                    img.style.width  = new StyleLength(StyleKeyword.Auto);
+                    img.style.height = new StyleLength(StyleKeyword.Auto);
+                    img.style.flexGrow = 1;
+                    cell.Add(img);
+                }
+                else
+                {
+                    var lbl = new Label($"[{capturedIdx}]\nno diffuse");
+                    lbl.style.fontSize = 9;
+                    lbl.style.unityTextAlign = TextAnchor.MiddleCenter;
+                    lbl.style.flexGrow = 1;
+                    cell.Add(lbl);
+                }
+
+                // Click cell to activate this palette index.
+                cell.RegisterCallback<ClickEvent>(_ => this.ActivatePalette(capturedIdx));
+
+                // Tiny "×" remove button in the top-right corner.
+                var removeBtn = new Button(() => this.RemovePaletteEntry(capturedIdx)) { text = "×" };
+                removeBtn.style.position = Position.Absolute;
+                removeBtn.style.top   = 0;
+                removeBtn.style.right = 0;
+                removeBtn.style.width = 16;
+                removeBtn.style.height = 16;
+                removeBtn.style.fontSize = 10;
+                removeBtn.tooltip = $"Remove '{(terrainLayer != null ? terrainLayer.name : "—")}' from the palette";
+                cell.Add(removeBtn);
+
+                this.paletteStripRoot.Add(cell);
+            }
+
+            // "+" add affordance — ObjectField inside a 72×72 cell so it lines up with the strip.
+            var addCell = new VisualElement();
+            addCell.style.width  = 72;
+            addCell.style.height = 72;
+            addCell.style.marginTop = addCell.style.marginRight =
+                addCell.style.marginBottom = addCell.style.marginLeft = 2;
+            addCell.style.borderTopWidth = addCell.style.borderRightWidth =
+                addCell.style.borderBottomWidth = addCell.style.borderLeftWidth = 1;
+            addCell.style.borderTopColor = addCell.style.borderRightColor =
+                addCell.style.borderBottomColor = addCell.style.borderLeftColor =
+                new StyleColor(new Color(0.5f, 0.5f, 0.5f));
+
+            var addLabel = new Label("+ Add");
+            addLabel.style.fontSize = 9;
+            addLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+            addCell.Add(addLabel);
+
+            var objField = new ObjectField
+            {
+                objectType         = typeof(UnityEngine.TerrainLayer),
+                allowSceneObjects  = false,
+            };
+            objField.style.flexGrow = 1;
+            objField.RegisterValueChangedCallback(evt =>
+            {
+                var picked = evt.newValue as UnityEngine.TerrainLayer;
+                if (picked != null) this.AddPaletteEntry(picked);
+                objField.SetValueWithoutNotify(null); // reset so the same asset can be added twice
+            });
+            addCell.Add(objField);
+
+            this.paletteStripRoot.Add(addCell);
+        }
+
+        // ── Palette state transitions ────────────────────────────────────────
+
+        private void ActivatePalette(int index)
+        {
+            // Picking an ink also means "you're now in splat mode" — flip the active layer
+            // kind so the contextual tool palette renders Paint/Erase, and engage paint mode
+            // so the brush driver isn't gated.
+            WorldPainterState.ActivePaletteIndex = index;
+            WorldPainterState.SetActiveLayer(string.Empty, WorldPainterState.PaintLayerKind.Splat);
+            WorldPainterState.SetActiveBrushTool("palette.paint");
+            WorldPainterState.PaintModeActive   = true;
+        }
+
+        private void AddPaletteEntry(UnityEngine.TerrainLayer terrainLayer)
+        {
+            var painter = WorldPainterState.ActivePainter;
+            var map     = painter != null ? painter.Map : null;
+            if (map == null) return;
+
+            int idx = WorldMapAssetLifecycle.AddTerrainLayer(map, terrainLayer);
+            if (idx < 0) return;
+
+            // Auto-select the newly-added layer + rebuild so the alphamap/palette array
+            // is reflected on the GPU immediately.
+            this.ActivatePalette(idx);
+            painter!.TryBuild();
+            UnityEditor.SceneView.RepaintAll();
+
+            this.PopulatePaletteStrip();
+        }
+
+        private void RemovePaletteEntry(int index)
+        {
+            var painter = WorldPainterState.ActivePainter;
+            var map     = painter != null ? painter.Map : null;
+            if (map == null) return;
+
+            // Confirmation — removal is destructive even though we don't trim alphamap data.
+            bool confirmed = UnityEditor.EditorUtility.DisplayDialog(
+                "Remove TerrainLayer?",
+                $"Remove palette entry at index {index}? Existing alphamap weights for that " +
+                "channel will be ignored by the shader but stay on disk (cheap re-add later).",
+                "Remove", "Cancel");
+            if (!confirmed) return;
+
+            WorldMapAssetLifecycle.RemoveTerrainLayer(map, index);
+
+            // Reset selection if we just removed the active ink.
+            if (WorldPainterState.ActivePaletteIndex == index)
+                WorldPainterState.ActivePaletteIndex = -1;
+            else if (WorldPainterState.ActivePaletteIndex > index)
+                WorldPainterState.ActivePaletteIndex--;
+
+            painter!.TryBuild();
+            UnityEditor.SceneView.RepaintAll();
+
+            this.PopulatePaletteStrip();
+        }
+
+        // ── Paint Mode toggle (Phase 1 — replaces Scene-view brush toolbar icon) ──
+
+        private VisualElement BuildPaintModeToggle()
+        {
+            var row = new VisualElement();
+            row.AddToClassList("wp-mode-toggle-row");
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.marginBottom  = 4;
+
+            var btn = new Button { text = PaintModeLabel() };
+            btn.AddToClassList("wp-mode-btn");
+            btn.style.flexGrow = 1;
+            if (WorldPainterState.PaintModeActive)
+                btn.AddToClassList("wp-mode-btn--active");
+
+            btn.clicked += () =>
+            {
+                WorldPainterState.PaintModeActive = !WorldPainterState.PaintModeActive;
+            };
+
+            // Keep the button label + active class in sync with state flips from elsewhere
+            // (layer selection auto-engages, tool click engages, programmatic disable in OnDisable).
+            System.Action<bool> onPaintMode = on =>
+            {
+                btn.text = PaintModeLabel();
+                if (on) btn.AddToClassList("wp-mode-btn--active");
+                else    btn.RemoveFromClassList("wp-mode-btn--active");
+            };
+            WorldPainterState.PaintModeChanged += onPaintMode;
+            btn.RegisterCallback<DetachFromPanelEvent>(_ =>
+                WorldPainterState.PaintModeChanged -= onPaintMode);
+
+            row.Add(btn);
+            return row;
+        }
+
+        private static string PaintModeLabel() =>
+            WorldPainterState.PaintModeActive ? "● Paint Mode: ON" : "○ Paint Mode: OFF";
 
         // ── Contextual tool palette (tools per active layer kind) ─────────────
 
@@ -159,6 +393,19 @@ namespace WorldPainter.Editor
                 ? WorldPainterState.EffectiveLayerType(painter)
                 : LayerType.Height;
 
+            // Phase 2b: when in splat mode, surface a yellow warning if the user hasn't
+            // picked a TerrainLayer from the palette strip above yet — the brush dispatch
+            // returns early without one.
+            if (kind == LayerType.Splat && WorldPainterState.ActivePaletteIndex < 0)
+            {
+                var warn = new Label("⚠ Click a TerrainLayer thumbnail above to pick an ink.");
+                warn.style.fontSize   = 9;
+                warn.style.color      = new StyleColor(new Color(1f, 0.7f, 0.2f));
+                warn.style.marginBottom = 2;
+                warn.style.flexBasis    = new StyleLength(new Length(100, LengthUnit.Percent));
+                this.toolPaletteRoot.Add(warn);
+            }
+
             var tools = BrushToolRegistry.ToolsFor(kind);
             if (tools.Count == 0)
             {
@@ -178,12 +425,31 @@ namespace WorldPainter.Editor
             for (int i = 0; i < tools.Count; i++)
             {
                 var tool = tools[i];
-                var btn = new Button(() => WorldPainterState.SetActiveBrushTool(tool.Id))
+                var btn = new Button(() =>
                 {
-                    text = tool.Label,
-                };
+                    WorldPainterState.SetActiveBrushTool(tool.Id);
+                    // Phase 1 — clicking any tool also turns paint mode on. The driver is
+                    // permanently subscribed to SceneView.duringSceneGui by the inspector;
+                    // this flag is the on/off gate.
+                    WorldPainterState.PaintModeActive = true;
+                });
                 btn.AddToClassList("wp-mode-btn");
                 btn.style.flexGrow = 1;
+                btn.style.flexDirection = FlexDirection.Row;
+                btn.style.alignItems    = Align.Center;
+                btn.style.justifyContent = Justify.Center;
+
+                // Icon (optional — falls back to text-only when no PNG is authored).
+                var icon = BrushIcons.For(tool.Id);
+                if (icon != null)
+                {
+                    var img = new Image { image = icon };
+                    img.style.width  = 16;
+                    img.style.height = 16;
+                    img.style.marginRight = 3;
+                    btn.Add(img);
+                }
+                btn.Add(new Label(tool.Label));
 
                 if (resolved != null && resolved.Id == tool.Id)
                     btn.AddToClassList("wp-mode-btn--active");
@@ -222,183 +488,6 @@ namespace WorldPainter.Editor
             }
 
             return row;
-        }
-
-        // ── Stamp thumbnail strip ─────────────────────────────────────────────
-
-        private VisualElement BuildStampStrip()
-        {
-            var container = new VisualElement();
-            container.AddToClassList("wp-stamp-strip-container");
-
-            var titleRow = new VisualElement();
-            titleRow.style.flexDirection = FlexDirection.Row;
-            titleRow.style.marginBottom  = 2;
-
-            var stampTitle = new Label("STAMPS");
-            stampTitle.AddToClassList("wp-section-title");
-            titleRow.Add(stampTitle);
-
-            // Import button — drag a .png to the Brushes folder via file panel.
-            var importBtn = new Button(this.OnImportBrushClicked);
-            importBtn.text = "+ Import";
-            importBtn.style.fontSize   = 9;
-            importBtn.style.marginLeft = 4;
-            importBtn.tooltip = "Import a grayscale PNG as a brush stamp";
-            titleRow.Add(importBtn);
-
-            container.Add(titleRow);
-
-            var strip = new VisualElement();
-            strip.AddToClassList("wp-stamp-strip");
-            strip.style.flexDirection = FlexDirection.Row;
-            strip.style.flexWrap      = Wrap.Wrap;
-
-            if (this.stampTextures.Length == 0)
-            {
-                var hint = new Label("No stamps — click Import to add one.");
-                hint.style.fontSize   = 9;
-                hint.style.color      = new StyleColor(new Color(0.6f, 0.6f, 0.6f));
-                hint.style.marginLeft = 4;
-                strip.Add(hint);
-            }
-            else
-            {
-                for (int i = 0; i < this.stampTextures.Length; i++)
-                {
-                    int capturedIdx = i;
-                    var cell = new VisualElement();
-                    cell.AddToClassList("wp-stamp-cell");
-                    cell.style.width  = 72;
-                    cell.style.height = 72;
-                    cell.style.marginTop = cell.style.marginRight =
-                        cell.style.marginBottom = cell.style.marginLeft = 2;
-                    cell.style.borderTopWidth = cell.style.borderRightWidth =
-                        cell.style.borderBottomWidth = cell.style.borderLeftWidth = 2;
-
-                    Color borderColor = (i == this.selectedStampIndex)
-                        ? new Color(0.2f, 0.5f, 1f)
-                        : new Color(0.3f, 0.3f, 0.3f);
-                    cell.style.borderTopColor = cell.style.borderRightColor =
-                        cell.style.borderBottomColor = cell.style.borderLeftColor =
-                        new StyleColor(borderColor);
-
-                    if (this.stampTextures[i] != null)
-                    {
-                        var img = new Image { image = this.stampTextures[i] };
-                        img.style.width  = new StyleLength(StyleKeyword.Auto);
-                        img.style.height = new StyleLength(StyleKeyword.Auto);
-                        img.style.flexGrow = 1;
-                        cell.Add(img);
-                    }
-
-                    var nameLbl = new Label(this.stampNames[i]);
-                    nameLbl.style.fontSize         = 9;
-                    nameLbl.style.unityTextAlign   = TextAnchor.MiddleCenter;
-                    nameLbl.style.whiteSpace        = WhiteSpace.Normal;
-                    nameLbl.style.overflow          = Overflow.Hidden;
-                    cell.Add(nameLbl);
-
-                    cell.RegisterCallback<ClickEvent>(_ =>
-                    {
-                        this.selectedStampIndex = capturedIdx;
-                        this.ApplySelectedStamp();
-                    });
-
-                    strip.Add(cell);
-                }
-            }
-
-            container.Add(strip);
-            return container;
-        }
-
-        private void ApplySelectedStamp()
-        {
-            if (this.selectedStampIndex < 0 || this.selectedStampIndex >= this.stampTextures.Length)
-                return;
-            // Hook: apply the selected stamp texture to the brush falloff (via BrushFalloffDirty).
-            // The actual stamp shape is used by the compute shader via the LUT.
-            WorldPainterState.RaiseBrushFalloffDirty();
-        }
-
-        // ── Stamp import ──────────────────────────────────────────────────────
-
-        private void OnImportBrushClicked()
-        {
-            string path = EditorUtility.OpenFilePanel(
-                "Import Brush Stamp",
-                Application.dataPath,
-                "png,tga,psd");
-
-            if (string.IsNullOrEmpty(path)) return;
-
-            this.ImportBrushFromPath(path);
-        }
-
-        /// <summary>
-        /// Copies the texture at <paramref name="sourcePath"/> into the brushes resources
-        /// folder, imports it as an editor-only asset, and reloads the stamp strip.
-        /// </summary>
-        internal void ImportBrushFromPath(string sourcePath)
-        {
-            if (!Directory.Exists(BRUSHES_RESOURCES_FOLDER))
-                Directory.CreateDirectory(BRUSHES_RESOURCES_FOLDER);
-
-            string fileName = Path.GetFileName(sourcePath);
-            string destPath = Path.Combine(BRUSHES_RESOURCES_FOLDER, fileName).Replace('\\', '/');
-
-            File.Copy(sourcePath, destPath, overwrite: true);
-            AssetDatabase.Refresh();
-
-            // Configure import settings: grayscale linear, no mip maps.
-            var importer = AssetImporter.GetAtPath(destPath) as TextureImporter;
-            if (importer != null)
-            {
-                importer.sRGBTexture     = false;
-                importer.alphaIsTransparency = false;
-                importer.mipmapEnabled   = false;
-                importer.isReadable      = true;
-                importer.textureType     = TextureImporterType.Default;
-                importer.wrapMode        = TextureWrapMode.Clamp;
-                importer.SaveAndReimport();
-            }
-
-            this.LoadStampTextures();
-        }
-
-        // ── Stamp texture loading ─────────────────────────────────────────────
-
-        private void LoadStampTextures()
-        {
-            if (!Directory.Exists(BRUSHES_RESOURCES_FOLDER))
-            {
-                this.stampTextures = System.Array.Empty<Texture2D>();
-                this.stampNames    = System.Array.Empty<string>();
-                return;
-            }
-
-            var guids  = AssetDatabase.FindAssets("t:Texture2D", new[] { BRUSHES_RESOURCES_FOLDER });
-            var textures = new System.Collections.Generic.List<Texture2D>(guids.Length);
-            var names    = new System.Collections.Generic.List<string>(guids.Length);
-
-            foreach (var guid in guids)
-            {
-                string assetPath = AssetDatabase.GUIDToAssetPath(guid);
-                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-                if (tex != null)
-                {
-                    textures.Add(tex);
-                    names.Add(Path.GetFileNameWithoutExtension(assetPath));
-                }
-            }
-
-            this.stampTextures = textures.ToArray();
-            this.stampNames    = names.ToArray();
-
-            // Clamp selection.
-            if (this.selectedStampIndex >= this.stampTextures.Length)
-                this.selectedStampIndex = 0;
         }
 
         // ── Preset bar ────────────────────────────────────────────────────────

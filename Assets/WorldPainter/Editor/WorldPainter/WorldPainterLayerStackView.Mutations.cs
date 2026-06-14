@@ -19,7 +19,6 @@ namespace WorldPainter.Editor
         private void ShowAddMenu()
         {
             var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("Splat layer"), false, () => this.AddSplatLayerUnified());
             menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayerUnified());
             menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayerUnified());
             menu.AddItem(new GUIContent("Biome preset"), false, () => this.AddBiomeRow());
@@ -27,26 +26,6 @@ namespace WorldPainter.Editor
         }
 
         // ── Unified add mutations (Phase 2 — all go through WorldMapAssetLifecycle) ──
-
-        /// <summary>
-        /// Adds a unified <see cref="SplatLayer"/> via <see cref="WorldMapAssetLifecycle.AddSplatLayer"/>.
-        /// Requires a saved WorldMapAsset.
-        /// </summary>
-        private void AddSplatLayerUnified()
-        {
-            WorldMapAsset? map = this.painter.Map;
-            if (!this.RequireSavedMap(map, "splat")) return;
-
-            // Count existing splat layers in the unified system for a smart default name.
-            int existingSplatCount = 0;
-            foreach (var sl in map!.SurfaceLayers)
-                if (sl is SplatLayer) existingSplatCount++;
-
-            string layerName = existingSplatCount == 0 ? "Ground" : $"Splat {existingSplatCount}";
-            SplatLayer newLayer = WorldMapAssetLifecycle.AddSplatLayer(map!, layerName);
-            this.SelectSurfaceLayer(newLayer);
-            this.RefreshStack();
-        }
 
         /// <summary>
         /// Adds a unified <see cref="GrassLayer"/> with blade mesh + 2 variants via

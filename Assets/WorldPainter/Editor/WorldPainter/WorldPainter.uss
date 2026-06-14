@@ -93,6 +93,30 @@
     font-size: 12px;
 }
 
+/* Brush tool / shape mode buttons (BrushDock contextual palette + Circle/Square toggle).
+   Default is a flat button; --active gets a thicker accent border so the user can SEE
+   which tool/shape is selected. */
+.wp-mode-btn {
+    border-radius: 3px;
+    padding: 2px 6px;
+    margin-right: 2px;
+    border-width: 1px;
+    border-color: rgba(0, 0, 0, 0);
+    font-size: 11px;
+}
+
+.wp-mode-btn--active {
+    border-width: 2px;
+    border-color: rgb(77, 155, 255);
+    background-color: rgba(77, 155, 255, 0.12);
+}
+
+.pro .wp-mode-btn--active {
+    border-color: rgb(102, 178, 255);
+    background-color: rgba(102, 178, 255, 0.18);
+    color: rgb(230, 230, 230);
+}
+
 .pro .wp-add-btn {
     background-color: rgb(62, 62, 62);
     color: rgb(200, 200, 200);

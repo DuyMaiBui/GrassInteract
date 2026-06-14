@@ -26,19 +26,14 @@ namespace WorldPainter
         // ── Chosen texture formats ────────────────────────────────────────────
         private static readonly TextureFormat PRIMARY_HEIGHT_FORMAT  = TextureFormat.R16;
         private static readonly TextureFormat FALLBACK_HEIGHT_FORMAT = TextureFormat.RHalf;
-        private static readonly TextureFormat SPLAT_FORMAT           = TextureFormat.RGBA32;
 
         // ── GPU textures ──────────────────────────────────────────────────────
         private Texture2D? heightTex;
-        private Texture2D? splatTex;
 
         // ── Public accessors ──────────────────────────────────────────────────
 
         /// <summary>Height texture (R16 or RHalf) built from the tile's heightData.</summary>
         public Texture2D? HeightTexture => this.heightTex;
-
-        /// <summary>Splat texture (RGBA32) built from the tile's splatData.</summary>
-        public Texture2D? SplatTexture => this.splatTex;
 
         /// <summary>
         /// The height texture format actually chosen: R16 if supported, RHalf otherwise.
@@ -99,35 +94,7 @@ namespace WorldPainter
                 this.heightTex!.LoadRawTextureData(this.ConvertR16ToRHalf(tile));
             this.heightTex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
 
-            // ── Splat texture: same reuse logic ──────────────────────────────
-            if (tile.IsSplatValid)
-            {
-                bool reuseSplat = this.splatTex != null
-                    && this.splatTex.width  == tile.splatRes
-                    && this.splatTex.height == tile.splatRes
-                    && this.splatTex.format == SPLAT_FORMAT;
-
-                if (!reuseSplat)
-                {
-                    if (this.splatTex != null) { SafeDestroy(this.splatTex); this.splatTex = null; }
-                    this.splatTex = new Texture2D(tile.splatRes, tile.splatRes, SPLAT_FORMAT,
-                        mipChain: false, linear: true)
-                    {
-                        name       = $"TerrainSplat_{tile.tileCoord.x}_{tile.tileCoord.y}",
-                        wrapMode   = TextureWrapMode.Clamp,
-                        filterMode = FilterMode.Bilinear,
-                    };
-                }
-                this.splatTex!.LoadRawTextureData(tile.splatData);
-                this.splatTex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
-            }
-
             this.IsUploaded = true;
-
-            Debug.Log($"[TerrainTileGpuResources] Uploaded tile {tile.tileCoord}: " +
-                      $"height={tile.heightRes}² ({chosenHeightFmt}) reuse={reuseHeight}, " +
-                      $"splat={tile.splatRes}² ({SPLAT_FORMAT}), " +
-                      $"range=[{tile.minHeight},{tile.maxHeight}]");
         }
 
         // ── Dispose ───────────────────────────────────────────────────────────
@@ -142,11 +109,6 @@ namespace WorldPainter
             {
                 SafeDestroy(this.heightTex);
                 this.heightTex = null;
-            }
-            if (this.splatTex != null)
-            {
-                SafeDestroy(this.splatTex);
-                this.splatTex = null;
             }
             this.IsUploaded = false;
         }

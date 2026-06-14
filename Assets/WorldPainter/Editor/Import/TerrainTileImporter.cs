@@ -54,9 +54,7 @@ namespace WorldPainter.Editor
             asset.heightData = rawBytes;
             asset.minHeight  = minHeight;
             asset.maxHeight  = maxHeight;
-            // Splat data left empty — Phase 5 populates it via the paint tool.
-            asset.splatRes   = TerrainWorldGrid.DEFAULT_SPLAT_RES;
-            asset.splatData  = System.Array.Empty<byte>();
+            // (Phase 3 cleanup — splat fields removed; per-tile palette weights live in alphamaps[].)
 
             AssetDatabase.CreateAsset(asset, outputAssetPath);
             AssetDatabase.SaveAssets();

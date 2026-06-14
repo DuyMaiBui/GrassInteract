@@ -17,6 +17,61 @@ namespace WorldPainter.Editor
         /// <summary>WorldPainter component currently bound for authoring. Set by the Inspector.</summary>
         public static WorldPainter? ActivePainter { get; set; }
 
+        // ── Tile edit mode (toggle Add / Remove via inspector TileStrip) ──────
+
+        /// <summary>
+        /// Inspector-driven tile-topology mode. Off = brush is the only scene interaction.
+        /// Add = scene shows green ghost quads at every open neighbour edge; click adds a tile.
+        /// Remove = scene shows red ghost quads on every existing tile; click removes it.
+        /// Drives <see cref="WorldPainterTileGhostHandler.OnSceneGui"/>.
+        /// </summary>
+        public enum TileEditModeKind
+        {
+            Off,
+            Add,
+            Remove,
+        }
+
+        /// <summary>Current tile-edit mode. Setter fires <see cref="TileEditModeChanged"/>.</summary>
+        public static TileEditModeKind TileEditMode
+        {
+            get => tileEditMode;
+            set
+            {
+                if (tileEditMode == value) return;
+                tileEditMode = value;
+                TileEditModeChanged?.Invoke(value);
+            }
+        }
+        private static TileEditModeKind tileEditMode = TileEditModeKind.Off;
+
+        /// <summary>Fired after <see cref="TileEditMode"/> changes.</summary>
+        public static event System.Action<TileEditModeKind>? TileEditModeChanged;
+
+        // ── Paint mode (Phase 1 — replaces the EditorTool active-state) ───────
+
+        /// <summary>
+        /// When true, the inspector-driven <c>WorldPainterSculptTool</c> processes Scene-view
+        /// input. When false the driver is short-circuited — handy as the "off" position of
+        /// the BrushDock Paint Mode toggle. Auto-enabled when the user selects a paintable
+        /// layer; users can flip it off to interact with the scene normally without restoring
+        /// the previous EditorTool (since there is no longer one).
+        /// </summary>
+        public static bool PaintModeActive
+        {
+            get => paintModeActive;
+            set
+            {
+                if (paintModeActive == value) return;
+                paintModeActive = value;
+                PaintModeChanged?.Invoke(value);
+            }
+        }
+        private static bool paintModeActive;
+
+        /// <summary>Fired after <see cref="PaintModeActive"/> flips. Argument = new value.</summary>
+        public static event System.Action<bool>? PaintModeChanged;
+
         // ── Brush-dirty notification ──────────────────────────────────────────
 
         /// <summary>
@@ -256,19 +311,30 @@ namespace WorldPainter.Editor
         /// </summary>
         public static int ActiveBiomeIndex { get; set; } = -1;
 
-        // ── Active splat channel (unified SurfaceLayers paint) ────────────────
+        // ── Active TerrainLayer palette index (Phase 2a/2b — new splat path) ──
 
         /// <summary>
-        /// The RGBA channel index [0..3] the splat brush writes to when a unified
-        /// <see cref="SplatLayer"/> is active (Phase 3 paint routing).
-        /// -1 = no channel selected / use legacy path.
-        ///
-        /// Set together with <see cref="SetActiveLayer"/>(splatLayer.name, Splat) when the user
-        /// clicks an albedo slot sub-row in the layer stack. The splat brush reads this value
-        /// and passes it as <c>_SplatLayer</c> to the GPU compute kernel, replacing the old
-        /// index-arithmetic path for the unified case.
+        /// Index into <see cref="WorldMapAsset.TerrainPalette"/> for the active paint ink.
+        /// -1 = no palette layer selected (brush dispatch returns early).
         /// </summary>
-        public static int ActiveSplatChannel { get; set; } = -1;
+        public static int ActivePaletteIndex
+        {
+            get => activePaletteIndex;
+            set
+            {
+                if (activePaletteIndex == value) return;
+                activePaletteIndex = value;
+                ActivePaletteIndexChanged?.Invoke(value);
+            }
+        }
+        private static int activePaletteIndex = -1;
+
+        /// <summary>Fired after <see cref="ActivePaletteIndex"/> changes.</summary>
+        public static event System.Action<int>? ActivePaletteIndexChanged;
+
+        // ── Active splat channel (unified SurfaceLayers paint) ────────────────
+
+        // (Phase 3 cleanup — ActiveSplatChannel removed. ActivePaletteIndex above is the SSOT.)
 
         // ── Stroke tracking ───────────────────────────────────────────────────
 
@@ -299,7 +365,6 @@ namespace WorldPainter.Editor
             ActivePainter    = null;
             ActiveLayerIndex = -1;
             ActiveBiomeIndex = -1;
-            ActiveSplatChannel = -1;
             ActiveLayerId    = string.Empty;
             ActiveLayerKind  = PaintLayerKind.None;
             ActiveBrushToolId  = string.Empty;
@@ -307,6 +372,12 @@ namespace WorldPainter.Editor
             ActiveLayerIndexChanged = null;
             ActiveBrushToolChanged  = null;
             BrushFalloffDirty = null;
+            paintModeActive   = false;
+            PaintModeChanged  = null;
+            tileEditMode      = TileEditModeKind.Off;
+            TileEditModeChanged = null;
+            activePaletteIndex = -1;
+            ActivePaletteIndexChanged = null;
             ResetLastStroked();
         }
     }

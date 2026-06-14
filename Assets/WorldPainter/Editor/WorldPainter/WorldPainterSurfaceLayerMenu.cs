@@ -12,19 +12,7 @@ namespace WorldPainter.Editor
     {
         private const string ROOT = "Tools/WorldPainter/Surface Layers/";
 
-        [MenuItem(ROOT + "Add Splat Layer")]
-        private static void AddSplatLayer()
-        {
-            if (Selection.activeObject is not WorldMapAsset map)
-            {
-                Debug.LogWarning("[WorldPainter] Select a WorldMapAsset first.");
-                return;
-            }
-
-            SplatLayer layer = WorldMapAssetLifecycle.AddSplatLayer(map, "Ground");
-            Debug.Log($"[WorldPainter] Added '{layer.name}'. Assign albedo textures (≤4) on its " +
-                      "TerrainLayerSet sub-asset, then paint with the splat tool to blend.", layer.LayerSet);
-        }
+        // (Phase 3 cleanup — "Add Splat Layer" menu removed. Use the BrushDock TerrainPalette strip.)
 
         [MenuItem(ROOT + "Add Grass Layer (blades + seeded density)")]
         private static void AddGrassLayer()
@@ -40,7 +28,7 @@ namespace WorldPainter.Editor
                       "Open the Control Panel to paint.", layer);
         }
 
-        [MenuItem(ROOT + "Create Demo (splat + grass)")]
+        [MenuItem(ROOT + "Create Demo (grass)")]
         private static void CreateDemo()
         {
             if (Selection.activeObject is not WorldMapAsset map)
@@ -50,8 +38,7 @@ namespace WorldPainter.Editor
             }
 
             WorldMapAssetLifecycle.CreateDemoSurfaceLayers(map);
-            Debug.Log("[WorldPainter] Created demo SurfaceLayers: 1 splat (assign albedos to its TerrainLayerSet) " +
-                      "+ 1 grass (blades, seeded density per tile). Grass renders immediately if the map has tiles.", map);
+            Debug.Log("[WorldPainter] Created demo SurfaceLayers: 1 grass (blades, seeded density per tile).", map);
         }
     }
 }

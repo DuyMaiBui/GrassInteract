@@ -11,43 +11,31 @@ using UnityEditor;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Reads back the per-tile working RenderTextures (height RT + splat RT) to CPU,
-    /// encodes them into the Phase 0 byte formats (R16 height + RGBA32 splat),
-    /// writes them into the <see cref="TerrainTileAsset"/>, and triggers a GPU re-upload.
+    /// Height-only readback writer (Phase 3 cleanup — splat path is gone). Reads back the
+    /// per-tile height RenderTexture to CPU, encodes it into the R16 byte format, writes it
+    /// into the <see cref="TerrainTileAsset"/>, and triggers a GPU re-upload.
     ///
-    /// Height encode uses <see cref="TerrainHeightFormat.EncodeHeight"/> (SSOT) so the
-    /// saved asset decodes back to the same value that was displayed — no preview/save drift.
+    /// Async path: call <see cref="RequestAsync"/> per drag stamp; <see cref="Tick"/> drains
+    /// the queue. Sync path: <see cref="ExecuteSync"/> on mouse-up.
     ///
-    /// Async path: call <see cref="RequestAsync"/> at stroke END (mouse-up).
-    /// Multiple tiles are queued by tile key; <see cref="Tick"/> drains ALL entries so
-    /// every tile touched by a cross-tile stroke persists independently.
-    ///
-    /// Synchronous path: call <see cref="ExecuteSync"/> for tests or forced saves.
-    /// NEVER call per-drag-sample to avoid editor stalls.
-    ///
-    /// Seam sync (P6): after every writeback the shared edge row/column between adjacent
-    /// tiles is copied so both tiles' edge texels are byte-identical. Uses the
-    /// <see cref="TerrainWorldGrid"/> 1-texel shared-edge convention.
-    /// Register neighbours via <see cref="RegisterNeighbours"/> before the stroke begins.
+    /// Seam sync: after every writeback the shared edge row/column between adjacent tiles is
+    /// copied so both tiles' edge texels are byte-identical. Register neighbours via
+    /// <see cref="RegisterNeighbours"/> before the stroke begins.
     /// </summary>
     public sealed class TerrainSculptRtWriteback : IDisposable
     {
-        // ── Async pending queue (keyed by tile — coalesces repeated drag requests) ──
-
         private sealed class PendingReadback
         {
-            public TerrainTileAsset       Tile;
+            public TerrainTileAsset        Tile;
             public TerrainTileGpuResources Gpu;
-            public RenderTexture          HeightRT;
-            public RenderTexture          SplatRT;
+            public RenderTexture           HeightRT;
 
             public PendingReadback(TerrainTileAsset tile, TerrainTileGpuResources gpu,
-                RenderTexture heightRT, RenderTexture splatRT)
+                RenderTexture heightRT)
             {
                 this.Tile     = tile;
                 this.Gpu      = gpu;
                 this.HeightRT = heightRT;
-                this.SplatRT  = splatRT;
             }
         }
 
@@ -56,18 +44,9 @@ namespace WorldPainter.Editor
 
         // ── Neighbour registry (keyed by tile for seam sync) ──────────────────
 
-        /// <summary>
-        /// All tile assets in the current painter, keyed by coord.
-        /// Updated via <see cref="RegisterNeighbours"/> at stroke start.
-        /// Used by seam sync to find the adjacent tile for edge-copy.
-        /// </summary>
         private readonly Dictionary<Vector2Int, TerrainTileAsset> neighbourMap =
             new Dictionary<Vector2Int, TerrainTileAsset>();
 
-        /// <summary>
-        /// Register (or refresh) the full tile map so seam sync can find
-        /// adjacent tiles. Call once per stroke before the first stamp.
-        /// </summary>
         public void RegisterNeighbours(IEnumerable<(Vector2Int coord, TerrainTileAsset tile)> tiles)
         {
             this.neighbourMap.Clear();
@@ -75,37 +54,24 @@ namespace WorldPainter.Editor
                 this.neighbourMap[coord] = tile;
         }
 
-        // ── Async public API ──────────────────────────────────────────────────
+        // ── Async ────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Queue an async GPU→CPU readback for a tile.
-        /// Repeated calls for the same tile coalesce to the latest RTs (throttled drag).
-        /// Call <see cref="Tick"/> each editor update to drain the queue.
-        /// </summary>
         public void RequestAsync(
             TerrainTileAsset tile,
             TerrainTileGpuResources gpu,
-            RenderTexture heightRT,
-            RenderTexture splatRT)
+            RenderTexture heightRT)
         {
-            if (tile == null)    throw new ArgumentNullException(nameof(tile));
-            if (gpu == null)     throw new ArgumentNullException(nameof(gpu));
+            if (tile == null)     throw new ArgumentNullException(nameof(tile));
+            if (gpu == null)      throw new ArgumentNullException(nameof(gpu));
             if (heightRT == null) throw new ArgumentNullException(nameof(heightRT));
-            if (splatRT == null)  throw new ArgumentNullException(nameof(splatRT));
 
-            // Upsert — latest RTs win (coalesces repeated drag requests for the same tile).
-            this.pendingMap[tile] = new PendingReadback(tile, gpu, heightRT, splatRT);
+            this.pendingMap[tile] = new PendingReadback(tile, gpu, heightRT);
         }
 
-        /// <summary>
-        /// Pump pending async requests. Call from EditorApplication.update or editor window OnGUI.
-        /// Drains ALL queued tiles so every tile in a cross-tile stroke persists independently.
-        /// </summary>
         public void Tick()
         {
             if (this.pendingMap.Count == 0) return;
 
-            // Snapshot + clear first so new RequestAsync calls during callbacks queue correctly.
             var snapshot = new PendingReadback[this.pendingMap.Count];
             this.pendingMap.Values.CopyTo(snapshot, 0);
             this.pendingMap.Clear();
@@ -114,19 +80,12 @@ namespace WorldPainter.Editor
                 this.IssueTileReadback(entry);
         }
 
-        // ── Per-tile async readback chain ─────────────────────────────────────
-
         private void IssueTileReadback(PendingReadback entry)
         {
-            // Capture ALL fields as locals — closures must not reference instance fields
-            // or the entry object (which may be reused/overwritten by a concurrent request).
             var tile     = entry.Tile;
             var gpu      = entry.Gpu;
             var heightRT = entry.HeightRT;
-            var splatRT  = entry.SplatRT;
-
-            // Unity-null guard: destroyed objects compare == null via operator overload.
-            if (tile == null || gpu == null || heightRT == null || splatRT == null) return;
+            if (tile == null || gpu == null || heightRT == null) return;
 
             AsyncGPUReadback.Request(heightRT, 0, request =>
             {
@@ -136,49 +95,25 @@ namespace WorldPainter.Editor
                         $"for tile {tile.tileCoord}.");
                     return;
                 }
-                // Guard again inside callback — domain reload or scene change may have
-                // destroyed the tile/gpu between request dispatch and callback.
-                if (tile == null || gpu == null || splatRT == null) return;
+                if (tile == null || gpu == null) return;
 
                 var heightRaw = request.GetData<float>();
                 this.WriteHeightToAsset(tile, heightRaw);
-
-                // Chain splat readback with its own captured locals.
-                AsyncGPUReadback.Request(splatRT, 0, splatRequest =>
-                {
-                    if (splatRequest.hasError)
-                    {
-                        Debug.LogError("[TerrainSculptRtWriteback] AsyncGPUReadback error on splat RT " +
-                            $"for tile {tile.tileCoord}.");
-                        return;
-                    }
-                    if (tile == null || gpu == null) return;
-
-                    var splatRaw = splatRequest.GetData<Color>();
-                    this.WriteSplatToAsset(tile, splatRaw);
-                    this.FinalizeWriteback(tile, gpu);
-                });
+                this.FinalizeWriteback(tile, gpu);
             });
         }
 
-        // ── Synchronous path (for tests and forced saves) ──────────────────────
+        // ── Sync ─────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Synchronous writeback: reads RT pixels on the CPU immediately.
-        /// Use in tests or for an explicit "Save All" action. Slower than async.
-        /// </summary>
         public void ExecuteSync(
             TerrainTileAsset tile,
             TerrainTileGpuResources gpu,
-            RenderTexture heightRT,
-            RenderTexture splatRT)
+            RenderTexture heightRT)
         {
-            if (tile == null)    throw new ArgumentNullException(nameof(tile));
-            if (gpu == null)     throw new ArgumentNullException(nameof(gpu));
+            if (tile == null)     throw new ArgumentNullException(nameof(tile));
+            if (gpu == null)      throw new ArgumentNullException(nameof(gpu));
             if (heightRT == null) throw new ArgumentNullException(nameof(heightRT));
-            if (splatRT == null)  throw new ArgumentNullException(nameof(splatRT));
 
-            // Read height RT pixels synchronously.
             var prevActive = RenderTexture.active;
             RenderTexture.active = heightRT;
             var tmpHeight = new Texture2D(heightRT.width, heightRT.height,
@@ -187,7 +122,6 @@ namespace WorldPainter.Editor
             tmpHeight.Apply();
             RenderTexture.active = prevActive;
 
-            // Resize heightData array if needed.
             int heightRes = tile.heightRes;
             int expectedBytes = heightRes * heightRes * TerrainHeightFormat.BYTES_PER_SAMPLE;
             if (tile.heightData == null || tile.heightData.Length != expectedBytes)
@@ -195,12 +129,10 @@ namespace WorldPainter.Editor
 
             var pixels = tmpHeight.GetPixels();
             int rtRes = heightRT.width;
-
             for (int y = 0; y < heightRes; ++y)
             {
                 for (int x = 0; x < heightRes; ++x)
                 {
-                    // Sample the RT at the proportional location if resolutions differ.
                     int rtX = Mathf.Clamp(Mathf.RoundToInt((float)x / (heightRes - 1) * (rtRes - 1)), 0, rtRes - 1);
                     int rtY = Mathf.Clamp(Mathf.RoundToInt((float)y / (heightRes - 1) * (rtRes - 1)), 0, rtRes - 1);
                     float normalized = pixels[rtY * rtRes + rtX].r;
@@ -211,55 +143,13 @@ namespace WorldPainter.Editor
             }
             UnityEngine.Object.DestroyImmediate(tmpHeight);
 
-            // Read splat RT.
-            RenderTexture.active = splatRT;
-            var tmpSplat = new Texture2D(splatRT.width, splatRT.height,
-                TextureFormat.RGBA32, mipChain: false, linear: true);
-            tmpSplat.ReadPixels(new Rect(0, 0, splatRT.width, splatRT.height), 0, 0);
-            tmpSplat.Apply();
-            RenderTexture.active = prevActive;
-
-            int splatRes = tile.splatRes;
-            int expectedSplat = splatRes * splatRes * 4;
-            if (tile.splatData == null || tile.splatData.Length != expectedSplat)
-                tile.splatData = new byte[expectedSplat];
-
-            var splatPx = tmpSplat.GetPixels32();
-            int srtRes  = splatRT.width;
-            for (int y = 0; y < splatRes; ++y)
-            {
-                for (int x = 0; x < splatRes; ++x)
-                {
-                    int sx = Mathf.Clamp(Mathf.RoundToInt((float)x / (splatRes - 1) * (srtRes - 1)), 0, srtRes - 1);
-                    int sy = Mathf.Clamp(Mathf.RoundToInt((float)y / (splatRes - 1) * (srtRes - 1)), 0, srtRes - 1);
-                    var c32 = splatPx[sy * srtRes + sx];
-                    int baseIdx = (y * splatRes + x) * 4;
-                    tile.splatData[baseIdx]     = c32.r;
-                    tile.splatData[baseIdx + 1] = c32.g;
-                    tile.splatData[baseIdx + 2] = c32.b;
-                    tile.splatData[baseIdx + 3] = c32.a;
-                }
-            }
-            UnityEngine.Object.DestroyImmediate(tmpSplat);
-
             this.FinalizeWriteback(tile, gpu);
         }
 
-        // ── Dispose ───────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Discard all queued async readbacks without finalizing them.
-        /// Call before mouse-up ExecuteSync so stale throttled-drag entries
-        /// (queued while RTs were alive) don't fire after RTs are destroyed.
-        /// </summary>
         public void CancelPending() => this.pendingMap.Clear();
+        public void Dispose()       => this.pendingMap.Clear();
 
-        public void Dispose()
-        {
-            this.pendingMap.Clear();
-        }
-
-        // ── Private helpers ───────────────────────────────────────────────────
+        // ── Private helpers ──────────────────────────────────────────────────
 
         private void WriteHeightToAsset(TerrainTileAsset tile,
             Unity.Collections.NativeArray<float> heightRaw)
@@ -284,110 +174,42 @@ namespace WorldPainter.Editor
             }
         }
 
-        private void WriteSplatToAsset(TerrainTileAsset tile,
-            Unity.Collections.NativeArray<Color> splatRaw)
-        {
-            int splatRes = tile.splatRes;
-            int expectedSplat = splatRes * splatRes * 4;
-            if (tile.splatData == null || tile.splatData.Length != expectedSplat)
-                tile.splatData = new byte[expectedSplat];
-
-            int srtRes = (int)Mathf.Sqrt(splatRaw.Length);
-            for (int y = 0; y < splatRes; ++y)
-            {
-                for (int x = 0; x < splatRes; ++x)
-                {
-                    int sx = Mathf.Clamp(Mathf.RoundToInt((float)x / (splatRes - 1) * (srtRes - 1)), 0, srtRes - 1);
-                    int sy = Mathf.Clamp(Mathf.RoundToInt((float)y / (splatRes - 1) * (srtRes - 1)), 0, srtRes - 1);
-                    Color c = splatRaw[sy * srtRes + sx];
-                    int baseIdx = (y * splatRes + x) * 4;
-                    tile.splatData[baseIdx]     = (byte)(c.r * 255f + 0.5f);
-                    tile.splatData[baseIdx + 1] = (byte)(c.g * 255f + 0.5f);
-                    tile.splatData[baseIdx + 2] = (byte)(c.b * 255f + 0.5f);
-                    tile.splatData[baseIdx + 3] = (byte)(c.a * 255f + 0.5f);
-                }
-            }
-        }
-
         private void FinalizeWriteback(TerrainTileAsset tile, TerrainTileGpuResources gpu)
         {
-            // Seam sync: copy the shared edge row/col so both adjacent tiles' boundary
-            // texels are byte-identical (TerrainWorldGrid 1-texel shared-edge convention).
             this.ApplySeamSync(tile);
 
-            // Re-upload to GPU for live preview.
             if (tile.IsHeightValid)
                 gpu.Upload(tile);
 
 #if UNITY_EDITOR
             EditorUtility.SetDirty(tile);
 #endif
-            Debug.Log($"[TerrainSculptRtWriteback] Writeback complete for tile {tile.tileCoord}.");
         }
 
-        // ── Seam sync ──────────────────────────────────────────────────────────
+        // ── Seam sync (height only) ──────────────────────────────────────────
 
-        /// <summary>
-        /// Copies the shared edge row/column from <paramref name="sourceTile"/> into every
-        /// registered neighbour that shares that edge, making both tiles' boundary texels
-        /// byte-identical (TerrainWorldGrid 1-texel shared-edge convention).
-        ///
-        /// Height: last column (x = heightRes-1) is shared with neighbour (+1, 0).
-        ///         last row    (z = heightRes-1) is shared with neighbour (0, +1).
-        /// Splat : same edges on splatRes resolution.
-        ///
-        /// Density channels are NOT synced here — the R8 density map has its own
-        /// per-tile writeback pipeline via WorldPainterDensityEncoder.
-        /// </summary>
         public void ApplySeamSync(TerrainTileAsset sourceTile)
         {
             if (sourceTile == null) return;
-
             var coord = sourceTile.tileCoord;
 
-            // +X neighbour: copy right column of source → left column of neighbour.
             var plusX = new Vector2Int(coord.x + 1, coord.y);
             if (this.neighbourMap.TryGetValue(plusX, out var neighX) && neighX != null)
-            {
                 SyncHeightColumn(sourceTile, neighX, isRight: true);
-                SyncSplatColumn(sourceTile, neighX, isRight: true);
-            }
 
-            // -X neighbour: copy left column of source → right column of neighbour.
             var minusX = new Vector2Int(coord.x - 1, coord.y);
             if (this.neighbourMap.TryGetValue(minusX, out var neighMX) && neighMX != null)
-            {
                 SyncHeightColumn(sourceTile, neighMX, isRight: false);
-                SyncSplatColumn(sourceTile, neighMX, isRight: false);
-            }
 
-            // +Z neighbour: copy top row of source → bottom row of neighbour.
             var plusZ = new Vector2Int(coord.x, coord.y + 1);
             if (this.neighbourMap.TryGetValue(plusZ, out var neighZ) && neighZ != null)
-            {
                 SyncHeightRow(sourceTile, neighZ, isTop: true);
-                SyncSplatRow(sourceTile, neighZ, isTop: true);
-            }
 
-            // -Z neighbour: copy bottom row of source → top row of neighbour.
             var minusZ = new Vector2Int(coord.x, coord.y - 1);
             if (this.neighbourMap.TryGetValue(minusZ, out var neighMZ) && neighMZ != null)
-            {
                 SyncHeightRow(sourceTile, neighMZ, isTop: false);
-                SyncSplatRow(sourceTile, neighMZ, isTop: false);
-            }
         }
 
-        // ── Height seam helpers ────────────────────────────────────────────────
-
-        /// <summary>
-        /// Copies the right (isRight=true) or left (isRight=false) height column of
-        /// <paramref name="src"/> into the left (isRight=true) or right (isRight=false)
-        /// column of <paramref name="dst"/>.
-        ///
-        /// Both tiles use R16 LE (2 bytes per texel). Heights map 1:1 when resolutions match.
-        /// When resolutions differ the smaller resolution is resampled at integer texel boundaries.
-        /// </summary>
         private static void SyncHeightColumn(TerrainTileAsset src, TerrainTileAsset dst, bool isRight)
         {
             if (!src.IsHeightValid || !dst.IsHeightValid) return;
@@ -403,18 +225,14 @@ namespace WorldPainter.Editor
                     ? dstRow
                     : Mathf.Clamp(Mathf.RoundToInt((float)dstRow / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
 
-                int srcIdx = srcRow * srcRes + srcCol;
-                int dstIdx = dstRow * dstRes + dstCol;
-
-                int srcByte = srcIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
-                int dstByte = dstIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                int srcByte = (srcRow * srcRes + srcCol) * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                int dstByte = (dstRow * dstRes + dstCol) * TerrainHeightFormat.BYTES_PER_SAMPLE;
 
                 dst.heightData[dstByte]     = src.heightData[srcByte];
                 dst.heightData[dstByte + 1] = src.heightData[srcByte + 1];
             }
         }
 
-        /// <summary>Copies the top (isTop=true) or bottom (isTop=false) height row.</summary>
         private static void SyncHeightRow(TerrainTileAsset src, TerrainTileAsset dst, bool isTop)
         {
             if (!src.IsHeightValid || !dst.IsHeightValid) return;
@@ -430,68 +248,11 @@ namespace WorldPainter.Editor
                     ? dstCol
                     : Mathf.Clamp(Mathf.RoundToInt((float)dstCol / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
 
-                int srcIdx = srcRow * srcRes + srcCol;
-                int dstIdx = dstRow * dstRes + dstCol;
-
-                int srcByte = srcIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
-                int dstByte = dstIdx * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                int srcByte = (srcRow * srcRes + srcCol) * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                int dstByte = (dstRow * dstRes + dstCol) * TerrainHeightFormat.BYTES_PER_SAMPLE;
 
                 dst.heightData[dstByte]     = src.heightData[srcByte];
                 dst.heightData[dstByte + 1] = src.heightData[srcByte + 1];
-            }
-        }
-
-        // ── Splat seam helpers ─────────────────────────────────────────────────
-
-        /// <summary>Copies right/left RGBA32 column of splat data between adjacent tiles.</summary>
-        private static void SyncSplatColumn(TerrainTileAsset src, TerrainTileAsset dst, bool isRight)
-        {
-            if (!src.IsSplatValid || !dst.IsSplatValid) return;
-
-            int srcRes = src.splatRes;
-            int dstRes = dst.splatRes;
-            int srcCol = isRight ? srcRes - 1 : 0;
-            int dstCol = isRight ? 0          : dstRes - 1;
-
-            for (int dstRow = 0; dstRow < dstRes; ++dstRow)
-            {
-                int srcRow = (srcRes == dstRes)
-                    ? dstRow
-                    : Mathf.Clamp(Mathf.RoundToInt((float)dstRow / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
-
-                int srcBase = (srcRow * srcRes + srcCol) * 4;
-                int dstBase = (dstRow * dstRes + dstCol) * 4;
-
-                dst.splatData[dstBase]     = src.splatData[srcBase];
-                dst.splatData[dstBase + 1] = src.splatData[srcBase + 1];
-                dst.splatData[dstBase + 2] = src.splatData[srcBase + 2];
-                dst.splatData[dstBase + 3] = src.splatData[srcBase + 3];
-            }
-        }
-
-        /// <summary>Copies top/bottom RGBA32 row of splat data between adjacent tiles.</summary>
-        private static void SyncSplatRow(TerrainTileAsset src, TerrainTileAsset dst, bool isTop)
-        {
-            if (!src.IsSplatValid || !dst.IsSplatValid) return;
-
-            int srcRes = src.splatRes;
-            int dstRes = dst.splatRes;
-            int srcRow = isTop ? srcRes - 1 : 0;
-            int dstRow = isTop ? 0          : dstRes - 1;
-
-            for (int dstCol = 0; dstCol < dstRes; ++dstCol)
-            {
-                int srcCol = (srcRes == dstRes)
-                    ? dstCol
-                    : Mathf.Clamp(Mathf.RoundToInt((float)dstCol / (dstRes - 1) * (srcRes - 1)), 0, srcRes - 1);
-
-                int srcBase = (srcRow * srcRes + srcCol) * 4;
-                int dstBase = (dstRow * dstRes + dstCol) * 4;
-
-                dst.splatData[dstBase]     = src.splatData[srcBase];
-                dst.splatData[dstBase + 1] = src.splatData[srcBase + 1];
-                dst.splatData[dstBase + 2] = src.splatData[srcBase + 2];
-                dst.splatData[dstBase + 3] = src.splatData[srcBase + 3];
             }
         }
     }
