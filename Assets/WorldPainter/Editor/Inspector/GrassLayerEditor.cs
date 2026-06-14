@@ -78,15 +78,10 @@ namespace WorldPainter.Editor
 
         static void RebuildOnAllPainters(GrassLayer layer)
         {
-            var painters = Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
-            for (int i = 0; i < painters.Length; ++i)
-            {
-                var p = painters[i];
-                if (p == null || p.Map == null) continue;
-                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
-                p.RebuildGrassLayer(layer);
-                UnityEditor.SceneView.RepaintAll();
-            }
+            // Coalesced — see WorldPainterRebuildScheduler. Fast typing in numeric fields can
+            // fire EndChangeCheck multiple times per frame; the scheduler collapses them so the
+            // game-view render doesn't catch a partially-disposed GPU buffer.
+            WorldPainterRebuildScheduler.MarkGrassDirty(layer);
         }
 
         static void DrawBox(string label, System.Action body)

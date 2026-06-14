@@ -383,6 +383,56 @@ namespace WorldPainter
             Debug.Log($"[ChunkedInstanceBuffer] Baked: TotalInstances={totalInst}, " +
                       $"Grid={gridX}×{gridZ} ({totalChunks} chunks), CellSize={cellSize}m, " +
                       $"ScaleMax={maxScale:F3}, MeshExtent={meshExtent:F3}m");
+
+            // ── DIAGNOSTIC (remove with matching prints) ──────────────────────
+            // Inspect the highest authored-index instance's encoded GPU record. Compare:
+            //   • posWS   should match the most-recent EmitExactlyOneAt.pivot
+            //   • decoded yawDeg + scale should match the stored rec.rotation.eulerAngles.y / scale
+            //   • The sortedToAuthMap permutation reveals which sorted slot it landed in
+            if (totalInst > 0)
+            {
+                int authoredIdx = totalInst - 1;
+                int sortedIdx   = -1;
+                for (int i = 0; i < totalInst; i++)
+                {
+                    if (sortedToAuthMap[i] == authoredIdx) { sortedIdx = i; break; }
+                }
+                var rec = instOut[sortedIdx];
+                float decodedYaw   = (float)((rec.packedYawScale >> 16) & 0xFFFFu) / 65535f * 360f;
+                float decodedScale = (float)( rec.packedYawScale        & 0xFFFFu) / 65535f * maxScale;
+
+                // Find which chunk owns this sortedIdx and inspect its range + AABB. If the
+                // chunk's AABB doesn't contain rec.posWS, frustum cull may reject the new
+                // instance entirely (and the "wrong-position cube" you see is some OLD instance).
+                int owningChunk = -1;
+                for (int c = 0; c < totalChunks; c++)
+                {
+                    var r = rangeOut[c];
+                    if (sortedIdx >= (int)r.start && sortedIdx < (int)(r.start + r.count))
+                    { owningChunk = c; break; }
+                }
+                string chunkInfo = owningChunk >= 0
+                    ? $"chunk={owningChunk} range=[{rangeOut[owningChunk].start},+{rangeOut[owningChunk].count}) " +
+                      $"aabb.min={aabbOut[owningChunk].min:F2} aabb.max={aabbOut[owningChunk].max:F2}"
+                    : "chunk=NOT_FOUND";
+
+                Debug.Log(
+                    $"[ChunkedInstanceBuffer] Latest record (authoredIdx={authoredIdx} sortedIdx={sortedIdx}): " +
+                    $"posWS={rec.posWS:F4} decodedYaw={decodedYaw:F2}° decodedScale={decodedScale:F4} " +
+                    $"oriented={oriented} | {chunkInfo}");
+
+                // ── DIAGNOSTIC: visualize the stored posWS in the scene view ────
+                // Persistent 30-second debug rays at the LATEST instance's posWS so the user
+                // can compare "where the data says the cube is" against "where the cube is
+                // actually rendered." If the rays and the cube don't coincide, the shader is
+                // rendering at a different world position than inst.posWS.
+                //   - RED ray pointing UP from posWS (5 m tall)
+                //   - GREEN ray pointing NORTH (+Z) for orientation (1 m)
+                //   - BLUE ray pointing EAST (+X) for orientation (1 m)
+                Debug.DrawRay(rec.posWS, Vector3.up    * 5f, Color.red,   30f, false);
+                Debug.DrawRay(rec.posWS, Vector3.forward * 1f, Color.green, 30f, false);
+                Debug.DrawRay(rec.posWS, Vector3.right   * 1f, Color.blue,  30f, false);
+            }
         }
 
         // ─────────────────────────────────────────────────────────────────────

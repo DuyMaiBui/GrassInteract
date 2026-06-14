@@ -24,6 +24,7 @@ namespace WorldPainter.Editor
         // ── Contextual tool palette ───────────────────────────────────────────
 
         private VisualElement? toolPaletteRoot;
+        private VisualElement? brushSettingsContainer;
 
         // ── Preset slot labels ────────────────────────────────────────────────
 
@@ -60,36 +61,46 @@ namespace WorldPainter.Editor
             // Contextual tool palette (tools for the active layer kind)
             dock.Add(this.BuildToolPalette());
 
-            // Shape toggle (Circle / Square)
-            dock.Add(this.BuildShapeToggle());
-
-            // Size
-            dock.Add(this.BuildSlider("Size (m)", 0.5f, 256f,
-                () => brush.size,
-                v  => brush.size = v));
-
-            // Strength
-            dock.Add(this.BuildSlider("Strength", 0f, 1f,
-                () => brush.strength,
-                v  => brush.strength = v));
-
-            // Falloff CurveField
-            dock.Add(this.BuildCurveField(brush));
-
-            // Spacing
-            dock.Add(this.BuildSlider("Spacing (m)", 0.1f, 64f,
-                () => brush.spacing,
-                v  => brush.spacing = v));
-
-            // Flow
-            dock.Add(this.BuildSlider("Flow", 0f, 1f,
-                () => brush.flow,
-                v  => brush.flow = v));
+            // Brush size / falloff / spacing / flow are bundled — hidden for prop layers
+            // because Place / Single / Select / Erase don't use a brush footprint (they
+            // operate at the cursor). Showing them then would be confusing UX.
+            this.brushSettingsContainer = new VisualElement();
+            this.brushSettingsContainer.Add(this.BuildShapeToggle());
+            this.brushSettingsContainer.Add(this.BuildSlider("Size (m)", 0.5f, 256f,
+                () => brush.size, v => brush.size = v));
+            this.brushSettingsContainer.Add(this.BuildSlider("Strength", 0f, 1f,
+                () => brush.strength, v => brush.strength = v));
+            this.brushSettingsContainer.Add(this.BuildCurveField(brush));
+            this.brushSettingsContainer.Add(this.BuildSlider("Spacing (m)", 0.1f, 64f,
+                () => brush.spacing, v => brush.spacing = v));
+            this.brushSettingsContainer.Add(this.BuildSlider("Flow", 0f, 1f,
+                () => brush.flow, v => brush.flow = v));
+            dock.Add(this.brushSettingsContainer);
 
             // P6: preset slots bar
             dock.Add(this.BuildPresetBar());
 
+            // Hook layer-kind changes so the brush-settings container hides for prop layers.
+            this.RefreshBrushSettingsVisibility();
+            System.Action<string, WorldPainterState.PaintLayerKind> onActive =
+                (_, __) => this.RefreshBrushSettingsVisibility();
+            WorldPainterState.ActiveLayerChanged += onActive;
+            dock.RegisterCallback<DetachFromPanelEvent>(_ =>
+                WorldPainterState.ActiveLayerChanged -= onActive);
+
             return dock;
+        }
+
+        /// <summary>
+        /// Hides the brush size / falloff / spacing / flow controls when a Prop layer is the
+        /// active paint target — the prop tools (Place / Single / Select / Erase) operate at the
+        /// cursor rather than within a brush footprint, so the controls would only confuse.
+        /// </summary>
+        private void RefreshBrushSettingsVisibility()
+        {
+            if (this.brushSettingsContainer == null) return;
+            bool isProp = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
+            this.brushSettingsContainer.style.display = isProp ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         // ── TerrainLayer palette strip (Phase 2c) ─────────────────────────────
@@ -428,10 +439,12 @@ namespace WorldPainter.Editor
                 var btn = new Button(() =>
                 {
                     WorldPainterState.SetActiveBrushTool(tool.Id);
-                    // Phase 1 — clicking any tool also turns paint mode on. The driver is
-                    // permanently subscribed to SceneView.duringSceneGui by the inspector;
-                    // this flag is the on/off gate.
-                    WorldPainterState.PaintModeActive = true;
+                    // Paint Mode = "I am painting/erasing with a continuous brush stroke."
+                    // Click-only prop tools (Place / Single / Select) are NOT brush strokes,
+                    // so picking them turns Paint Mode OFF; picking a continuous-stroke tool
+                    // (paint, erase, sculpt, etc.) turns it ON. The SculptTool gate lets
+                    // click-only tools dispatch regardless of this flag.
+                    WorldPainterState.PaintModeActive = !WorldPainterState.IsClickOnlyTool(tool.Id);
                 });
                 btn.AddToClassList("wp-mode-btn");
                 btn.style.flexGrow = 1;

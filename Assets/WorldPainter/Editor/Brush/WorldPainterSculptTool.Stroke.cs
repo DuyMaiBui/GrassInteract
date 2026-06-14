@@ -154,6 +154,19 @@ namespace WorldPainter.Editor
         {
             var brush = WorldPainterState.Brush;
 
+            // Props are LAYER-GLOBAL (one AuthoredInstances list per layer, no per-tile bucket
+            // at brush time). Dispatching per overlapped tile would call InstancePlaceTool.Apply
+            // once per tile, multiplying placement by tile count whenever the brush footprint
+            // straddles >1 tile (the "click → many instances on large mesh" bug). Just dispatch
+            // once at the cursor's tile.
+            LayerType activeKind = WorldPainterState.EffectiveLayerType(painter);
+            if (activeKind == LayerType.Props)
+            {
+                Vector2Int cursorCoord = TerrainWorldGrid.WorldToTileCoord(worldPos.x, worldPos.z);
+                this.DispatchOneTile(painter, worldPos, cursorCoord);
+                return;
+            }
+
             this.resolveResults.Clear();
             TerrainPaintTargetResolver.Resolve(
                 new Vector2(worldPos.x, worldPos.z),

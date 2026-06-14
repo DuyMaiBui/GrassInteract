@@ -343,7 +343,14 @@ namespace WorldPainter.Editor
         /// </summary>
         private void OnActiveLayerChanged(string layerId, WorldPainterState.PaintLayerKind kind)
         {
-            WorldPainterState.PaintModeActive = kind != WorldPainterState.PaintLayerKind.None;
+            // Auto-enable Paint Mode ONLY when the new layer's default tool is a continuous
+            // brush stroke. Prop layers default to "Place" (click-only) — auto-enabling Paint
+            // Mode there would show a misleading "Paint Mode: ON" label even though the user
+            // is just placing single instances. The SculptTool gate lets click-only tools
+            // dispatch regardless of this flag, so prop placement still works.
+            WorldPainterState.PaintModeActive =
+                kind != WorldPainterState.PaintLayerKind.None &&
+                kind != WorldPainterState.PaintLayerKind.Prop;
         }
 
         // ── Manual rebuild ────────────────────────────────────────────────────

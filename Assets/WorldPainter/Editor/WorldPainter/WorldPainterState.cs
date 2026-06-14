@@ -303,6 +303,16 @@ namespace WorldPainter.Editor
             ActiveBrushToolChanged?.Invoke(toolId);
         }
 
+        /// <summary>
+        /// True when the tool is a single-click action (no continuous brush stroke):
+        /// <c>instance.place</c>, <c>instance.single</c>, <c>instance.select</c>.
+        /// These tools bypass the <see cref="PaintModeActive"/> gate and do NOT auto-enable
+        /// Paint Mode when selected — "Paint Mode" is reserved for continuous paint/erase
+        /// strokes (density paint, terrain layer paint, height sculpt, etc.).
+        /// </summary>
+        public static bool IsClickOnlyTool(string toolId) =>
+            toolId == "instance.place" || toolId == "instance.single" || toolId == "instance.select";
+
         // ── Active biome (P5) ─────────────────────────────────────────────────
 
         /// <summary>

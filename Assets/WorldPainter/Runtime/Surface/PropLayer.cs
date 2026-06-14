@@ -29,14 +29,26 @@ namespace WorldPainter
 
         [SerializeField] private ScatterInstanceTiltConfig tilt;
 
-        // ── Deform anchor ────────────────────────────────────────────────────────
+        // ── Mesh anchor (single source of truth) ─────────────────────────────────
+        // Local-space point on the mesh that BOTH:
+        //   1) lands exactly at the cursor / scatter position (place-from-anchor formula
+        //      `pivot = pos − rot · (anchor · scale)`),  and
+        //   2) drives wind/tilt deform sampling.
+        // This unifies what was briefly split into anchorOffsetLocal + propPivotOffset during
+        // the unified-PropLayer migration; the split caused the Place tool and the
+        // brush/biome scatter to use different offsets for the same conceptual point — visible
+        // as instances landing in the wrong spot. OnValidate migrates any legacy
+        // propPivotOffset value into anchorOffsetLocal once, then zeros the legacy field.
 
-        [Tooltip("Local-space offset of the deform sampling anchor from the instance pivot.")]
+        [Tooltip("Mesh-local anchor point. Lands at the cursor / scatter position AND drives " +
+                 "wind/tilt deform sampling. Use \"Auto-anchor: mesh base on cursor\" in the " +
+                 "Setup panel to set this to the mesh's lowest local-Y vertex.")]
         [SerializeField] private Vector3 anchorOffsetLocal = Vector3.zero;
 
-        // ── Prop placement anchor config ─────────────────────────────────────────
-
-        [Tooltip("Pivot offset applied to every placed instance in local space.")]
+        // Deprecated. Kept hidden+serialized for ONE cycle so OnValidate can migrate the value
+        // out of older assets. Remove after every prop layer in the project has been opened
+        // once with this build (OnValidate fires on asset load + property change).
+        [HideInInspector]
         [SerializeField] private Vector3 propPivotOffset = Vector3.zero;
 
         [Tooltip("When true, each placed instance is snapped to the surface Y.")]
@@ -109,7 +121,6 @@ namespace WorldPainter
 
         // ── Prop placement accessors ─────────────────────────────────────────────
 
-        public Vector3 PropPivotOffset  => this.propPivotOffset;
         public bool    PropGroundSnap   => this.propGroundSnap;
         public bool    PropAlignToNormal => this.propAlignToNormal;
 
@@ -162,10 +173,28 @@ namespace WorldPainter
         internal void EditorSetBounds(ScatterBoundsConfig cfg)          => this.bounds    = cfg;
         internal void EditorSetPlacement(ScatterPlacementConfig cfg)    => this.placement = cfg;
         internal void EditorSetTilt(ScatterInstanceTiltConfig cfg)      => this.tilt      = cfg;
+        internal void EditorSetAnchorOffset(Vector3 offset)             => this.anchorOffsetLocal = offset;
 
 #if UNITY_EDITOR
+        // ── Migration ────────────────────────────────────────────────────────────
+        // OnValidate fires on asset load (after deserialize) and on every inspector edit.
+        // Two one-shot migrations live here:
+        //   1) propPivotOffset → anchorOffsetLocal (unifies the placement / deform anchor;
+        //      see "Mesh anchor (single source of truth)" comment up top).
+        //   2) ScatterRenderConfig render-cull distance migration.
+        // Both are idempotent — they only mutate when their source field is non-default.
+
         private void OnValidate()
         {
+            // 1) Pivot-offset merge into the single mesh anchor.
+            if (this.propPivotOffset != Vector3.zero)
+            {
+                this.anchorOffsetLocal += this.propPivotOffset;
+                this.propPivotOffset    = Vector3.zero;
+                UnityEditor.EditorUtility.SetDirty(this);
+            }
+
+            // 2) Render-cull distance migration.
             var migrated = ScatterRenderConfig.MigrateCull(this.render);
             if (migrated.RenderCullDistance != this.render.RenderCullDistance)
             {

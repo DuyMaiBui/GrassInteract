@@ -73,31 +73,70 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Places exactly one instance at <paramref name="pos"/> (the Single tool). Reuses the
-        /// full anchor/ground-snap/slope pipeline via a single-density, near-zero-radius emit.
+        /// Places exactly one instance whose mesh-local <see cref="PropLayer.AnchorOffsetLocal"/>
+        /// point lands exactly on <paramref name="exactPos"/> — the "place-from-anchor" pattern
+        /// proven in commit 35e2def's <c>InstancePlacementTool.BuildRecord</c>.
+        ///
+        /// Stored position formula (must match <see cref="PropGhostPreview"/>):
+        ///   <c>pivot = exactPos − rot · (anchor · scale)</c>
+        /// At runtime the shader does <c>vertex = pivot + rot · (localPos · scale)</c>; at the
+        /// anchor local point this evaluates back to <c>exactPos</c>, so the anchor — and any
+        /// associated mesh feature (base / roots / hand grip) — lands on the cursor.
+        ///
+        /// Yaw is deterministic (no Random.value) so the placed instance is byte-identical to the
+        /// ghost. AlignToNormal also matches the ghost.
         /// </summary>
-        public void EmitSingle(
+        public void EmitExactlyOneAt(
             PropLayer                propLayer,
-            Vector3                  pos,
+            Vector3                  exactPos,
             HeightmapSurfaceSampler? surfaceSampler)
         {
-            int savedDensity = this.DensityPerStamp;
-            this.DensityPerStamp = 1;
-            try
-            {
-                this.Emit(propLayer, pos, brushRadius: 0.01f, deleteMode: false, surfaceSampler);
-            }
-            finally
-            {
-                this.DensityPerStamp = savedDensity;
-            }
-        }
+            var authored = propLayer.AuthoredInstances;
+            if (authored == null) return;
 
-        /// <summary>Returns the density-per-stamp label string for display in the card.</summary>
-        public static string GetDensityLabel()
-        {
-            // Density-per-stamp is a tool-side config, not on the layer asset.
-            return $"{DEFAULT_DENSITY_PER_STAMP} per stamp";
+            Vector2 scaleRange = propLayer.OverrideScaleRange
+                ? propLayer.ScaleRangeOverride
+                : new Vector2(1f, 1f);
+            // Use the midpoint of the range — matches the ghost preview exactly. Scale jitter is
+            // applied to ghost-and-placement together (via the same seed-less midpoint), so the
+            // ghost the user saw IS the instance they get.
+            float scale = (scaleRange.x + scaleRange.y) * 0.5f;
+            if (scale <= 0f) scale = 1f;
+
+            // Deterministic rotation — only AlignToNormal can change it. NO random yaw.
+            // Random yaw caused ghost ≠ placement mismatch (each click rolled a new yaw).
+            Quaternion rot = Quaternion.identity;
+            if (propLayer.PropAlignToNormal && surfaceSampler != null &&
+                surfaceSampler.TrySample(exactPos.x, exactPos.z, out var hit) &&
+                hit.Normal.sqrMagnitude > 0.01f)
+            {
+                rot = Quaternion.FromToRotation(Vector3.up, hit.Normal);
+            }
+
+            // Canonical place-from-anchor formula (mirror of commit 35e2def line 252).
+            Vector3 anchor = propLayer.AnchorOffsetLocal;
+            Vector3 pivot  = exactPos - rot * (anchor * scale);
+
+            // ── DIAGNOSTIC (remove once the place-vs-ghost mismatch is resolved) ─
+            // Prints the click world position the emitter saw, the stored pivot, the anchor
+            // and scale, and a stack-tag identifying who called us. Compare these against
+            // PropGhostPreview's ghostCursor (printed in OnSceneGui) to localise the bug.
+            UnityEngine.Debug.Log(
+                $"[EmitExactlyOneAt] exactPos={exactPos:F4} pivot={pivot:F4} " +
+                $"anchor={anchor:F4} scale={scale:F4} rot={rot.eulerAngles:F2} " +
+                $"workingCount={authored.WorkingList.Count + 1}");
+
+            authored.AddRecord(new InstanceRecord
+            {
+                position     = pivot,
+                rotation     = rot,
+                scale        = scale,
+                overrideMask = InstanceOverrideMask.None,
+            });
+
+            RebuildTileBuckets(authored);
+            authored.PackBlob();
+            EditorUtility.SetDirty(authored);
         }
 
         // ── Add instances ─────────────────────────────────────────────────────
@@ -137,7 +176,12 @@ namespace WorldPainter.Editor
 
             bool groundSnap    = propLayer.PropGroundSnap;
             bool alignToNormal = propLayer.PropAlignToNormal;
-            Vector3 pivotOffset = propLayer.PropPivotOffset;
+
+            // Single source of truth for prop placement — same anchor formula as
+            // EmitExactlyOneAt + PropGhostPreview. The mesh-local anchor lands at the
+            // ground-snapped point, then the pivot is back-computed so the runtime shader
+            // (vertex = pivot + rot·(localPos·scale)) places anchor exactly at `pos`.
+            Vector3 anchor = propLayer.AnchorOffsetLocal;
 
             int requested  = this.DensityPerStamp;
             int placed     = 0;
@@ -168,14 +212,15 @@ namespace WorldPainter.Editor
 
                 if (slopeDeg > maxSlopeDeg) { slopeReject++; continue; }
 
-                pos += rot * pivotOffset;
-
                 float scale = midScale * (1f + (Random.value * 2f - 1f) * this.ScaleJitter);
                 scale = Mathf.Max(0.01f, scale);
 
+                // Place-from-anchor: anchor at `pos`, pivot computed so vertex sampling lands back at `pos`.
+                Vector3 pivot = pos - rot * (anchor * scale);
+
                 authored.AddRecord(new InstanceRecord
                 {
-                    position     = pos,
+                    position     = pivot,
                     rotation     = rot,
                     scale        = scale,
                     overrideMask = InstanceOverrideMask.None,

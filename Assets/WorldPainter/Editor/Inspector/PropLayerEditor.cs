@@ -31,7 +31,6 @@ namespace WorldPainter.Editor
         SerializedProperty? propPlacement;
         SerializedProperty? propTilt;
         SerializedProperty? propAnchorOffsetLocal;
-        SerializedProperty? propPropPivotOffset;
         SerializedProperty? propPropGroundSnap;
         SerializedProperty? propPropAlignToNormal;
         SerializedProperty? propOverrideScaleRange;
@@ -62,7 +61,6 @@ namespace WorldPainter.Editor
             this.propPlacement            = this.serializedObject.FindProperty("placement");
             this.propTilt                 = this.serializedObject.FindProperty("tilt");
             this.propAnchorOffsetLocal    = this.serializedObject.FindProperty("anchorOffsetLocal");
-            this.propPropPivotOffset      = this.serializedObject.FindProperty("propPivotOffset");
             this.propPropGroundSnap       = this.serializedObject.FindProperty("propGroundSnap");
             this.propPropAlignToNormal    = this.serializedObject.FindProperty("propAlignToNormal");
             this.propOverrideScaleRange   = this.serializedObject.FindProperty("overrideScaleRange");
@@ -112,15 +110,10 @@ namespace WorldPainter.Editor
 
         static void RebuildOnAllPainters(PropLayer layer)
         {
-            var painters = Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
-            for (int i = 0; i < painters.Length; ++i)
-            {
-                var p = painters[i];
-                if (p == null || p.Map == null) continue;
-                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
-                p.RebuildPropLayer(layer);
-                UnityEditor.SceneView.RepaintAll();
-            }
+            // Coalesced — see WorldPainterRebuildScheduler. Fast typing in numeric fields can
+            // fire EndChangeCheck multiple times per frame; the scheduler collapses them so the
+            // game-view render doesn't catch a partially-disposed GPU buffer.
+            WorldPainterRebuildScheduler.MarkPropDirty(layer);
         }
 
         static void DrawBox(string label, System.Action body)
@@ -171,7 +164,6 @@ namespace WorldPainter.Editor
         void DrawAnchor()
         {
             EditorGUILayout.PropertyField(this.propAnchorOffsetLocal!);
-            EditorGUILayout.PropertyField(this.propPropPivotOffset!);
 
             EditorGUILayout.Space(4f);
             this.DrawPreview();
@@ -273,8 +265,9 @@ namespace WorldPainter.Editor
                     this.previewUtil.DrawMesh(mesh, Matrix4x4.identity, mat, 0);
             }
 
-            // Draw crosshair at (anchorOffsetLocal + propPivotOffset)
-            Vector3 markerPos = layer.AnchorOffsetLocal + layer.PropPivotOffset;
+            // Draw crosshair at the mesh anchor — single source of truth for both placement
+            // and deform/wind/interactor sampling.
+            Vector3 markerPos = layer.AnchorOffsetLocal;
             this.DrawPreviewCrosshair(markerPos);
 
             this.previewUtil.camera.Render();
@@ -285,7 +278,7 @@ namespace WorldPainter.Editor
             // Label
             EditorGUI.LabelField(
                 new Rect(previewRect.x, previewRect.yMax - 16f, previewRect.width, 16f),
-                $"Anchor+Pivot: {markerPos:F2}",
+                $"Anchor: {markerPos:F2}",
                 EditorStyles.centeredGreyMiniLabel);
         }
 

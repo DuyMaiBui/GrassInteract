@@ -104,6 +104,17 @@ namespace WorldPainter
         private void OnBeginCameraRenderingEdit(ScriptableRenderContext ctx, Camera cam)
         {
             if (Application.isPlaying) return;
+
+            // Filter: only the user-facing Scene View and Game cameras may receive our terrain /
+            // scatter draws. Without this, EVERY editor camera — inspector previews, the prop
+            // setup window's PreviewRenderUtility, material thumbnails, reflection probes — got
+            // the full 200+ prop scatter dumped into it, producing the glitch the user sees while
+            // editing in Select mode (where the LayerSetupWindow / Inspector pane are typically
+            // open). The runtime fires `beginCameraRendering` for every camera URP/HDRP render,
+            // so the filter MUST happen here.
+            CameraType t = cam.cameraType;
+            if (t != CameraType.SceneView && t != CameraType.Game) return;
+
             if (!this.IsBuilt) this.TryBuild();
             this.SubmitTerrain(cam);
 

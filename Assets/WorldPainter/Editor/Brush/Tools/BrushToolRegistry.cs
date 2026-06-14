@@ -44,6 +44,7 @@ namespace WorldPainter.Editor
             new InstancePlaceTool(),
             new InstanceEraseTool(),
             new InstanceSingleTool(),
+            new InstanceSelectTool(),
         };
 
         private static readonly IBrushTool[] NoTools = System.Array.Empty<IBrushTool>();

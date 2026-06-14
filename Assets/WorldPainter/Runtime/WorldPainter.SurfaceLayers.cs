@@ -252,11 +252,13 @@ namespace WorldPainter
                 return;
             }
 
-            if (prop.Render.LodMeshes.Length == 0)
+            Mesh[] propMeshes = prop.Render.LodMeshes;
+            if (propMeshes.Length == 0 || propMeshes[0] == null)
             {
                 Debug.LogWarning(
                     $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
-                    "LodMeshes is empty — no props will render.", this);
+                    "LOD 0 mesh is missing — assign one via the Setup panel (🔧 on the layer row) " +
+                    "before painting. No props will render until then.", this);
                 return;
             }
 

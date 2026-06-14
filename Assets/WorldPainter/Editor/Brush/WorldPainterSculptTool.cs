@@ -125,23 +125,14 @@ namespace WorldPainter.Editor
             this.densityEncoder.Tick();
             this.alphamapEncoder.Tick();
 
-            // Live scatter preview during a grass stroke: rebuild ONLY the active grass layer
-            // after each tick so the scene shows updated grass continuously (not only on mouse-
-            // up). Density Texture2Ds were just refreshed by densityEncoder.Tick; per-layer
-            // rebuild is cheap enough at editor tick rate.
-            if (this.stroke.InStroke)
-            {
-                var painter = WorldPainterState.ActivePainter;
-                if (painter != null)
-                {
-                    var grass = BrushToolTargets.ResolveActiveGrassLayer(painter);
-                    if (grass != null)
-                    {
-                        painter.RebuildGrassLayer(grass);
-                        UnityEditor.SceneView.RepaintAll();
-                    }
-                }
-            }
+            // NOTE: previously this block scheduled a coalesced grass/prop layer rebuild every
+            // editor frame while a stroke was in progress, to give a live scatter preview.
+            // Even at one rebuild per frame, the rebuild Disposes the engine's argsLodN
+            // GraphicsBuffers — and Graphics.RenderMeshIndirect is player-loop-deferred, so the
+            // previous frame's still-pending draw catches the just-released buffer and the GPU
+            // renders garbage (the black-square flicker reported in Scene / Game / Inspector).
+            // The stroke-end path already calls painter.RebuildScatterPreview() once, cleanly,
+            // on mouse-up — that is the authoritative refresh point. No in-stroke rebuild.
         }
 
         // ── LUT re-upload (finding #3) ────────────────────────────────────────
@@ -203,7 +194,12 @@ namespace WorldPainter.Editor
         /// </summary>
         public void OnSceneGui(SceneView sceneView)
         {
-            if (!WorldPainterState.PaintModeActive) return;
+            // Paint Mode gates continuous-stroke tools (paint, erase, sculpt). Click-only prop
+            // tools (Place / Single / Select) dispatch regardless — "Paint Mode" is for brush
+            // strokes, not single-click placement or transform-handle interaction.
+            string gatingToolId = WorldPainterState.ActiveBrushToolId;
+            if (!WorldPainterState.PaintModeActive && !WorldPainterState.IsClickOnlyTool(gatingToolId))
+                return;
             if (this.brushCompute == null) return;
 
             var painter = WorldPainterState.ActivePainter;
@@ -215,10 +211,14 @@ namespace WorldPainter.Editor
             if (e.type == EventType.Layout)
                 HandleUtility.AddDefaultControl(controlId);
 
-            // ── Prop Transform mode — delegate scene input; skip brush logic ──────
+            // ── Prop Select tool — delegate scene input to the transform editor ────
 
-            if (WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop &&
-                WorldPainterPropTransformEdit.PropTransformModeActive)
+            bool isPropActive    = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
+            string activeToolId  = WorldPainterState.ActiveBrushToolId;
+            bool isSelectTool    = activeToolId == "instance.select";
+            bool isPlacementTool = activeToolId == "instance.place" || activeToolId == "instance.single";
+
+            if (isPropActive && isSelectTool)
             {
                 PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
                 if (propLayer != null)
@@ -237,21 +237,37 @@ namespace WorldPainter.Editor
             if (hasHit)
             {
                 var brush = WorldPainterState.Brush;
-                // Alpha is set by TerrainBrushPreview (ring=1f, fill=FILL_ALPHA) — not honored here.
-                var previewColor = new Color(0.3f, 0.7f, 1.0f); // WorldPainter blue
-                TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape, s_heightFn);
+
+                // The brush ring is a *brush* concept — drop it for the placement tools (they
+                // place exactly one instance at the cursor, not within a brush footprint). Erase
+                // still uses the ring so the user sees the deletion radius. Not calling Set()
+                // lets the existing freshness timeout fade the ring within 250 ms.
+                bool suppressBrushRing = isPropActive && isPlacementTool;
+                if (!suppressBrushRing)
+                {
+                    var previewColor = new Color(0.3f, 0.7f, 1.0f); // WorldPainter blue
+                    TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape, s_heightFn);
+                }
                 HandleUtility.Repaint();
 
-                // Prop layer ghost preview (P4 task 3 — inline Handles, no WorldPainter.Editor dep).
-                // Draw a green wire disc at the hover point when a Prop layer is active.
-                LayerType hoverType = WorldPainterState.ActiveLayerType(painter, out _);
-                if (hoverType == LayerType.Props && e.type == EventType.Repaint)
-                    this.DrawPropGhostHandles(worldPoint, valid: true);
+                // Prop placement ghost — show the LOD 0 mesh translucent at the cursor so the
+                // artist sees what they're about to place. Falls back to a wire disc when LOD 0
+                // isn't assigned yet (the Setup panel will prompt them to add one).
+                if (isPropActive && isPlacementTool)
+                {
+                    PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
+                    if (propLayer != null)
+                        PropGhostPreview.Draw(propLayer, worldPoint, valid: true);
+                }
             }
 
             switch (e.GetTypeForControl(controlId))
             {
                 case EventType.MouseDown when e.button == 0 && !e.alt && hasHit:
+                    // ── DIAGNOSTIC (remove with the matching prints) ─────────────
+                    UnityEngine.Debug.Log(
+                        $"[MouseDown] mousePx={e.mousePosition} worldPoint={worldPoint:F4} " +
+                        $"hasHit={hasHit}");
                     this.HandleMouseDown(painter, worldPoint, controlId);
                     e.Use();
                     break;
@@ -306,32 +322,11 @@ namespace WorldPainter.Editor
             return null;
         }
 
-        // ── Prop ghost preview (P4 task 3, option A — Handles only) ──────────
-
-        /// <summary>
-        /// Draws an inline prop placement ghost using Handles — green (valid placement)
-        /// or red (slope/overlap rejected). No dependency on WorldPainter.Editor.
-        /// </summary>
-        private void DrawPropGhostHandles(Vector3 worldPos, bool valid)
-        {
-            // Wire disc at brush centre scaled to ~1m prop representation.
-            Color ghostColor = valid
-                ? new Color(0.3f, 1f, 0.3f, 0.8f)
-                : new Color(1f, 0.2f, 0.2f, 0.8f);
-
-            using (new Handles.DrawingScope(ghostColor))
-            {
-                Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
-                Handles.DrawLine(worldPos, worldPos + Vector3.up * 1.5f);
-            }
-        }
-
         // ── HUD ───────────────────────────────────────────────────────────────
 
         private void DrawHud()
         {
             bool isPropActive = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
-            bool isTransform  = WorldPainterPropTransformEdit.PropTransformModeActive;
 
             // Build a 1-line target descriptor so the user can see WHAT will be painted.
             // Empty layer + Height fallback is the silent-failure case we surface here.
@@ -373,11 +368,15 @@ namespace WorldPainter.Editor
 
             if (isPropActive)
             {
-                string modeLabel = isTransform
-                    ? "Mode: Transform  [T = scatter]"
-                    : "Mode: Scatter  [T = transform]";
-                if (GUILayout.Button(modeLabel, EditorStyles.miniButton))
-                    WorldPainterPropTransformEdit.ToggleMode();
+                string toolId = WorldPainterState.ActiveBrushToolId;
+                string modeLabel = toolId switch
+                {
+                    "instance.select" => "Mode: Select (transform)",
+                    "instance.erase"  => "Mode: Erase",
+                    "instance.single" => "Mode: Single placement",
+                    _                  => "Mode: Place (ghost preview)",
+                };
+                GUILayout.Label(modeLabel, EditorStyles.miniLabel);
             }
 
             GUILayout.EndArea();

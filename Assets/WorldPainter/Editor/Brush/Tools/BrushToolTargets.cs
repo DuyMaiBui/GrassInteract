@@ -57,6 +57,22 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
+        /// The active unified <see cref="PropLayer"/> from <c>map.SurfaceLayers</c>, or null when no
+        /// prop layer is selected. Mirror of <see cref="ResolveActiveGrassLayer"/>.
+        /// </summary>
+        public static PropLayer? ResolveActivePropLayerForStroke(WorldPainter painter)
+        {
+            if (WorldPainterState.ActiveLayerKind != WorldPainterState.PaintLayerKind.Prop)
+                return null;
+            WorldMapAsset? map = painter.Map;
+            if (map == null) return null;
+            string id = WorldPainterState.ActiveLayerId;
+            foreach (var sl in map.SurfaceLayers)
+                if (sl is PropLayer p && p.name == id) return p;
+            return null;
+        }
+
+        /// <summary>
         /// The active unified <see cref="PropLayer"/> from <c>map.SurfaceLayers</c>, or null when:
         ///   - <see cref="WorldPainterState.ActiveLayerKind"/> is not <see cref="WorldPainterState.PaintLayerKind.Prop"/>, OR
         ///   - no <see cref="PropLayer"/> in <c>map.SurfaceLayers</c> has a name matching

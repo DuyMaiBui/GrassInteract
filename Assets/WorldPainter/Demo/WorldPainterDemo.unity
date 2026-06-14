@@ -183,7 +183,7 @@ Light:
   m_InnerSpotAngle: 21.80208
   m_CookieSize2D: {x: 0.5, y: 0.5}
   m_Shadows:
-    m_Type: 0
+    m_Type: 2
     m_Resolution: -1
     m_CustomResolution: -1
     m_Strength: 1
@@ -414,16 +414,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: WorldPainter::WorldPainter.WorldPainter
   bakeManifest: {fileID: 0}
   streamingManager: {fileID: 0}
-  map: {fileID: 11400000, guid: 0cca122669eb0be4ca3a3ef6dd89b688, type: 2}
+  map: {fileID: 11400000, guid: 3d9d18bd536b747af941fc570483eb9c, type: 2}
   worldGrid:
     tileSizeM: 256
     heightRes: 257
     splatRes: 512
   tiles: []
-  splatLayers: []
-  activeSplatLayerIndex: 0
-  scatterLayers:
-  - {fileID: 2396977382599958153, guid: 0cca122669eb0be4ca3a3ef6dd89b688, type: 2}
   biomes: []
   cullCompute: {fileID: 7200000, guid: 0372c160c85ed5840b84dc4ff78748d9, type: 3}
   patchMaterial: {fileID: 2100000, guid: 9a75d618311bac045b52b302dffdc652, type: 2}

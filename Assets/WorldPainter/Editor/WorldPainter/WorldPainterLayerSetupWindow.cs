@@ -95,12 +95,12 @@ namespace WorldPainter.Editor
             bool changed = EditorGUI.EndChangeCheck();
             EditorGUILayout.EndScrollView();
 
-            // Live preview: rebuild only this layer's engines so the scene mirrors the panel.
+            // Live preview: coalesced rebuild via the shared scheduler so the GPU buffer churn
+            // doesn't bleed into Game/Inspector views as flicker (see WorldPainterRebuildScheduler).
             if (changed && this.painter != null)
             {
-                if (this.layer is GrassLayer g) this.painter.RebuildGrassLayer(g);
-                if (this.layer is PropLayer  p) this.painter.RebuildPropLayer(p);
-                SceneView.RepaintAll();
+                if (this.layer is GrassLayer g) WorldPainterRebuildScheduler.MarkGrassDirty(g);
+                if (this.layer is PropLayer  p) WorldPainterRebuildScheduler.MarkPropDirty(p);
             }
         }
 
@@ -267,14 +267,39 @@ namespace WorldPainter.Editor
             var so = new SerializedObject(prop);
             so.Update();
             var anchorOffset = so.FindProperty("anchorOffsetLocal");
-            var pivotOffset  = so.FindProperty("propPivotOffset");
             if (anchorOffset != null) EditorGUILayout.PropertyField(anchorOffset);
-            if (pivotOffset  != null) EditorGUILayout.PropertyField(pivotOffset);
             so.ApplyModifiedProperties();
+
+            // Auto-anchor helper. The placement formula is `pivot = cursor − rot·(anchor·scale)`
+            // (commit 35e2def). For the mesh BASE to land on the cursor, the anchor in local
+            // space must equal the mesh's bounds.min — that's the LOWEST local-Y point on the
+            // mesh. Then `cursor − rot·(bounds.min·scale)` lifts the pivot so the lowest vertex
+            // lands exactly on the cursor.
+            EditorGUILayout.Space(2f);
+            using (new EditorGUI.DisabledScope(GetLod0(prop) == null))
+            {
+                if (GUILayout.Button("Auto-anchor: mesh base on cursor", GUILayout.Height(22f)))
+                {
+                    var lod0 = GetLod0(prop);
+                    if (lod0 != null)
+                    {
+                        Vector3 anchor = new Vector3(0f, lod0.bounds.min.y, 0f);
+                        prop.EditorSetAnchorOffset(anchor);
+                        EditorUtility.SetDirty(prop);
+                        WorldPainterRebuildScheduler.MarkPropDirty(prop);
+                    }
+                }
+            }
 
             EditorGUILayout.Space(4f);
             this.DrawAnchorPreview(prop);
             EditorGUILayout.EndVertical();
+        }
+
+        private static Mesh? GetLod0(PropLayer prop)
+        {
+            var lods = prop.Render.Lods;
+            return (lods != null && lods.Length > 0) ? lods[0].mesh : null;
         }
 
         private void DrawAnchorPreview(PropLayer prop)
@@ -282,6 +307,16 @@ namespace WorldPainter.Editor
             Mesh? mesh = null;
             var lods = prop.Render.Lods;
             if (lods != null && lods.Length > 0) mesh = lods[0].mesh;
+
+            // No LOD0 mesh → no meaningful anchor preview. Surface a hint instead of an empty
+            // viewport so the user knows to assign a mesh in the LOD list above.
+            if (mesh == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Assign a LOD 0 mesh above to preview the anchor.",
+                    MessageType.Info);
+                return;
+            }
 
             var rect = GUILayoutUtility.GetRect(PREVIEW_WIDTH, PREVIEW_HEIGHT, GUILayout.ExpandWidth(false));
 
@@ -315,7 +350,7 @@ namespace WorldPainter.Editor
             if (mesh != null && prop.Render.Material != null)
                 this.previewUtil.DrawMesh(mesh, Matrix4x4.identity, prop.Render.Material, 0);
 
-            Vector3 marker = prop.AnchorOffsetLocal + prop.PropPivotOffset;
+            Vector3 marker = prop.AnchorOffsetLocal;
             this.DrawAxisLine(marker, marker + new Vector3(AXIS_LENGTH, 0f, 0f), Color.red);
             this.DrawAxisLine(marker, marker + new Vector3(0f, AXIS_LENGTH, 0f), Color.green);
             this.DrawAxisLine(marker, marker + new Vector3(0f, 0f, AXIS_LENGTH), Color.blue);
@@ -326,7 +361,7 @@ namespace WorldPainter.Editor
 
             EditorGUI.LabelField(
                 new Rect(rect.x, rect.yMax - 16f, rect.width, 16f),
-                $"Anchor+Pivot: {marker:F2}",
+                $"Anchor: {marker:F2}",
                 EditorStyles.centeredGreyMiniLabel);
         }
 
