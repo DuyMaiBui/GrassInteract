@@ -38,6 +38,10 @@ namespace WorldPainter
             return adapter;
         }
 
+        /// <summary>Source <see cref="GrassLayer"/> this adapter was created for. Used by the
+        /// per-layer rebuild path to scope teardown.</summary>
+        internal GrassLayer SourceLayer => this.layer;
+
         // ── ScatterLayer config accessors (shared from layer; material used directly) ──
 
         public override ScatterRenderConfig    Render    => this.layer.Render;
@@ -75,7 +79,12 @@ namespace WorldPainter
 
         public bool       UseExplicitFieldBounds => true;
         public Texture2D? DensityMap     => this.densityMap;
-        public int        TargetInstances => this.layer.TargetInstances;
+
+        // Author authors instances per 1×1 m²; per-tile candidate count = density × tile area.
+        // Clamped to ≥ 0 and rounded to int for the DensityPlacement loop counter.
+        public int        TargetInstances =>
+            Mathf.Max(0, Mathf.RoundToInt(this.layer.TargetDensityPerSqM *
+                this.explicitFieldBounds.x * this.explicitFieldBounds.y));
         public int        Seed            => this.layer.Seed;
         public Vector2    SlopeRange      => this.layer.SlopeRange;
         public int        SplatLayerIndex => -1;   // drives placement from density, no splat mask

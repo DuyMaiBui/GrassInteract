@@ -225,6 +225,15 @@ namespace WorldPainter.Editor
             nameLabel.AddToClassList("wp-layer-name");
             row.Add(nameLabel);
 
+            // "Setup" button opens the layer-setup panel (LOD meshes, anchor preview).
+            if (layer is GrassLayer || layer is PropLayer)
+            {
+                var setupBtn = new Button(() => WorldPainterLayerSetupWindow.Open(layer, this.painter)) { text = "🔧" };
+                setupBtn.AddToClassList("wp-remove-btn");
+                setupBtn.tooltip = "Open setup panel (LOD meshes, anchor)";
+                row.Add(setupBtn);
+            }
+
             // "Select" button opens the sub-asset in the Inspector.
             var selectBtn = new Button(() => Selection.activeObject = layer) { text = "⚙" };
             selectBtn.AddToClassList("wp-remove-btn");

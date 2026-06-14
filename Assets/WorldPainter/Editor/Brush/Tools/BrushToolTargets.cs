@@ -41,6 +41,22 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
+        /// The active unified <see cref="GrassLayer"/> from <c>map.SurfaceLayers</c>, or null when no
+        /// grass layer is selected. Used by the brush stroke loop to drive live per-stroke rebuild.
+        /// </summary>
+        public static GrassLayer? ResolveActiveGrassLayer(WorldPainter painter)
+        {
+            if (WorldPainterState.ActiveLayerKind != WorldPainterState.PaintLayerKind.Meadow)
+                return null;
+            WorldMapAsset? map = painter.Map;
+            if (map == null) return null;
+            string id = WorldPainterState.ActiveLayerId;
+            foreach (var sl in map.SurfaceLayers)
+                if (sl is GrassLayer g && g.name == id) return g;
+            return null;
+        }
+
+        /// <summary>
         /// The active unified <see cref="PropLayer"/> from <c>map.SurfaceLayers</c>, or null when:
         ///   - <see cref="WorldPainterState.ActiveLayerKind"/> is not <see cref="WorldPainterState.PaintLayerKind.Prop"/>, OR
         ///   - no <see cref="PropLayer"/> in <c>map.SurfaceLayers</c> has a name matching

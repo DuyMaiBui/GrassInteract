@@ -33,6 +33,10 @@ namespace WorldPainter
             return adapter;
         }
 
+        /// <summary>Source <see cref="PropLayer"/> this adapter was created for. Used by the
+        /// per-layer rebuild path to scope teardown.</summary>
+        internal PropLayer SourceLayer => this.layer;
+
         // ── ScatterLayer abstract config accessors ───────────────────────────────
 
         public override ScatterRenderConfig    Render    => this.layer.Render;

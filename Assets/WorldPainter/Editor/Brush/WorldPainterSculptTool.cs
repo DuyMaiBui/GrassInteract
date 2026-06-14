@@ -124,6 +124,24 @@ namespace WorldPainter.Editor
             this.writeback.Tick();
             this.densityEncoder.Tick();
             this.alphamapEncoder.Tick();
+
+            // Live scatter preview during a grass stroke: rebuild ONLY the active grass layer
+            // after each tick so the scene shows updated grass continuously (not only on mouse-
+            // up). Density Texture2Ds were just refreshed by densityEncoder.Tick; per-layer
+            // rebuild is cheap enough at editor tick rate.
+            if (this.stroke.InStroke)
+            {
+                var painter = WorldPainterState.ActivePainter;
+                if (painter != null)
+                {
+                    var grass = BrushToolTargets.ResolveActiveGrassLayer(painter);
+                    if (grass != null)
+                    {
+                        painter.RebuildGrassLayer(grass);
+                        UnityEditor.SceneView.RepaintAll();
+                    }
+                }
+            }
         }
 
         // ── LUT re-upload (finding #3) ────────────────────────────────────────

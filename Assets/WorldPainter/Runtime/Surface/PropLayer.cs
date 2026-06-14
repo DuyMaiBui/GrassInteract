@@ -156,6 +156,13 @@ namespace WorldPainter
             this.authoredInstances = data;
         }
 
+        internal void EditorSetRender(ScatterRenderConfig cfg)          => this.render    = cfg;
+        internal void EditorSetWind(ScatterWindConfig cfg)              => this.wind      = cfg;
+        internal void EditorSetDeform(ScatterDeformConfig cfg)          => this.deform    = cfg;
+        internal void EditorSetBounds(ScatterBoundsConfig cfg)          => this.bounds    = cfg;
+        internal void EditorSetPlacement(ScatterPlacementConfig cfg)    => this.placement = cfg;
+        internal void EditorSetTilt(ScatterInstanceTiltConfig cfg)      => this.tilt      = cfg;
+
 #if UNITY_EDITOR
         private void OnValidate()
         {

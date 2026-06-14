@@ -1,4 +1,5 @@
 #nullable enable
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,7 +8,7 @@ namespace WorldPainter.Editor
     [CustomEditor(typeof(GrassLayer))]
     public sealed class GrassLayerEditor : UnityEditor.Editor
     {
-        // ── Foldout section name constants ───────────────────────────────────
+        // ── Box section name constants ───────────────────────────────────────
 
         const string SECTION_RENDER    = "Render";
         const string SECTION_WIND      = "Wind";
@@ -15,9 +16,6 @@ namespace WorldPainter.Editor
         const string SECTION_BOUNDS    = "Bounds";
         const string SECTION_PLACEMENT = "Placement";
         const string SECTION_DENSITY   = "Density";
-
-        static string PrefKey(string section) =>
-            $"WorldPainter.GrassLayerEditor.{section}";
 
         // ── Serialized properties ─────────────────────────────────────────────
 
@@ -30,21 +28,12 @@ namespace WorldPainter.Editor
         SerializedProperty? propScaleRange;
         SerializedProperty? propSeed;
         SerializedProperty? propSlopeRange;
-        SerializedProperty? propTargetInstances;
+        SerializedProperty? propTargetDensityPerSqM;
         SerializedProperty? propRotationOffsetEuler;
         SerializedProperty? propRandomPitchRange;
         SerializedProperty? propRandomRollRange;
         SerializedProperty? propAlignToNormal;
         SerializedProperty? propDensityTiles;
-
-        // ── Foldout states ────────────────────────────────────────────────────
-
-        bool foldRender;
-        bool foldWind;
-        bool foldDeform;
-        bool foldBounds;
-        bool foldPlacement;
-        bool foldDensity;
 
         void OnEnable()
         {
@@ -57,62 +46,102 @@ namespace WorldPainter.Editor
             this.propScaleRange         = this.serializedObject.FindProperty("scaleRange");
             this.propSeed               = this.serializedObject.FindProperty("seed");
             this.propSlopeRange         = this.serializedObject.FindProperty("slopeRange");
-            this.propTargetInstances    = this.serializedObject.FindProperty("targetInstances");
+            this.propTargetDensityPerSqM    = this.serializedObject.FindProperty("targetDensityPerSqM");
             this.propRotationOffsetEuler= this.serializedObject.FindProperty("rotationOffsetEuler");
             this.propRandomPitchRange   = this.serializedObject.FindProperty("randomPitchRange");
             this.propRandomRollRange    = this.serializedObject.FindProperty("randomRollRange");
             this.propAlignToNormal      = this.serializedObject.FindProperty("alignToNormal");
             this.propDensityTiles       = this.serializedObject.FindProperty("densityTiles");
-
-            this.foldRender    = EditorPrefs.GetBool(PrefKey(SECTION_RENDER),    true);
-            this.foldWind      = EditorPrefs.GetBool(PrefKey(SECTION_WIND),      true);
-            this.foldDeform    = EditorPrefs.GetBool(PrefKey(SECTION_DEFORM),    false);
-            this.foldBounds    = EditorPrefs.GetBool(PrefKey(SECTION_BOUNDS),    false);
-            this.foldPlacement = EditorPrefs.GetBool(PrefKey(SECTION_PLACEMENT), true);
-            this.foldDensity   = EditorPrefs.GetBool(PrefKey(SECTION_DENSITY),   false);
         }
 
         public override void OnInspectorGUI()
         {
             this.serializedObject.Update();
 
-            this.DrawFoldout(SECTION_RENDER, ref this.foldRender,    this.DrawRender);
-            this.DrawFoldout(SECTION_WIND,   ref this.foldWind,      this.DrawWind);
-            this.DrawFoldout(SECTION_DEFORM, ref this.foldDeform,    this.DrawDeform);
-            this.DrawFoldout(SECTION_BOUNDS, ref this.foldBounds,    this.DrawBounds);
-            this.DrawFoldout(SECTION_PLACEMENT, ref this.foldPlacement, this.DrawPlacement);
-            this.DrawFoldout(SECTION_DENSITY,   ref this.foldDensity,   this.DrawDensity);
+            EditorGUI.BeginChangeCheck();
 
+            DrawBox(SECTION_RENDER,    this.DrawRender);
+            DrawBox(SECTION_WIND,      this.DrawWind);
+            DrawBox(SECTION_DEFORM,    this.DrawDeform);
+            DrawBox(SECTION_BOUNDS,    this.DrawBounds);
+            DrawBox(SECTION_PLACEMENT, this.DrawPlacement);
+            DrawBox(SECTION_DENSITY,   this.DrawDensity);
+
+            bool changed = EditorGUI.EndChangeCheck();
             this.serializedObject.ApplyModifiedProperties();
+
+            // Live preview: rebuild ONLY this grass layer's engines on every painter that
+            // references the owning map. Other layers stay live → no full-map flicker.
+            if (changed && this.target is GrassLayer grass)
+                RebuildOnAllPainters(grass);
         }
 
-        void DrawFoldout(string label, ref bool state, System.Action body)
+        static void RebuildOnAllPainters(GrassLayer layer)
         {
-            bool next = EditorGUILayout.Foldout(state, label, true, EditorStyles.foldoutHeader);
-            if (next != state)
+            var painters = Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            for (int i = 0; i < painters.Length; ++i)
             {
-                state = next;
-                EditorPrefs.SetBool(PrefKey(label), state);
+                var p = painters[i];
+                if (p == null || p.Map == null) continue;
+                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
+                p.RebuildGrassLayer(layer);
+                UnityEditor.SceneView.RepaintAll();
             }
-            if (!state) return;
-            EditorGUI.indentLevel++;
-            body();
-            EditorGUI.indentLevel--;
         }
 
-        void DrawRender()    => EditorGUILayout.PropertyField(this.propRender!,    GUIContent.none, true);
-        void DrawWind()      => EditorGUILayout.PropertyField(this.propWind!,      GUIContent.none, true);
-        void DrawDeform()    => EditorGUILayout.PropertyField(this.propDeform!,    GUIContent.none, true);
-        void DrawBounds()    => EditorGUILayout.PropertyField(this.propBounds!,    GUIContent.none, true);
+        static void DrawBox(string label, System.Action body)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(label, EditorStyles.boldLabel);
+            body();
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(2f);
+        }
+
+        /// <summary>
+        /// Wrap a nested-struct property inside its own sub-box. Iterates visible children
+        /// manually so Unity's built-in foldout for expandable structs is skipped — the
+        /// outer helpBox is the only container the user sees.
+        /// </summary>
+        static void DrawNestedBox(string label, SerializedProperty prop)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
+            DrawChildrenFlat(prop);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(1f);
+        }
+
+        /// <summary>
+        /// Draws every visible direct child of <paramref name="prop"/> without a parent foldout.
+        /// Each child still uses its own default drawer, so primitives, ranges, and arrays look
+        /// exactly like they do when shown elsewhere — only the wrapper foldout is suppressed.
+        /// </summary>
+        static void DrawChildrenFlat(SerializedProperty prop)
+        {
+            var iter = prop.Copy();
+            var end  = prop.GetEndProperty();
+            if (!iter.NextVisible(enterChildren: true)) return;
+            while (!SerializedProperty.EqualContents(iter, end))
+            {
+                EditorGUILayout.PropertyField(iter, includeChildren: true);
+                if (!iter.NextVisible(enterChildren: false)) break;
+            }
+        }
+
+        void DrawRender()    => DrawChildrenFlat(this.propRender!);
+        void DrawWind()      => DrawChildrenFlat(this.propWind!);
+        void DrawDeform()    => DrawChildrenFlat(this.propDeform!);
+        void DrawBounds()    => DrawChildrenFlat(this.propBounds!);
 
         void DrawPlacement()
         {
-            EditorGUILayout.PropertyField(this.propPlacement!,           GUIContent.none, true);
+            DrawNestedBox("Placement Config", this.propPlacement!);
             EditorGUILayout.PropertyField(this.propFieldBounds!);
             EditorGUILayout.PropertyField(this.propScaleRange!);
             EditorGUILayout.PropertyField(this.propSeed!);
             EditorGUILayout.PropertyField(this.propSlopeRange!);
-            EditorGUILayout.PropertyField(this.propTargetInstances!);
+            EditorGUILayout.PropertyField(this.propTargetDensityPerSqM!);
             EditorGUILayout.PropertyField(this.propRotationOffsetEuler!);
             EditorGUILayout.PropertyField(this.propRandomPitchRange!);
             EditorGUILayout.PropertyField(this.propRandomRollRange!);

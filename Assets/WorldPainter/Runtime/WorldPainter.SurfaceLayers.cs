@@ -64,48 +64,121 @@ namespace WorldPainter
                 }
 
                 if (layers[i] is not GrassLayer grass) continue; // splat layers don't scatter
+                this.BuildGrassLayerEngines(i, grass, painterOrigin, gpuCapable, probeReason);
+            }
+        }
 
-                // Per-tile: build one engine per tile. Each tile gets its own adapter at the tile
-                // center origin with that tile's density texture.
-                if (this.map != null)
+        /// <summary>
+        /// Rebuild only one <see cref="GrassLayer"/>'s engines (per-tile). Other layers' engines
+        /// stay live. Used by the inspector to surface authoring edits immediately and by the
+        /// density brush to refresh the scatter while dragging.
+        /// </summary>
+        internal void RebuildGrassLayer(GrassLayer layer)
+        {
+            if (layer == null || this.map == null) return;
+
+            this.DisposeGrassLayerEngines(layer);
+
+            // Resolve infra lazily — RebuildSurfaceLayers does the same. Safe to call repeatedly.
+            this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
+            this.ResolveScatterInfra();
+            this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
+
+#if UNITY_EDITOR || !UNITY_WEBGL
+            bool gpuCapable = GrassTierProbe.TryGpu(out string probeReason);
+#else
+            bool gpuCapable  = false;
+            string probeReason = "WebGL";
+#endif
+
+            int layerIndex = this.map.SurfaceLayers is System.Collections.Generic.IList<WorldPainterLayer> il
+                ? il.IndexOf(layer)
+                : -1;
+            this.BuildGrassLayerEngines(layerIndex, layer, this.transform.position, gpuCapable, probeReason);
+        }
+
+        /// <summary>
+        /// Rebuild only one <see cref="PropLayer"/>'s engine. Other layers' engines stay live.
+        /// </summary>
+        internal void RebuildPropLayer(PropLayer layer)
+        {
+            if (layer == null || this.map == null) return;
+
+            this.DisposePropLayerEngines(layer);
+
+            this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
+            this.ResolveScatterInfra();
+            this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
+
+            int layerIndex = this.map.SurfaceLayers is System.Collections.Generic.IList<WorldPainterLayer> il
+                ? il.IndexOf(layer)
+                : -1;
+            this.TryBuildPropLayerEngine(layerIndex, layer, this.transform.position);
+        }
+
+        /// <summary>Builds one engine per tile for <paramref name="grass"/>.</summary>
+        private void BuildGrassLayerEngines(int layerIndex, GrassLayer grass, Vector3 painterOrigin,
+            bool gpuCapable, string probeReason)
+        {
+            if (this.map == null) return;
+
+            foreach (TerrainTileAsset tile in this.map.EnumerateTiles())
+            {
+                Texture2D? tileTex = grass.GetTileDensity(tile.tileCoord);
+                // tileTex == null means no density painted yet → skip (valid state).
+                if (tileTex == null) continue;
+
+                var adapter = GrassTileScatterLayer.Create(grass, tile.tileCoord, tileTex);
+
+                if (!adapter.Validate(out string tileErr))
                 {
-                    foreach (TerrainTileAsset tile in this.map.EnumerateTiles())
-                    {
-                        Texture2D? tileTex = grass.GetTileDensity(tile.tileCoord);
-                        // tileTex == null means no density painted yet → skip (valid state).
-                        if (tileTex == null) continue;
-
-                        var adapter = GrassTileScatterLayer.Create(grass, tile.tileCoord, tileTex);
-
-                        if (!adapter.Validate(out string tileErr))
-                        {
-                            Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {tileErr} — skipped.", this);
-                            DestroyAdapter(adapter);
-                            continue;
-                        }
-
-                        // Per-tile origin = tile center world XZ at the painter's Y.
-                        Vector2 tileOriginXZ = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
-                        float halfTile = TerrainWorldGrid.TILE_SIZE_M * 0.5f;
-                        var tileOrigin = new Vector3(
-                            tileOriginXZ.x + halfTile,
-                            painterOrigin.y,
-                            tileOriginXZ.y + halfTile);
-
-                        ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
-                            ?? new RaycastSurfaceSampler(adapter.Placement.GroundSnapMask, tileOrigin.y);
-
-                        IGrassEngine engine = this.SelectAndBuildScatterEngine(
-                            i, adapter, tileOrigin, sampler, gpuCapable, probeReason);
-                        engine.Build(adapter, tileOrigin, this.scatterPool!, sampler);
-
-                        this.surfaceEngines.Add(engine);
-                        this.surfaceAdapters.Add(adapter);
-
-                        Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name} → " +
-                                  $"tier={this.ScatterActiveTierName}.", this);
-                    }
+                    Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {tileErr} — skipped.", this);
+                    DestroyAdapter(adapter);
+                    continue;
                 }
+
+                Vector2 tileOriginXZ = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
+                float halfTile = TerrainWorldGrid.TILE_SIZE_M * 0.5f;
+                var tileOrigin = new Vector3(
+                    tileOriginXZ.x + halfTile,
+                    painterOrigin.y,
+                    tileOriginXZ.y + halfTile);
+
+                ISurfaceSampler sampler = (ISurfaceSampler?)this.scatterSampler
+                    ?? new RaycastSurfaceSampler(adapter.Placement.GroundSnapMask, tileOrigin.y);
+
+                IGrassEngine engine = this.SelectAndBuildScatterEngine(
+                    layerIndex, adapter, tileOrigin, sampler, gpuCapable, probeReason);
+                engine.Build(adapter, tileOrigin, this.scatterPool!, sampler);
+
+                this.surfaceEngines.Add(engine);
+                this.surfaceAdapters.Add(adapter);
+            }
+        }
+
+        /// <summary>Dispose only the engines/adapters that belong to <paramref name="layer"/>.</summary>
+        private void DisposeGrassLayerEngines(GrassLayer layer)
+        {
+            for (int i = this.surfaceAdapters.Count - 1; i >= 0; --i)
+            {
+                if (this.surfaceAdapters[i].SourceLayer != layer) continue;
+                this.surfaceEngines[i].Dispose();
+                DestroyAdapter(this.surfaceAdapters[i]);
+                this.surfaceEngines.RemoveAt(i);
+                this.surfaceAdapters.RemoveAt(i);
+            }
+        }
+
+        /// <summary>Dispose only the engines/adapters that belong to <paramref name="layer"/>.</summary>
+        private void DisposePropLayerEngines(PropLayer layer)
+        {
+            for (int i = this.surfacePropAdapters.Count - 1; i >= 0; --i)
+            {
+                if (this.surfacePropAdapters[i].SourceLayer != layer) continue;
+                this.surfacePropEngines[i].Dispose();
+                DestroyPropAdapter(this.surfacePropAdapters[i]);
+                this.surfacePropEngines.RemoveAt(i);
+                this.surfacePropAdapters.RemoveAt(i);
             }
         }
 

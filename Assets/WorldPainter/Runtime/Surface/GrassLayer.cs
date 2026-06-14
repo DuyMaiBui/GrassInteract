@@ -47,9 +47,11 @@ namespace WorldPainter
         [Tooltip("Placement allowed only when ground slope (deg) is within [x, y].")]
         [SerializeField] private Vector2 slopeRange = new Vector2(0f, 90f);
 
-        [Min(1)]
-        [Tooltip("Candidate instances scattered per tile across the field.")]
-        [SerializeField] private int targetInstances = 50000;
+        [Min(0f)]
+        [Tooltip("Target candidate density in instances per 1×1 m². " +
+                 "Per-tile candidate count = density × tile area (TILE_SIZE_M²). " +
+                 "Default 0.76 ≈ the legacy 50 000 candidates per 256×256 tile.")]
+        [SerializeField] private float targetDensityPerSqM = 0.76f;
 
         [Tooltip("Per-layer uniform rotation offset applied to every instance.")]
         [SerializeField] private Vector3 rotationOffsetEuler = Vector3.zero;
@@ -88,7 +90,9 @@ namespace WorldPainter
         public Vector2 ScaleRange => this.scaleRange;
         public int Seed => this.seed;
         public Vector2 SlopeRange => this.slopeRange;
-        public int TargetInstances => this.targetInstances;
+
+        /// <summary>Authored density in instances per 1×1 m². Multiplied by tile area at scatter time.</summary>
+        public float TargetDensityPerSqM => this.targetDensityPerSqM;
         public Vector3 RotationOffsetEuler => this.rotationOffsetEuler;
         public Vector2 RandomPitchRange => this.randomPitchRange;
         public Vector2 RandomRollRange => this.randomRollRange;
@@ -135,5 +139,11 @@ namespace WorldPainter
             this.render = new ScatterRenderConfig(
                 this.render.Material, this.render.ShadowCastingMode, lods, this.render.RenderCullDistance);
         }
+
+        internal void EditorSetRender(ScatterRenderConfig cfg)          => this.render    = cfg;
+        internal void EditorSetWind(ScatterWindConfig cfg)              => this.wind      = cfg;
+        internal void EditorSetDeform(ScatterDeformConfig cfg)          => this.deform    = cfg;
+        internal void EditorSetBounds(ScatterBoundsConfig cfg)          => this.bounds    = cfg;
+        internal void EditorSetPlacement(ScatterPlacementConfig cfg)    => this.placement = cfg;
     }
 }

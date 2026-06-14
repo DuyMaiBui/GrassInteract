@@ -28,8 +28,9 @@ namespace WorldPainter.Editor
         // ── Unified add mutations (Phase 2 — all go through WorldMapAssetLifecycle) ──
 
         /// <summary>
-        /// Adds a unified <see cref="GrassLayer"/> with blade mesh + 2 variants via
-        /// <see cref="WorldMapAssetLifecycle.AddGrassLayerWithBlades"/>.
+        /// Adds an empty unified <see cref="GrassLayer"/> — material + per-tile empty density
+        /// textures only, NO blade mesh. The user assigns LODs via the setup panel
+        /// (<see cref="WorldPainterLayerSetupWindow"/>) before painting.
         /// Requires a saved WorldMapAsset.
         /// </summary>
         private void AddGrassLayerUnified()
@@ -42,9 +43,10 @@ namespace WorldPainter.Editor
                 if (sl is GrassLayer) existingGrassCount++;
 
             string layerName = existingGrassCount == 0 ? "Grass" : $"Grass {existingGrassCount}";
-            GrassLayer newLayer = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map!, layerName);
+            GrassLayer newLayer = WorldMapAssetLifecycle.AddGrassLayer(map!, layerName);
             this.SelectSurfaceLayer(newLayer);
             this.RefreshStack();
+            WorldPainterLayerSetupWindow.Open(newLayer, this.painter);
         }
 
         /// <summary>
@@ -64,6 +66,7 @@ namespace WorldPainter.Editor
             PropLayer newLayer = WorldMapAssetLifecycle.AddPropLayer(map!, layerName);
             this.SelectSurfaceLayer(newLayer);
             this.RefreshStack();
+            WorldPainterLayerSetupWindow.Open(newLayer, this.painter);
         }
 
         /// <summary>

@@ -443,7 +443,15 @@ namespace WorldPainter.Editor
 
             }
 
-            // Eagerly create one density texture per existing tile (seeded full = visible immediately).
+            // Apply sensible defaults — empty structs default to all-zero (no wind, no bend, zero
+            // blade height, no LOD) which renders nothing visible. These match the legacy
+            // hand-tuned ScatterLayer authoring so a brand-new GrassLayer is immediately usable.
+            ApplyGrassLayerDefaults(layer);
+
+            // Eagerly create one density texture per existing tile, seeded EMPTY (zero R channel).
+            // New grass layers must start blank — the artist paints density in afterwards. This
+            // mirrors the per-tile-added path above (seedFull: false), keeping both entry points
+            // consistent.
 
             var tileDensities = new List<TileDensityTexture>();
 
@@ -455,7 +463,7 @@ namespace WorldPainter.Editor
 
                     $"{layer.name}@{TileSubAssetName(tile.tileCoord)}",
 
-                    seedFull: true);
+                    seedFull: false);
 
                 AssetDatabase.AddObjectToAsset(tex, mapPath);
 
@@ -655,6 +663,9 @@ namespace WorldPainter.Editor
                 layer.EditorSetMaterial(propMat);
             }
 
+            // Apply sensible defaults so the layer renders without manual tuning.
+            ApplyPropLayerDefaults(layer);
+
             // Create companion AuthoredInstancesData sub-asset and wire it into the layer.
 
             var authoredData = ScriptableObject.CreateInstance<AuthoredInstancesData>();
@@ -678,6 +689,66 @@ namespace WorldPainter.Editor
 
             return layer;
 
+        }
+
+        /// <summary>Apply sensible defaults to a freshly-created <see cref="GrassLayer"/>.</summary>
+        private static void ApplyGrassLayerDefaults(GrassLayer layer)
+        {
+            layer.EditorSetWind(new ScatterWindConfig(
+                windMode:         ScatterLayer.WindMode.Perlin,
+                windDirection:    new Vector2(1f, 0f),
+                windStrength:     0.5f,
+                windFrequency:    1.5f,
+                windNoiseScale:   0.4f,
+                windGustScale:    1.0f,
+                windRippleScale:  0.3f,
+                windGustSpeed:    1.0f,
+                windRippleSpeed:  1.2f,
+                windRippleWeight: 0.5f));
+
+            layer.EditorSetDeform(new ScatterDeformConfig(
+                affectedByWind:        true,
+                affectedByInteractors: true,
+                bendStrength:          0.7f,
+                flatten:               0.5f,
+                recoveryRate:          0.5f));
+
+            layer.EditorSetBounds(new ScatterBoundsConfig(
+                maxBladeHeight: 0.8f,
+                bendHeadroom:   0.2f,
+                chunkSize:      32));
+
+            layer.EditorSetPlacement(new ScatterPlacementConfig(groundSnapMask: ~0));
+        }
+
+        /// <summary>Apply sensible defaults to a freshly-created <see cref="PropLayer"/>.</summary>
+        private static void ApplyPropLayerDefaults(PropLayer layer)
+        {
+            layer.EditorSetWind(new ScatterWindConfig(
+                windMode:         ScatterLayer.WindMode.Perlin,
+                windDirection:    new Vector2(1f, 0f),
+                windStrength:     0.3f,
+                windFrequency:    1.2f,
+                windNoiseScale:   0.4f,
+                windGustScale:    1.0f,
+                windRippleScale:  0.3f,
+                windGustSpeed:    1.0f,
+                windRippleSpeed:  1.0f,
+                windRippleWeight: 0.4f));
+
+            layer.EditorSetDeform(new ScatterDeformConfig(
+                affectedByWind:        true,
+                affectedByInteractors: false,
+                bendStrength:          0.3f,
+                flatten:               0.0f,
+                recoveryRate:          0.5f));
+
+            layer.EditorSetBounds(new ScatterBoundsConfig(
+                maxBladeHeight: 2.0f,
+                bendHeadroom:   0.5f,
+                chunkSize:      32));
+
+            layer.EditorSetPlacement(new ScatterPlacementConfig(groundSnapMask: ~0));
         }
 
         /// <summary>

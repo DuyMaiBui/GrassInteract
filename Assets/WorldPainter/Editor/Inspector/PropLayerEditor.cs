@@ -1,4 +1,5 @@
 #nullable enable
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,15 +8,12 @@ namespace WorldPainter.Editor
     [CustomEditor(typeof(PropLayer))]
     public sealed class PropLayerEditor : UnityEditor.Editor
     {
-        // ── Foldout section name constants ───────────────────────────────────
+        // ── Box section name constants ───────────────────────────────────────
 
         const string SECTION_IDENTITY  = "Identity";
         const string SECTION_ANCHOR    = "Anchor";
         const string SECTION_PLACEMENT = "Placement";
         const string SECTION_RENDER    = "Render";
-
-        static string PrefKey(string section) =>
-            $"WorldPainter.PropLayerEditor.{section}";
 
         // ── Preview constants ─────────────────────────────────────────────────
 
@@ -49,13 +47,6 @@ namespace WorldPainter.Editor
         SerializedProperty? propCullColliders;
         SerializedProperty? propDefaultColliderScale;
 
-        // ── Foldout states ────────────────────────────────────────────────────
-
-        bool foldIdentity;
-        bool foldAnchor;
-        bool foldPlacement;
-        bool foldRender;
-
         // ── Preview state ─────────────────────────────────────────────────────
 
         PreviewRenderUtility? previewUtil;
@@ -86,11 +77,6 @@ namespace WorldPainter.Editor
             this.propPoolCap              = this.serializedObject.FindProperty("poolCap");
             this.propCullColliders        = this.serializedObject.FindProperty("cullColliders");
             this.propDefaultColliderScale = this.serializedObject.FindProperty("defaultColliderScale");
-
-            this.foldIdentity  = EditorPrefs.GetBool(PrefKey(SECTION_IDENTITY),  true);
-            this.foldAnchor    = EditorPrefs.GetBool(PrefKey(SECTION_ANCHOR),    true);
-            this.foldPlacement = EditorPrefs.GetBool(PrefKey(SECTION_PLACEMENT), true);
-            this.foldRender    = EditorPrefs.GetBool(PrefKey(SECTION_RENDER),    true);
         }
 
         void OnDisable()
@@ -108,26 +94,73 @@ namespace WorldPainter.Editor
         {
             this.serializedObject.Update();
 
-            this.DrawFoldout(SECTION_IDENTITY,  ref this.foldIdentity,  this.DrawIdentity);
-            this.DrawFoldout(SECTION_ANCHOR,    ref this.foldAnchor,    this.DrawAnchor);
-            this.DrawFoldout(SECTION_PLACEMENT, ref this.foldPlacement, this.DrawPlacement);
-            this.DrawFoldout(SECTION_RENDER,    ref this.foldRender,    this.DrawRender);
+            EditorGUI.BeginChangeCheck();
 
+            DrawBox(SECTION_IDENTITY,  this.DrawIdentity);
+            DrawBox(SECTION_ANCHOR,    this.DrawAnchor);
+            DrawBox(SECTION_PLACEMENT, this.DrawPlacement);
+            DrawBox(SECTION_RENDER,    this.DrawRender);
+
+            bool changed = EditorGUI.EndChangeCheck();
             this.serializedObject.ApplyModifiedProperties();
+
+            // Live preview: rebuild ONLY this prop layer's engine on every painter that
+            // references the owning map. Other layers stay live → no full-map flicker.
+            if (changed && this.target is PropLayer prop)
+                RebuildOnAllPainters(prop);
         }
 
-        void DrawFoldout(string label, ref bool state, System.Action body)
+        static void RebuildOnAllPainters(PropLayer layer)
         {
-            bool next = EditorGUILayout.Foldout(state, label, true, EditorStyles.foldoutHeader);
-            if (next != state)
+            var painters = Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            for (int i = 0; i < painters.Length; ++i)
             {
-                state = next;
-                EditorPrefs.SetBool(PrefKey(label), state);
+                var p = painters[i];
+                if (p == null || p.Map == null) continue;
+                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
+                p.RebuildPropLayer(layer);
+                UnityEditor.SceneView.RepaintAll();
             }
-            if (!state) return;
-            EditorGUI.indentLevel++;
+        }
+
+        static void DrawBox(string label, System.Action body)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(label, EditorStyles.boldLabel);
             body();
-            EditorGUI.indentLevel--;
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(2f);
+        }
+
+        /// <summary>
+        /// Wrap a nested-struct property inside its own sub-box. Iterates visible children
+        /// manually so Unity's built-in foldout for expandable structs is skipped — the
+        /// outer helpBox is the only container the user sees.
+        /// </summary>
+        static void DrawNestedBox(string label, SerializedProperty prop)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
+            DrawChildrenFlat(prop);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(1f);
+        }
+
+        /// <summary>
+        /// Draws every visible direct child of <paramref name="prop"/> without a parent foldout.
+        /// Each child still uses its own default drawer, so primitives, ranges, and arrays look
+        /// exactly like they do when shown elsewhere — only the wrapper foldout is suppressed.
+        /// </summary>
+        static void DrawChildrenFlat(SerializedProperty prop)
+        {
+            var iter = prop.Copy();
+            var end  = prop.GetEndProperty();
+            if (!iter.NextVisible(enterChildren: true)) return;
+            while (!SerializedProperty.EqualContents(iter, end))
+            {
+                EditorGUILayout.PropertyField(iter, includeChildren: true);
+                if (!iter.NextVisible(enterChildren: false)) break;
+            }
         }
 
         void DrawIdentity()
@@ -146,8 +179,8 @@ namespace WorldPainter.Editor
 
         void DrawPlacement()
         {
-            EditorGUILayout.PropertyField(this.propPlacement!,          GUIContent.none, true);
-            EditorGUILayout.PropertyField(this.propTilt!,               GUIContent.none, true);
+            DrawNestedBox("Placement Config", this.propPlacement!);
+            DrawNestedBox("Tilt", this.propTilt!);
             EditorGUILayout.PropertyField(this.propPropGroundSnap!);
             EditorGUILayout.PropertyField(this.propPropAlignToNormal!);
             EditorGUILayout.PropertyField(this.propOverrideScaleRange!);
@@ -155,7 +188,8 @@ namespace WorldPainter.Editor
                 EditorGUILayout.PropertyField(this.propScaleRangeOverride!);
 
             EditorGUILayout.Space(2f);
-            EditorGUILayout.LabelField("Colliders", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Colliders", EditorStyles.miniBoldLabel);
             EditorGUILayout.PropertyField(this.propGenerateColliders!);
             if (this.propGenerateColliders!.boolValue)
             {
@@ -170,14 +204,15 @@ namespace WorldPainter.Editor
                 EditorGUILayout.PropertyField(this.propCullColliders!);
                 EditorGUI.indentLevel--;
             }
+            EditorGUILayout.EndVertical();
         }
 
         void DrawRender()
         {
-            EditorGUILayout.PropertyField(this.propRender!,  GUIContent.none, true);
-            EditorGUILayout.PropertyField(this.propWind!,    GUIContent.none, true);
-            EditorGUILayout.PropertyField(this.propDeform!,  GUIContent.none, true);
-            EditorGUILayout.PropertyField(this.propBounds!,  GUIContent.none, true);
+            DrawNestedBox("Render Config", this.propRender!);
+            DrawNestedBox("Wind",          this.propWind!);
+            DrawNestedBox("Deform",        this.propDeform!);
+            DrawNestedBox("Bounds",        this.propBounds!);
         }
 
         // ── 3-D preview pane ──────────────────────────────────────────────────
