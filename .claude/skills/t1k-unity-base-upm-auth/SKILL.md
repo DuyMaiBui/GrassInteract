@@ -4,7 +4,7 @@ description: "Set up Unity UPM (Verdaccio) scoped-registry auth non-interactivel
 effort: medium
 context: fork
 keywords: [upm auth, upmconfig, verdaccio, unity registry, the1studio registry, npm login, scoped registry]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

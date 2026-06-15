@@ -26,11 +26,9 @@ batch_execute(commands=[{"tool": "rendering_stats", "params": {"action": "get_sy
 ```
 `get_system_stats` returns per-DOTS-system CPU breakdown: `avg_ms`, `max_ms`, `p95_ms`, `pct_of_frame` for each system, sorted by cost. Auto-records during Play mode via `PerformanceSessionRecorder`.
 
-## manage_cinemachine
-Actions: `list_vcams`, `get_vcam`, `set_vcam`, `get_brain`, `set_priority`, `list_blends`
-Key params: `target` (GameObject name/ID), `properties` (JSON), `priority` (int), `page_size`, `cursor`
-Requires: com.unity.cinemachine
-Example: `manage_cinemachine(action="set_priority", target="BattleCam", priority=20)` — raise camera priority
+## ~~manage_cinemachine~~ → use `manage_camera`
+**`manage_cinemachine` does NOT exist on the The1Studio/unity-mcp fork** — calls return `Unknown or unsupported command type`. Cinemachine is handled by the unified `manage_camera` tool. For CM3 vCam setup use `manage_camera`: `ping` (confirm availability) → `ensure_brain` → `create_camera` → `set_body` / `set_aim` / `set_target` / `set_priority` / `set_blend`. Full reference: `references/tools-camera-graphics.md`.
+Example: `manage_camera(action="set_priority", target="BattleCam", properties={"priority": 20})` — raise camera priority
 
 ## manage_render_pipeline
 Actions: `get_pipeline_info`, `list_volumes`, `get_volume`, `set_volume_override`, `list_renderer_features`, `get_render_pipeline_asset`, `list_post_processing`, `toggle_volume_override`

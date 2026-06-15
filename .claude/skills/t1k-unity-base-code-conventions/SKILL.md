@@ -4,7 +4,7 @@ description: Unity C# code conventions — naming, no-hardcoded-values, shared c
 effort: high
 context: fork
 keywords: [code conventions, coding standards, naming, style]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

@@ -4,7 +4,7 @@ description: "Edit Unity config files as text (JSON/YAML) and refresh. Covers as
 effort: high
 context: fork
 keywords: [text config, configuration, localization, unity]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

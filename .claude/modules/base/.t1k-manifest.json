@@ -1,9 +1,9 @@
 {
   "module": "base",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-15T04:28:47.155Z",
+  "generatedAt": "2026-06-15T10:01:44.795Z",
   "files": {
     "skills": [
       "t1k-unity-base-addressables/SKILL.md",
@@ -98,5 +98,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:f12db1dce547c057c85159b9b80d5c22dfa0cad83b697e7592d7617730dc3b44"
+  "checksum": "sha256:a18957991d905ed502e21691b3f0940137bac6a092aee9120d0447c30fde79c7"
 }

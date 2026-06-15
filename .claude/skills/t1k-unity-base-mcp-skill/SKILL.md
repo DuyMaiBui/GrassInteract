@@ -4,7 +4,7 @@ description: Orchestrate Unity Editor via MCP tools — GameObjects, scripts, sc
 effort: high
 context: fork
 keywords: [MCP, unity MCP, tool, bridge]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
@@ -149,6 +149,10 @@ Fix: re-register at **user** scope from the beta fork (canonical install above),
 
 ## 🔍 When MCP doesn't respond — diagnose Unity status WITHOUT MCP
 
+### ⚠️ Tools missing/disconnected ≠ "restart Claude" — the Editor just isn't open
+
+If the `mcp__UnityMCP__*` tools are absent or disconnected this session, do **NOT** tell the user to restart Claude Code to reconnect. The UnityMCP server is a `uvx` process that **bridges to a running Unity Editor**; it has nothing to connect to until the Editor is open with the MCP bridge live (`Window > MCP for Unity > Start Session`). The overwhelmingly common cause is simply that **Unity hasn't been opened yet** — once the user opens the project in Unity, the bridge comes up and the tools reconnect on their own. **No Claude restart is required** (it does not bring Unity up and won't help). This holds even right after a `claude mcp add`/re-register: the registration is correct on disk; the tools light up when the Editor is running, not when Claude relaunches. Confirm the registration with `claude mcp get UnityMCP` (expect `✔ Connected` config), then ask the user to open Unity — don't prescribe a restart.
+
 A failed MCP call (timeout, "Unity is reloading", "No Unity Editor instances") is almost never a bridge connectivity problem. **It usually means Unity's main thread is busy** (compiling, importing, baking, domain-reloading, lightmapping, etc.) and the bridge thread is blocked behind it. Asking the user to "Start Session" is the wrong escalation — the bridge IS connected, Unity just isn't yet ready to service requests.
 
 Before asking the user for help, run these CLI probes to see what Unity is actually doing:
@@ -185,7 +189,7 @@ Before asking the user for help, run these CLI probes to see what Unity is actua
 | Editor | `manage_editor`, `execute_menu_item`, `read_console` |
 | Testing | `run_tests`, `get_test_job` |
 | Batch | `batch_execute` |
-| Camera | `manage_camera`, `manage_cinemachine` |
+| Camera | `manage_camera` (unified Camera + Cinemachine — there is NO separate `manage_cinemachine`) |
 | Graphics | `manage_graphics`, `manage_render_pipeline`, `manage_shader` |
 | Packages | `query_packages`, `manage_packages` |
 | ProBuilder | `manage_probuilder` |
@@ -246,7 +250,7 @@ get_test_job(job_id=result["job_id"], wait_timeout=60, include_failed_tests=True
 | `references/tools-dots-physics-nav.md` | manage_dots, manage_dots_graphics/physics/subscene, manage_physics/2d, manage_navigation, manage_mesh |
 | `references/tools-media-world.md` | manage_animation, manage_audio, manage_video, manage_vfx, manage_timeline, manage_terrain, manage_tilemap, manage_splines, manage_lighting |
 | `references/tools-systems-code.md` | manage_addressables, manage_build, manage_input_system, manage_localization, manage_netcode, manage_script, manage_scriptable_object, manage_shader |
-| `references/tools-perf-ai-misc.md` | manage_profiler, rendering_stats, manage_cinemachine, manage_render_pipeline, manage_behavior, manage_asset_hunter, validation_snapshot, manage_ui_toolkit |
+| `references/tools-perf-ai-misc.md` | manage_profiler, rendering_stats, manage_render_pipeline, manage_behavior, manage_asset_hunter, validation_snapshot, manage_ui_toolkit |
 | `references/error-recovery-guide.md` | Error diagnosis table, auto-start setup, cache gotchas, asset refresh hierarchy |
 | `references/upm-gotchas.md` | UPM diagnostic recipes: duplicate-scope registry failure, embed-override pattern, submodule GUID conflict, `refresh_unity` timeout vs bridge disconnect |
 | `references/workflow-scriptableobject-creation.md` | Custom ScriptableObject .asset creation — manage_asset limitation, execute_code Windows path-length failure, direct YAML write fallback |
@@ -305,6 +309,8 @@ get_test_job(job_id=result["job_id"], wait_timeout=60, include_failed_tests=True
 
 - **`manage_asset(action="create")` does NOT support arbitrary ScriptableObject types — only Folder, Material, and PhysicsMaterial.** `execute_code` is the next approach but on Windows hits a Mono "filename too long" error (~260-char path limit) on both roslyn and codedom backends. **Reliable fallback on all platforms**: write the `.asset` YAML directly to disk using the script GUID from its `.cs.meta` file, then call `refresh_unity(mode="force", scope="assets")`. Full YAML template, field-name rules, and step-by-step guide: `references/workflow-scriptableobject-creation.md`.
 
+- **Multi-editor / cross-scene-move / router-strips-MCP trio (GrassSurfer scene-consolidation + Vehicle Visual Swapper cooks).** (a) **Multi-editor + Windows MCP fallbacks.** When multiple Unity Editors are registered with UnityMCP, the active instance flips after every domain reload/recompile — before each MCP call read `mcpforunity://instances` and `set_active_instance` by matching the project PATH, not a cached hash (reinforces Step 0). `execute_code` can be UNUSABLE on Windows (CodeDom mono "command line too long"; Roslyn backend absent) — fall back to `manage_scene` / `manage_gameobject` instead of `execute_code`. `manage_scene` `get_hierarchy`/`save` IGNORE the `scene_name` arg and operate on the ACTIVE scene only — `set_active_scene` first. (b) **Move GameObjects between scenes.** To move GameObjects across scenes via MCP without breaking serialized refs: additively load both scenes, then `manage_scene action=move_to_scene` per ROOT (targets by instanceID). Cross-scene instanceID lookups FAIL. There is no discard-unsaved-changes action — reset a dirty scene by save → `git checkout` the `.unity` → reload. WARNING: a `git checkout` of a `.unity` while that scene is OPEN triggers Unity's "scene changed on disk, reload?" modal which FREEZES the bridge until the user dismisses it. (c) **Model-router strips MCP tools from spawned verifier subagents.** When model-router transparent routing is ACTIVE, a subagent spawned to do Unity-MCP verification (compile / `run_tests` / `refresh_unity`) may be routed to a NON-Anthropic backend that does NOT expose `mcp__UnityMCP__*` tools — the agent reports "tool not available" despite the tools being in its declared toolset. Workarounds: verify compile out-of-band via `Library/Bee` build log + `Library/ScriptAssemblies/*.dll` mtimes (Bash), hand the actual EditMode run to the user's Test Runner, OR add the Unity agent to `modelRouter.excludeAgents` to keep MCP.
+
 Field reports for the gotchas in this section: see [references/incidents.md](references/incidents.md).
 
 ## Compile / Refresh Troubleshooting
@@ -321,6 +327,12 @@ Field reports for the gotchas in this section: see [references/incidents.md](ref
 - **Wedged compile pipeline — editor alive but Bee/artifacts stays empty.** The editor answers `read_console` and `execute_code` but DLLs never rebuild even after `rm -rf Library/Bee/artifacts Library/BurstCache Library/ScriptAssemblies` and `CompilationPipeline.RequestScriptCompilation()`. Symptom: `Library/Bee/artifacts/` stays empty; worker logs show no compile activity; mtime on DLLs never advances. Cause: the import/compile subsystem is wedged (typically after a series of rapid domain reloads during package resolution). **Recovery:** only a Unity Editor restart revives it — ask the user (hard rule: you cannot kill/restart Unity yourself, see `rules/unity-forbidden-operations.md`). Stop retrying; surface the situation clearly.
 
 - **MCP-noise EditMode test flake — random `Cannot access a disposed object` failure.** When `run_tests` triggers a domain reload at the start of the run, the MCP bridge briefly drops and Unity's global log-assert machinery attributes the `NetworkStream disposed` error to whatever test is in `SetUp` at that instant. Signature: the failing test changes each run (never the same test twice in a row), and the failure message contains `MCP-FOR-UNITY` / `NetworkStream` / `disposed`. These are NOT real code bugs. **Mitigation in DOTSTestBase:** add `UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;` in the `[SetUp]` of your test base class. This suppresses the bridge-noise assertions globally for that fixture. Do NOT use `LogAssert.Expect(...)` — that would mask real failures. Prefer running tests per-assembly (`run_tests assembly_names=[...]`) to reduce the likelihood of a reload coinciding with a `SetUp`.
+
+- **`manage_cinemachine` is NOT a working tool — use `manage_camera` for all Cinemachine work.** On the The1Studio/unity-mcp fork, `manage_cinemachine` returns `Unknown or unsupported command type`. `manage_camera` is the unified Camera + Cinemachine tool (CM3 vCam setup: `ensure_brain` → `create_camera` → `set_body` / `set_aim` / `set_target` / `set_priority` / `set_blend`). Call `manage_camera(action="ping")` first to confirm Cinemachine availability. Full action reference: `references/tools-camera-graphics.md`.
+
+- **`execute_code` does NOT exist in the The1Studio/unity-mcp fork — and even on builds that expose it, it fails on Windows.** The fork ships ~27 tools and none is `execute_code` (cross-ref unity#219, unity-mcp#15). Where it does resolve (degraded/non-fork builds), Windows raises `mono.exe: filename or extension is too long` for both the codedom and roslyn (unavailable) backends — the ~260-char path limit. **Replace `execute_code` with granular MCP tools** (`manage_texture`, `manage_audio`, `manage_graphics`, `manage_scene`, `manage_gameobject`) or a temp Editor-script-via-`execute_menu_item` pattern. Specific replacements: to strip missing-script components use `manage_scene(action="validate", auto_repair=true)` instead of `GameObjectUtility` via `execute_code`; for custom ScriptableObject `.asset` creation use the direct-YAML-write fallback (`references/workflow-scriptableobject-creation.md`). NOTE: several older Gotchas above and `references/*` still reference `execute_code` as a fallback — treat those as "use a granular tool / temp-Editor-script instead" on the fork.
+
+- **Multi-instance: pin BEFORE every tool call when 2+ editors are connected.** With multiple Unity Editors registered, the active instance flips after every domain reload/recompile. Read `mcpforunity://instances` and call `set_active_instance(instance="<Name>@<hash>")` — matching by project PATH, not a cached hash — before any tool call (reinforces Step 0).
 
 ## MCP Gaps — FIX-FIRST in our fork, do NOT just file an issue
 
