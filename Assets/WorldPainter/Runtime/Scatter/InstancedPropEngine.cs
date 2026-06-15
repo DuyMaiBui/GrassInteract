@@ -136,6 +136,15 @@ namespace WorldPainter
         private InstanceTiltSimulator? tiltSim;
         private bool tiltEnabled;
 
+        // ── Engine-owned uniform snapshots (re-applied each Submit so the per-frame live
+        //     CopyPropertiesFromMaterial bulk sync of materialBase doesn't stomp them) ──
+        private float   orientModeVal;
+        private Vector4 rotOffsetVal;
+        private float   tiltFlagVal;
+        private Vector4 anchorOffsetVal;
+        private float   windFlagVal;
+        private float   interactorsFlagVal;
+
         // ── Per-frame state ───────────────────────────────────────────────────
         private Bounds worldBounds;
         private bool isBuilt;
@@ -265,39 +274,25 @@ namespace WorldPainter
             if (this.visibleLod1Buf != null) this.lodMat1.SetBuffer(ID_VisibleIndices, this.visibleLod1Buf);
             if (this.visibleLod2Buf != null) this.lodMat2.SetBuffer(ID_VisibleIndices, this.visibleLod2Buf);
 
-            float orientMode = layer.IsOriented ? 1f : 0f;
+            // Snapshot the engine-set per-material uniforms. Submit() re-applies them every frame
+            // AFTER the bulk live-style sync from materialBase, so material edits in the Inspector
+            // propagate without rebuilding while engine-owned values (orient mode, anchor, tilt
+            // flag, wind/interactor gates) survive the bulk copy intact.
+            this.orientModeVal = layer.IsOriented ? 1f : 0f;
             Vector3 rotOffset = layer.RotationOffsetEuler;
-            this.lodMat0.SetFloat(ID_OrientMode, orientMode);
-            this.lodMat1.SetFloat(ID_OrientMode, orientMode);
-            this.lodMat2.SetFloat(ID_OrientMode, orientMode);
-            this.lodMat0.SetVector(ID_RotationOffsetEuler, new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f));
-            this.lodMat1.SetVector(ID_RotationOffsetEuler, new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f));
-            this.lodMat2.SetVector(ID_RotationOffsetEuler, new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f));
-
-            float tiltFlag = this.tiltEnabled ? 1f : 0f;
-            this.lodMat0.SetFloat(ID_TiltEnabled, tiltFlag);
-            this.lodMat1.SetFloat(ID_TiltEnabled, tiltFlag);
-            this.lodMat2.SetFloat(ID_TiltEnabled, tiltFlag);
-
-            // Per-layer deform sampling anchor (instance-only). Static — set once at Build.
-            // Shader samples wind/interactor from posWS + baseRot*(_AnchorOffset.xyz * scale).
+            this.rotOffsetVal = new Vector4(rotOffset.x, rotOffset.y, rotOffset.z, 0f);
+            this.tiltFlagVal  = this.tiltEnabled ? 1f : 0f;
             Vector3 anchor = instLayer != null ? instLayer.AnchorOffsetLocal : Vector3.zero;
-            var anchorV = new Vector4(anchor.x, anchor.y, anchor.z, 0f);
-            this.lodMat0.SetVector(ID_AnchorOffset, anchorV);
-            this.lodMat1.SetVector(ID_AnchorOffset, anchorV);
-            this.lodMat2.SetVector(ID_AnchorOffset, anchorV);
+            this.anchorOffsetVal = new Vector4(anchor.x, anchor.y, anchor.z, 0f);
 
             this.affectedByWind        = layer.Deform.AffectedByWind;
             this.affectedByInteractors = layer.Deform.AffectedByInteractors;
             this.interactsWithDeform   = this.affectedByWind || this.affectedByInteractors;
-            float windFlag        = this.affectedByWind        ? 1f : 0f;
-            float interactorsFlag = this.affectedByInteractors ? 1f : 0f;
-            this.lodMat0.SetFloat(ID_WindEnabled,        windFlag);
-            this.lodMat1.SetFloat(ID_WindEnabled,        windFlag);
-            this.lodMat2.SetFloat(ID_WindEnabled,        windFlag);
-            this.lodMat0.SetFloat(ID_InteractorsEnabled, interactorsFlag);
-            this.lodMat1.SetFloat(ID_InteractorsEnabled, interactorsFlag);
-            this.lodMat2.SetFloat(ID_InteractorsEnabled, interactorsFlag);
+            this.windFlagVal        = this.affectedByWind        ? 1f : 0f;
+            this.interactorsFlagVal = this.affectedByInteractors ? 1f : 0f;
+
+            // Initial apply (Submit() will re-apply each frame so style edits stay live).
+            this.ApplyEngineOwnedUniforms();
 
             // Phase 2: PBR material keyword + texture binding.
             this.ApplyPbrKeywords(layer.Render);
@@ -402,6 +397,14 @@ namespace WorldPainter
 
             if (this.instanceBuffer.InstanceBuffer != null)
                 Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
+
+            // Live material-state sync — Inspector edits to the layer material (BaseMap, colors,
+            // _Cutoff, keyword toggles) propagate to the LOD clones each frame WITHOUT requiring
+            // a layer rebuild. Runs BEFORE the per-frame engine uniforms (_ScaleMax2, wind, etc.)
+            // because the bulk copy would otherwise stomp them; SyncLiveMaterialStyle also re-
+            // applies the snapshotted engine-owned uniforms (orient/anchor/tilt/wind gates).
+            this.SyncLiveMaterialStyle();
+
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
             this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
 
@@ -715,6 +718,55 @@ namespace WorldPainter
             if (this.lodMat0 != null) this.lodMat0.SetBuffer(id, buf);
             if (this.lodMat1 != null) this.lodMat1.SetBuffer(id, buf);
             if (this.lodMat2 != null) this.lodMat2.SetBuffer(id, buf);
+        }
+
+        // ── Live material-state sync ──────────────────────────────────────────
+        //
+        // Submit() calls SyncLiveMaterialStyle() every frame so edits in the Inspector to the
+        // layer's material — _BaseMap texture, _BaseColor/_TipColor, _Cutoff, _NORMALMAP/_PBR
+        // toggles, anything — flow through to the LOD clones without a layer rebuild. The
+        // engine-owned uniforms (orient mode, anchor, tilt flag, wind/interactor gates) are
+        // re-applied AFTER the bulk copy so the donor's authored defaults don't stomp them.
+
+        /// <summary>
+        /// Mirror EVERY material property + keyword from materialBase onto each LOD clone, then
+        /// re-restore the engine-owned uniforms and per-LOD _VisibleIndices buffer binding. Cheap:
+        /// CopyPropertiesFromMaterial is a single internal copy, and the re-restores are scalar
+        /// SetFloat / SetVector / SetBuffer calls. 3 mats × O(1) work per frame — negligible.
+        /// </summary>
+        private void SyncLiveMaterialStyle()
+        {
+            if (this.materialBase == null) return;
+            SyncOne(this.lodMat0, this.visibleLod0Buf);
+            SyncOne(this.lodMat1, this.visibleLod1Buf);
+            SyncOne(this.lodMat2, this.visibleLod2Buf);
+
+            void SyncOne(Material? mat, GraphicsBuffer? visibleIdx)
+            {
+                if (mat == null) return;
+                mat.CopyPropertiesFromMaterial(this.materialBase);
+                // Restore the per-LOD _VisibleIndices binding (CopyPropertiesFromMaterial copies
+                // textures / floats / colors / keywords — not StructuredBuffer bindings — but if
+                // the materialBase happens to have any value at the same property ID, it could
+                // race with the per-LOD binding intent. Re-set defensively.)
+                if (visibleIdx != null) mat.SetBuffer(ID_VisibleIndices, visibleIdx);
+            }
+            this.ApplyEngineOwnedUniforms();
+        }
+
+        /// <summary>
+        /// Push the snapshotted engine-owned uniforms (orient mode, rot offset, anchor, tilt
+        /// flag, wind/interactor gates) onto each LOD clone. Called once at Build and again
+        /// every Submit after the live-style sync so the bulk copy doesn't overwrite them.
+        /// </summary>
+        private void ApplyEngineOwnedUniforms()
+        {
+            this.SetLodFloat (ID_OrientMode,         this.orientModeVal);
+            this.SetLodVector(ID_RotationOffsetEuler, this.rotOffsetVal);
+            this.SetLodFloat (ID_TiltEnabled,        this.tiltFlagVal);
+            this.SetLodVector(ID_AnchorOffset,       this.anchorOffsetVal);
+            this.SetLodFloat (ID_WindEnabled,        this.windFlagVal);
+            this.SetLodFloat (ID_InteractorsEnabled, this.interactorsFlagVal);
         }
 
         // ── Metal-safe dummy StructuredBuffers ────────────────────────────────

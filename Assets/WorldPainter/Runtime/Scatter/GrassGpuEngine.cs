@@ -125,6 +125,13 @@ namespace WorldPainter
         private Material? lodMat1;
         private Material? lodMat2;
 
+        // ── Live-style donor (per-frame bridge — no rebuild needed on material edits) ──
+        // Reference to the layer's authored material. Held across frames so Submit() can
+        // re-mirror its style properties + keywords onto the LOD clones every frame; that
+        // way edits in the Inspector (BaseMap, BaseColor, TipColor, Cutoff, Alphaclip toggle)
+        // show up immediately without forcing the user to trigger a full layer rebuild.
+        private Material? layerStyleDonor;
+
         // ── LOD meshes ────────────────────────────────────────────────────────
         private Mesh? mesh0;
         private Mesh? mesh1;
@@ -335,7 +342,11 @@ namespace WorldPainter
             // GPU tier needs (WorldPainter/IndirectGrass). Without this bridge the user's BaseMap
             // texture set on the layer material is silently dropped on GPU tier because the
             // clones come from scatterIndirectMat (the default), not from the layer material.
-            this.ApplyLayerMaterialStyle(layer.Render.Material);
+            //
+            // Cache the donor reference so Submit() can re-bridge every frame without storing
+            // the whole ScatterLayer — that way Inspector edits to the material are live.
+            this.layerStyleDonor = layer.Render.Material;
+            this.ApplyLayerMaterialStyle(this.layerStyleDonor);
 
             // ── Phase 3: shadow config snapshot + keyword/param binding ─────
             this.receiveShadows = render.ReceiveShadows;
@@ -436,6 +447,13 @@ namespace WorldPainter
             this.SetLodFloat (ID_Flatten,          this.flatten);
             // _CamPosWS is the camera position — genuinely scene-wide, not per-layer — so it stays global.
             Shader.SetGlobalVector(ID_CamPosWS, new Vector4(camPos.x, camPos.y, camPos.z, 0f));
+
+            // Re-bridge the per-layer material style every frame so Inspector edits propagate
+            // live to the LOD clones (Texture / Color SetXxx are cheap dictionary lookups; the
+            // 3-mats × 5-props × ~ms cost is negligible compared to the cull dispatch above).
+            // Without this, edits to the layer material — BaseMap, BaseColor, TipColor, Cutoff,
+            // _ALPHACLIP toggle — only show after a full layer rebuild.
+            this.ApplyLayerMaterialStyle(this.layerStyleDonor);
 
             // FIX 3: upload interactors here (Submit) so it is always fresh for the draw.
             // SSOT: upload in exactly one place — not in Step.
@@ -695,6 +713,8 @@ namespace WorldPainter
             SafeDestroy(this.lodMat0); this.lodMat0 = null;
             SafeDestroy(this.lodMat1); this.lodMat1 = null;
             SafeDestroy(this.lodMat2); this.lodMat2 = null;
+            // Drop the donor reference (we never own it — it's a layer-asset reference).
+            this.layerStyleDonor = null;
 
             this.isBuilt = false;
         }
