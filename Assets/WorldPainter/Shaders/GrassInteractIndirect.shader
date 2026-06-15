@@ -54,8 +54,9 @@ Shader "WorldPainter/IndirectGrass"
         [Toggle(_SHADOW_TINT)]     _UseShadowTint  ("Shadow Tint",     Float) = 0
         _ShadowStrength ("Shadow Strength", Range(0,1)) = 1.0
         _ShadowTint     ("Shadow Tint Color", Color) = (1,1,1,1)
-        [Toggle(_ALPHACLIP_SHADOWS)] _AlphaclipShadows ("Alpha-Clip Shadows", Float) = 0
-        _Cutoff         ("Shadow Alpha Cutoff", Range(0,1)) = 0.5
+        [Toggle(_ALPHACLIP)]         _Alphaclip        ("Alpha Clip (Forward + Depth)", Float) = 0
+        [Toggle(_ALPHACLIP_SHADOWS)] _AlphaclipShadows ("Alpha-Clip Shadows",            Float) = 0
+        _Cutoff         ("Alpha Cutoff", Range(0,1)) = 0.5
         _ShadowDepthBias  ("Shadow Depth Bias",  Float) = 0
         _ShadowNormalBias ("Shadow Normal Bias", Float) = 0
     }
@@ -100,9 +101,11 @@ Shader "WorldPainter/IndirectGrass"
             // Phase 3: shadow feature toggles (shader_feature_local, all default OFF).
             // _RECEIVE_SHADOWS: compute real URP shadow coord + receive shadows (only meaningful with _PBR).
             // _SHADOW_TINT:     modulate received shadow term by _ShadowStrength/_ShadowTint.
-            // _ALPHACLIP_SHADOWS: unused in forward pass (applies in ShadowCaster). Declared for parity.
+            // _ALPHACLIP:       discard fragments where BaseMap.a < _Cutoff (transparent grass cards).
+            // _ALPHACLIP_SHADOWS: applies in ShadowCaster (separate so shadows can be opt-in).
             #pragma shader_feature_local _RECEIVE_SHADOWS
             #pragma shader_feature_local _SHADOW_TINT
+            #pragma shader_feature_local _ALPHACLIP
             #pragma shader_feature_local _ALPHACLIP_SHADOWS
             // Phase 3: URP shadow sampling keywords (multi_compile so shadow variants are always in build).
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -283,7 +286,11 @@ Shader "WorldPainter/IndirectGrass"
 
             // Reconstruct world-space vertex position from a BladeInstance.
             // billboard=true rotates the blade's yaw to face the camera (LOD2 path).
-            float3 ReconstructBladeVertexWS(BladeInstance b, float3 localPos, bool billboard)
+            // bendT (= uv.y, range 0..1) selects how much of the wind/interactor lean is applied
+            // to THIS vertex: 0 at the blade base (no displacement, stays glued to the ground),
+            // 1 at the tip (full displacement). Replaces the previous rigid leanMat that rotated
+            // the whole blade together — base no longer translates with the tip.
+            float3 ReconstructBladeVertexWS(BladeInstance b, float3 localPos, float bendT, bool billboard)
             {
                 // Unpack yaw + scale.
                 uint  hi      = (b.packedYawScale >> 16) & 0xFFFFu;
@@ -361,17 +368,16 @@ Shader "WorldPainter/IndirectGrass"
                 if (_Flatten > 0.0 && _BendStrength > 1e-5)
                     scaleY = scaleXZ * (1.0 - _Flatten * saturate(bendMag / _BendStrength));
 
-                // Lean rotation — mirrors GrassBendSimulator.LeanRotation.
-                float2 lean   = windXZ + bendXZ;
-                float leanPitch = lean.y * DEG_PER_METRE;
-                float leanRoll  = -lean.x * DEG_PER_METRE;
-                float magDeg    = sqrt(leanPitch * leanPitch + leanRoll * leanRoll);
-                if (magDeg > MAX_LEAN_DEGREES)
-                {
-                    float s = MAX_LEAN_DEGREES / magDeg;
-                    leanPitch *= s;
-                    leanRoll  *= s;
-                }
+                // Accumulated horizontal lean in metres (wind + interactor + trail). We no longer
+                // rotate the whole blade by this — instead it becomes a per-vertex sweep capped at
+                // MAX_LEAN_METRES (the rotation-era clamp converted back through DEG_PER_METRE so
+                // existing _WindStrength / _BendStrength values produce roughly the same tip
+                // amplitude as the old rigid-rotation path).
+                float2 lean    = windXZ + bendXZ;
+                float  leanMag = length(lean);
+                const float MAX_LEAN_METRES = MAX_LEAN_DEGREES / DEG_PER_METRE;
+                if (leanMag > MAX_LEAN_METRES)
+                    lean *= (MAX_LEAN_METRES / leanMag);
 
                 // Billboard: override yaw to face camera (LOD2 only).
                 if (billboard)
@@ -380,15 +386,22 @@ Shader "WorldPainter/IndirectGrass"
                     yawDeg = atan2(toCam.x, toCam.y) * (180.0 / 3.14159265);
                 }
 
-                // Compose: leanRot * baseRot → scale → translate.
-                // baseRot = oriented (align*Euler(p,y,r)*offset) or legacy (yaw+offset).
-                // Wind lean is applied on top (leanRot * baseRot), matching CPU GrassBendSimulator:
-                //   outSlab[k] = TRS(basePos, lean * yawSlab[k], scale)  where yawSlab[k] = m.rotation.
+                // baseRot = oriented (align*Euler(p,y,r)*offset) or legacy (yaw+offset). Only
+                // handles orientation (yaw / surface alignment / authored offset); the WIND/
+                // INTERACTOR LEAN is applied per-vertex below so the base of the blade stays put
+                // and only the upper portion sweeps in the wind.
                 float3x3 baseRot = GRASS_BaseRotation(b, yawDeg);
-                float3x3 leanMat = EulerToMatrix(leanPitch, 0.0, leanRoll);
-                float3x3 rot     = mul(leanMat, baseRot);
                 float3 scaled    = float3(localPos.x * scaleXZ, localPos.y * scaleY, localPos.z * scaleXZ);
-                return b.posWS + mul(rot, scaled);
+                float3 baseVert  = mul(baseRot, scaled);
+
+                // Per-vertex bend: horizontal world-XZ offset proportional to vertex height. The
+                // tip (bendT=1) reaches `lean * scaleY` metres, matching the original rigid-rotation
+                // tip amplitude; the base (bendT=0) stays at b.posWS. Use bendT² for a softer
+                // arc (tip moves more, base/midshaft stay closer to vertical) — visually closer
+                // to a real grass blade than a linear shear.
+                float bendShape  = bendT * bendT;
+                float3 bendOffset = float3(lean.x, 0.0, lean.y) * (bendShape * scaleY);
+                return b.posWS + baseVert + bendOffset;
             }
 
             struct Varyings
@@ -441,9 +454,9 @@ Shader "WorldPainter/IndirectGrass"
                 BladeInstance b = _Blades[bladeIdx];
 
                 #ifdef _LOD2_BILLBOARD
-                    float3 posWS = ReconstructBladeVertexWS(b, posOS.xyz, true);
+                    float3 posWS = ReconstructBladeVertexWS(b, posOS.xyz, saturate(uv.y), true);
                 #else
-                    float3 posWS = ReconstructBladeVertexWS(b, posOS.xyz, false);
+                    float3 posWS = ReconstructBladeVertexWS(b, posOS.xyz, saturate(uv.y), false);
                 #endif
 
                 o.positionCS = TransformWorldToHClip(posWS);
@@ -461,6 +474,11 @@ Shader "WorldPainter/IndirectGrass"
             half4 frag(Varyings i) : SV_Target
             {
                 half4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv);
+                // _ALPHACLIP: kill transparent fragments of the BaseMap (cutout grass cards).
+                // Runs BEFORE color compute so we skip lighting for discarded pixels.
+                #if defined(_ALPHACLIP)
+                    clip(tex.a - _Cutoff);
+                #endif
                 half3 baseAlbedo = lerp(_BaseColor.rgb, _TipColor.rgb, i.heightT) * tex.rgb;
 
                 // ── Normal map perturbation (runs before PBR or stylized branch) ──
@@ -681,7 +699,10 @@ Shader "WorldPainter/IndirectGrass"
                 return mul(GS_EulerMat(0,yaw,0),GS_EulerMat(oe.x,oe.y,oe.z));
             }
 
-            float3 ReconstructWS(BladeInstance b, float3 lp, bool bb)
+            // Per-vertex bend (bendT = uv.y, 0 at base, 1 at tip): replaces the rigid leanMat in
+            // the forward pass. Mirrors ReconstructBladeVertexWS so shadow silhouettes match the
+            // visible blade exactly under wind/interactor lean.
+            float3 ReconstructWS(BladeInstance b, float3 lp, float bendT, bool bb)
             {
                 uint hi=(b.packedYawScale>>16)&0xFFFFu, lo=b.packedYawScale&0xFFFFu;
                 float yaw=(float)hi/65535.0*360.0, sxz=(float)lo/65535.0*_ScaleMax2, sy2=sxz;
@@ -727,11 +748,18 @@ Shader "WorldPainter/IndirectGrass"
                 // TRAIL DEFORM END
                 float bm=length(bx);
                 if(_Flatten>0&&_BendStrength>1e-5) sy2=sxz*(1-_Flatten*saturate(bm/_BendStrength));
-                float2 ln=wt+bx; float pt=ln.y*DEG_PER_METRE, rl=-ln.x*DEG_PER_METRE;
-                float mg=sqrt(pt*pt+rl*rl); if(mg>MAX_LEAN_DEGREES){float s=MAX_LEAN_DEGREES/mg;pt*=s;rl*=s;}
+                // Clamp lean magnitude to the rotation-era cap so existing wind/bend settings
+                // produce equivalent tip amplitude on the new per-vertex path.
+                float2 ln=wt+bx; float lm=length(ln);
+                const float MAX_LEAN_METRES_S = MAX_LEAN_DEGREES / DEG_PER_METRE;
+                if (lm > MAX_LEAN_METRES_S) ln *= (MAX_LEAN_METRES_S / lm);
                 if(bb){float2 tc=_CamPosWS.xz-b.posWS.xz;yaw=atan2(tc.x,tc.y)*(180/3.14159265);}
-                float3x3 rot=mul(GS_EulerMat(pt,0,rl),GS_BaseRot(b,yaw));
-                return b.posWS+mul(rot,float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
+                // Orientation only — bend is added per-vertex below (tip moves, base sits still).
+                float3x3 baseRot=GS_BaseRot(b,yaw);
+                float3 baseVert=mul(baseRot, float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
+                float bendShape=bendT*bendT;
+                float3 bendOffset=float3(ln.x,0.0,ln.y) * (bendShape * sy2);
+                return b.posWS + baseVert + bendOffset;
             }
 
             // Phase 3: extend SV with uv when _ALPHACLIP_SHADOWS is active (alpha-clip in frag).
@@ -748,9 +776,9 @@ Shader "WorldPainter/IndirectGrass"
                 SV o=(SV)0;
                 BladeInstance b=_Blades[_VisibleIndices[iid]];
                 #ifdef _LOD2_BILLBOARD
-                    float3 posWS=ReconstructWS(b,posOS.xyz,true);
+                    float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),true);
                 #else
-                    float3 posWS=ReconstructWS(b,posOS.xyz,false);
+                    float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),false);
                 #endif
                 float3 nWS=float3(0,1,0);
                 #if _CASTING_PUNCTUAL_LIGHT_SHADOW
@@ -805,11 +833,23 @@ Shader "WorldPainter/IndirectGrass"
             #pragma fragment depthFrag
             #pragma multi_compile_local _ _LOD2_BILLBOARD
             #pragma multi_compile_local _ _WIND_PERLIN
+            // _ALPHACLIP: also discard transparent fragments in the URP depth-prepass so the depth
+            // buffer matches the forward silhouette (otherwise depth says "blocker" everywhere and
+            // anything behind a transparent card gets z-rejected). Must mirror the forward pass.
+            #pragma shader_feature_local _ALPHACLIP
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             struct BladeInstance { float3 posWS; uint packedYawScale; uint hash; };
             struct GrassInteractorGpu { float3 posWS; float radius; float strength; float _p0; float _p1; float _p2; };
+
+            // BaseMap + cutoff are only needed under _ALPHACLIP (zero cost when keyword is off,
+            // since the variant compiler strips both samplers and CBUFFER entry).
+            #if defined(_ALPHACLIP)
+                TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+                float4 _BaseMap_ST;
+                float  _Cutoff;
+            #endif
 
             // TRAIL DEFORM BEGIN
             struct GrassTrailSegmentGpu {  // matches C# TrailSegmentGpu, 48 B
@@ -858,7 +898,9 @@ Shader "WorldPainter/IndirectGrass"
             float3x3 GD_AlignMat(float3 n){float3 up=float3(0,1,0);float3 ax=cross(up,n);float s=length(ax),c=dot(up,n);if(s<1e-6)return c>0?(float3x3)1:float3x3(1,0,0,0,-1,0,0,0,1);ax/=s;float t=1-c;return float3x3(t*ax.x*ax.x+c,t*ax.x*ax.y-s*ax.z,t*ax.x*ax.z+s*ax.y,t*ax.x*ax.y+s*ax.z,t*ax.y*ax.y+c,t*ax.y*ax.z-s*ax.x,t*ax.x*ax.z-s*ax.y,t*ax.y*ax.z+s*ax.x,t*ax.z*ax.z+c);}
             float3x3 GD_BaseRot(BladeInstance b,float yaw){float3 oe=_RotationOffsetEuler.xyz;if(_OrientMode>=0.5){uint s2=b.hash;float ox=(float)((s2>>24)&0xFFu)/255.0*2.0-1.0,oy=(float)((s2>>16)&0xFFu)/255.0*2.0-1.0,ip=(float)((s2>>8)&0xFFu)/255.0*180.0-90.0,ir=(float)(s2&0xFFu)/255.0*180.0-90.0;return mul(GD_AlignMat(GD_OctDec(ox,oy)),mul(GD_EulerMat(ip,yaw,ir),GD_EulerMat(oe.x,oe.y,oe.z)));}return mul(GD_EulerMat(0,yaw,0),GD_EulerMat(oe.x,oe.y,oe.z));}
 
-            float3 ReconstructWS(BladeInstance b, float3 lp, bool bb)
+            // Per-vertex bend mirror for the DepthOnly pass — same per-vertex sweep as the
+            // forward/shadow paths so the depth-prepass silhouette tracks the visible blade.
+            float3 ReconstructWS(BladeInstance b, float3 lp, float bendT, bool bb)
             {
                 uint hi=(b.packedYawScale>>16)&0xFFFFu, lo=b.packedYawScale&0xFFFFu;
                 float yaw=(float)hi/65535.0*360.0, sxz=(float)lo/65535.0*_ScaleMax2, sy2=sxz;
@@ -904,27 +946,47 @@ Shader "WorldPainter/IndirectGrass"
                 // TRAIL DEFORM END
                 float bm=length(bx);
                 if(_Flatten>0&&_BendStrength>1e-5) sy2=sxz*(1-_Flatten*saturate(bm/_BendStrength));
-                float2 ln=wt+bx; float pt=ln.y*DEG_PER_METRE, rl=-ln.x*DEG_PER_METRE;
-                float mg=sqrt(pt*pt+rl*rl); if(mg>MAX_LEAN_DEGREES){float s=MAX_LEAN_DEGREES/mg;pt*=s;rl*=s;}
+                float2 ln=wt+bx; float lm=length(ln);
+                const float MAX_LEAN_METRES_D = MAX_LEAN_DEGREES / DEG_PER_METRE;
+                if (lm > MAX_LEAN_METRES_D) ln *= (MAX_LEAN_METRES_D / lm);
                 if(bb){float2 tc=_CamPosWS.xz-b.posWS.xz;yaw=atan2(tc.x,tc.y)*(180/3.14159265);}
-                float3x3 rot=mul(GD_EulerMat(pt,0,rl),GD_BaseRot(b,yaw));
-                return b.posWS+mul(rot,float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
+                float3x3 baseRot=GD_BaseRot(b,yaw);
+                float3 baseVert=mul(baseRot, float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
+                float bendShape=bendT*bendT;
+                float3 bendOffset=float3(ln.x,0.0,ln.y) * (bendShape * sy2);
+                return b.posWS + baseVert + bendOffset;
             }
 
-            struct DV { float4 positionCS : SV_POSITION; };
+            struct DV
+            {
+                float4 positionCS : SV_POSITION;
+                #if defined(_ALPHACLIP)
+                    float2 uv : TEXCOORD0;
+                #endif
+            };
             DV depthVert(float4 posOS : POSITION, float2 uv : TEXCOORD0, uint iid : SV_InstanceID)
             {
                 DV o=(DV)0;
                 BladeInstance b=_Blades[_VisibleIndices[iid]];
                 #ifdef _LOD2_BILLBOARD
-                    float3 posWS=ReconstructWS(b,posOS.xyz,true);
+                    float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),true);
                 #else
-                    float3 posWS=ReconstructWS(b,posOS.xyz,false);
+                    float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),false);
                 #endif
                 o.positionCS=TransformWorldToHClip(posWS);
+                #if defined(_ALPHACLIP)
+                    o.uv = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                #endif
                 return o;
             }
-            half4 depthFrag(DV i):SV_Target{return 0;}
+            half4 depthFrag(DV i):SV_Target
+            {
+                #if defined(_ALPHACLIP)
+                    half alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv).a;
+                    clip(alpha - _Cutoff);
+                #endif
+                return 0;
+            }
             ENDHLSL
         }
     }

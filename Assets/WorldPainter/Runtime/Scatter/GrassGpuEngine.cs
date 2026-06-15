@@ -62,6 +62,18 @@ namespace WorldPainter
         private static readonly int ID_MaskMap             = Shader.PropertyToID("_MaskMap");
         private static readonly int ID_EmissionMap         = Shader.PropertyToID("_EmissionMap");
         private static readonly int ID_EmissionColor       = Shader.PropertyToID("_EmissionColor");
+        // Style properties harvested from the per-layer material (independent of its shader so
+        // an InstancedGrass-shader layer material can still hand its texture/colors to the
+        // IndirectGrass-shader LOD clones the GPU tier draws with).
+        private static readonly int ID_BaseMap             = Shader.PropertyToID("_BaseMap");
+        private static readonly int ID_BaseMap_ST          = Shader.PropertyToID("_BaseMap_ST");
+        private static readonly int ID_BaseColor           = Shader.PropertyToID("_BaseColor");
+        private static readonly int ID_TipColor            = Shader.PropertyToID("_TipColor");
+        private static readonly int ID_Cutoff              = Shader.PropertyToID("_Cutoff");
+        // Donor _Alphaclip float (1 when the [Toggle(_ALPHACLIP)] is on in Inspector). Used as a
+        // fallback when the donor material has the float set but the keyword wasn't refreshed.
+        private static readonly int ID_Alphaclip           = Shader.PropertyToID("_Alphaclip");
+        private const string KW_Alphaclip                  = "_ALPHACLIP";
         private const string KW_NormalMap                  = "_NORMALMAP";
         private const string KW_Pbr                        = "_PBR";
         private const string KW_MaskMap                    = "_MASKMAP";
@@ -317,6 +329,14 @@ namespace WorldPainter
             // ── Phase 2: PBR material keyword + texture binding ─────────────
             this.ApplyPbrKeywords(render);
 
+            // Per-layer style: bridge _BaseMap / _BaseColor / _TipColor / _BaseMap_ST from the
+            // layer's own material onto the LOD clones. The layer material commonly uses a
+            // DIFFERENT shader (WorldPainter/InstancedGrass for the CPU tier) than the one the
+            // GPU tier needs (WorldPainter/IndirectGrass). Without this bridge the user's BaseMap
+            // texture set on the layer material is silently dropped on GPU tier because the
+            // clones come from scatterIndirectMat (the default), not from the layer material.
+            this.ApplyLayerMaterialStyle(layer.Render.Material);
+
             // ── Phase 3: shadow config snapshot + keyword/param binding ─────
             this.receiveShadows = render.ReceiveShadows;
             this.ApplyShadowKeywords(render);
@@ -471,6 +491,51 @@ namespace WorldPainter
         }
 
         /// <summary>
+        /// Copies the per-layer style properties (<c>_BaseMap</c>, <c>_BaseMap_ST</c>,
+        /// <c>_BaseColor</c>, <c>_TipColor</c>) from the layer's own material onto each LOD clone.
+        /// </summary>
+        /// <remarks>
+        /// The layer's material commonly uses <c>WorldPainter/InstancedGrass</c> (driven by the CPU
+        /// tier) but the GPU tier clones from <c>scatterIndirectMat</c> which uses
+        /// <c>WorldPainter/IndirectGrass</c>. Both shaders declare the same style uniform names,
+        /// so we mirror just those properties when the donor declares them — meaning a BaseMap
+        /// texture / BaseColor / TipColor set on the layer's material in the Inspector now visibly
+        /// drives the GPU tier draw, matching the CPU tier behaviour. Missing properties are
+        /// skipped (HasProperty guard) so this is a no-op for layers without a donor material.
+        /// </remarks>
+        private void ApplyLayerMaterialStyle(Material? donor)
+        {
+            if (donor == null) return;
+            // Toggle attributes set BOTH a float property (e.g. _Alphaclip = 1) AND a shader
+            // keyword (_ALPHACLIP) on the donor when the user flips the toggle in the Inspector.
+            // The GPU LOD clones derive from scatterIndirectMat, which has the keyword OFF, so
+            // we must mirror the donor's keyword state explicitly — copying just the float would
+            // leave the variant compiler stripping the clip() path on the clones and the
+            // transparency stays solid no matter what the user does on the material.
+            bool donorAlphaclip =
+                donor.IsKeywordEnabled(KW_Alphaclip) ||
+                (donor.HasProperty(ID_Alphaclip) && donor.GetFloat(ID_Alphaclip) > 0.5f);
+
+            Material?[] mats = { this.lodMat0, this.lodMat1, this.lodMat2 };
+            foreach (Material? mat in mats)
+            {
+                if (mat == null) continue;
+                if (donor.HasProperty(ID_BaseMap))    mat.SetTexture(ID_BaseMap,   donor.GetTexture(ID_BaseMap));
+                if (donor.HasProperty(ID_BaseMap_ST)) mat.SetVector (ID_BaseMap_ST, donor.GetVector (ID_BaseMap_ST));
+                if (donor.HasProperty(ID_BaseColor))  mat.SetColor  (ID_BaseColor, donor.GetColor  (ID_BaseColor));
+                if (donor.HasProperty(ID_TipColor))   mat.SetColor  (ID_TipColor,  donor.GetColor  (ID_TipColor));
+                // Bridge the alpha cutoff threshold so the layer's _Cutoff drives the GPU tier's clip().
+                if (donor.HasProperty(ID_Cutoff))     mat.SetFloat  (ID_Cutoff,    donor.GetFloat  (ID_Cutoff));
+
+                // Donor's _ALPHACLIP OR the per-layer config's UseAlphaclip can enable the cutout
+                // path — either is authoritative. We only DISABLE here if neither says yes, so a
+                // ApplyPbrKeywords enable triggered by cfg.UseAlphaclip is not stomped.
+                if (donorAlphaclip)
+                    mat.EnableKeyword(KW_Alphaclip);
+            }
+        }
+
+        /// <summary>
         /// Phase 2: Binds PBR textures and sets shader_feature_local keywords on all LOD material clones.
         /// All defaults are OFF — with no toggles enabled the original stylized lighting path runs unchanged.
         /// </summary>
@@ -525,6 +590,15 @@ namespace WorldPainter
                 {
                     mat.DisableKeyword(KW_Emission);
                 }
+
+                // _ALPHACLIP — discard transparent BaseMap fragments in the forward + depth passes
+                // (and shadow caster when UseAlphaclipShadows is also on). Required for cutout grass
+                // cards: without it, BaseMap.a < 1 still renders as a solid quad and the grass looks
+                // like uniform rectangles instead of blade silhouettes.
+                if (cfg.UseAlphaclip)
+                    mat.EnableKeyword(KW_Alphaclip);
+                else
+                    mat.DisableKeyword(KW_Alphaclip);
             }
         }
 

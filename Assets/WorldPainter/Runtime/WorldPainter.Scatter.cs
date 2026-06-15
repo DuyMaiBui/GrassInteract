@@ -156,7 +156,7 @@ namespace WorldPainter
                     return this.TryBuildScatterGpuEngine(
                         layerIndex, $"ForceGpu layer[{layerIndex}]",
                         layer, origin, sampler,
-                        this.scatterCullCompute, this.scatterIndirectMat);
+                        this.scatterCullCompute, this.ResolveScatterMaterial(layer));
 
                 case ScatterTierMode.Auto:
                 default:
@@ -180,8 +180,23 @@ namespace WorldPainter
                     return this.TryBuildScatterGpuEngine(
                         layerIndex, $"Auto layer[{layerIndex}]",
                         layer, origin, sampler,
-                        this.scatterCullCompute, this.scatterIndirectMat);
+                        this.scatterCullCompute, this.ResolveScatterMaterial(layer));
             }
+        }
+
+        // Per-layer material when set AND it uses the WorldPainter/IndirectGrass shader (so its
+        // properties — _BaseMap/_BaseColor/_TipColor/etc — bind to the same uniforms the GPU engine
+        // and shader expect). Falls back to the project-wide scatterIndirectMat otherwise, so layers
+        // that leave Material null (or pick an incompatible shader) still render with the default.
+        // Without this, the GPU tier always cloned scatterIndirectMat and per-layer styling — base
+        // map, gradient colors — was silently ignored (CPU tier already honors layer.Render.Material).
+        private Material ResolveScatterMaterial(ScatterLayer layer)
+        {
+            Material? layerMat = layer.Render.Material;
+            if (layerMat != null && layerMat.shader != null &&
+                layerMat.shader.name == "WorldPainter/IndirectGrass")
+                return layerMat;
+            return this.scatterIndirectMat!;
         }
 
         private IGrassEngine TryBuildScatterGpuEngine(

@@ -99,6 +99,10 @@ namespace WorldPainter
         [Tooltip("Alpha-clip the shadow caster by base-map alpha. OFF = solid-quad caster (default). Requires _Cutoff to be sensible (0.5 default baked into the shader property).")]
         [SerializeField] private bool useAlphaclipShadows;
 
+        [BoxGroup("PBR Materials")]
+        [Tooltip("Alpha-clip the forward + depth passes by base-map alpha so transparent texels (alpha < cutoff) disappear instead of rendering as solid quads. Required when assigning a transparent grass-card texture to _BaseMap. Threshold uses the material's _Cutoff property (0.5 default).")]
+        [SerializeField] private bool useAlphaclip;
+
         public ScatterRenderConfig(Material? material, ShadowCastingMode shadowCastingMode, ScatterLod[] lods, float renderCullDistance)
         {
             this.material = material;
@@ -120,6 +124,7 @@ namespace WorldPainter
             this.shadowDepthBias     = 0f;
             this.shadowNormalBias    = 0f;
             this.useAlphaclipShadows = false;
+            this.useAlphaclip        = false;
         }
 
         /// <summary>Copy constructor with an overridden renderCullDistance. Preserves all other fields including PBR and shadows.</summary>
@@ -144,6 +149,7 @@ namespace WorldPainter
             this.shadowDepthBias     = src.shadowDepthBias;
             this.shadowNormalBias    = src.shadowNormalBias;
             this.useAlphaclipShadows = src.useAlphaclipShadows;
+            this.useAlphaclip        = src.useAlphaclip;
         }
 
         public Material? Material => this.material;
@@ -175,6 +181,7 @@ namespace WorldPainter
         public float ShadowDepthBias  => this.shadowDepthBias;
         public float ShadowNormalBias => this.shadowNormalBias;
         public bool  UseAlphaclipShadows => this.useAlphaclipShadows;
+        public bool  UseAlphaclip        => this.useAlphaclip;
 
         public Mesh[] LodMeshes
         {

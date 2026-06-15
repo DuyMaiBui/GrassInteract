@@ -18,6 +18,8 @@ Shader "WorldPainter/InstancedGrass"
         _TipColor  ("Tip Color",  Color) = (0.55, 0.85, 0.30, 1)
         [NoScaleOffset] _BaseMap ("Base Map (optional)", 2D) = "white" {}
         _BaseMap_ST ("Base Map Tiling", Vector) = (1,1,0,0)
+        [Toggle(_ALPHACLIP)] _Alphaclip ("Alpha Clip (transparent cards)", Float) = 0
+        _Cutoff ("Alpha Cutoff", Range(0,1)) = 0.5
     }
 
     SubShader
@@ -41,6 +43,9 @@ Shader "WorldPainter/InstancedGrass"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
+            // Cutout grass cards (BaseMap with an alpha channel): discard fragments under _Cutoff
+            // so transparent texels disappear instead of rendering as solid blade quads.
+            #pragma shader_feature_local _ALPHACLIP
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -48,6 +53,7 @@ Shader "WorldPainter/InstancedGrass"
                 float4 _BaseColor;
                 float4 _TipColor;
                 float4 _BaseMap_ST;
+                float  _Cutoff;
             CBUFFER_END
 
             TEXTURE2D(_BaseMap);
@@ -86,6 +92,9 @@ Shader "WorldPainter/InstancedGrass"
             half4 frag (Varyings input) : SV_Target
             {
                 half4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
+                #if defined(_ALPHACLIP)
+                    clip(tex.a - _Cutoff);
+                #endif
                 half3 col = lerp(_BaseColor.rgb, _TipColor.rgb, input.heightT) * tex.rgb;
                 return half4(col, 1.0);
             }
@@ -110,12 +119,20 @@ Shader "WorldPainter/InstancedGrass"
             #pragma fragment shadowFrag
             #pragma multi_compile_instancing
             #pragma multi_compile _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+            // Mirror the forward keyword so the shadow silhouette matches the visible blade.
+            #pragma shader_feature_local _ALPHACLIP
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             float3 _LightDirection;
             float3 _LightPosition;
+
+            #if defined(_ALPHACLIP)
+                TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+                float4 _BaseMap_ST;
+                float  _Cutoff;
+            #endif
 
             struct ShadowAttributes
             {
@@ -128,6 +145,9 @@ Shader "WorldPainter/InstancedGrass"
             struct ShadowVaryings
             {
                 float4 positionCS : SV_POSITION;
+                #if defined(_ALPHACLIP)
+                    float2 uv : TEXCOORD0;
+                #endif
             };
 
             float4 ShadowClipPos(float3 posWS, float3 nrmWS)
@@ -156,11 +176,18 @@ Shader "WorldPainter/InstancedGrass"
                 float3 nrmWS = TransformObjectToWorldNormal(input.normalOS);
 
                 output.positionCS = ShadowClipPos(posWS, nrmWS);
+                #if defined(_ALPHACLIP)
+                    output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                #endif
                 return output;
             }
 
             half4 shadowFrag (ShadowVaryings input) : SV_Target
             {
+                #if defined(_ALPHACLIP)
+                    half alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).a;
+                    clip(alpha - _Cutoff);
+                #endif
                 return 0;
             }
             ENDHLSL
@@ -181,8 +208,16 @@ Shader "WorldPainter/InstancedGrass"
             #pragma vertex depthVert
             #pragma fragment depthFrag
             #pragma multi_compile_instancing
+            // Mirror the forward keyword so the depth-prepass silhouette matches.
+            #pragma shader_feature_local _ALPHACLIP
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            #if defined(_ALPHACLIP)
+                TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+                float4 _BaseMap_ST;
+                float  _Cutoff;
+            #endif
 
             struct DepthAttributes
             {
@@ -195,6 +230,9 @@ Shader "WorldPainter/InstancedGrass"
             struct DepthVaryings
             {
                 float4 positionCS : SV_POSITION;
+                #if defined(_ALPHACLIP)
+                    float2 uv : TEXCOORD0;
+                #endif
             };
 
             DepthVaryings depthVert (DepthAttributes input)
@@ -206,11 +244,18 @@ Shader "WorldPainter/InstancedGrass"
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
 
                 output.positionCS = TransformWorldToHClip(posWS);
+                #if defined(_ALPHACLIP)
+                    output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                #endif
                 return output;
             }
 
             half4 depthFrag (DepthVaryings input) : SV_Target
             {
+                #if defined(_ALPHACLIP)
+                    half alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).a;
+                    clip(alpha - _Cutoff);
+                #endif
                 return 0;
             }
             ENDHLSL

@@ -332,6 +332,17 @@ namespace WorldPainter
             if (this.tiltSim?.TiltBuffer != null)
                 Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
 
+            // Metal requires every StructuredBuffer declared by the shader to be bound, even when
+            // a runtime branch (_InteractorsEnabled / _TiltEnabled) skips reading it. When this layer
+            // doesn't use interactors/tilt, the global slot may still be unset, producing
+            //   "requires a ComputeBuffer at index N to be bound, but none provided."
+            // Bind a 1-element dummy per-material so the shader is satisfied without disturbing the
+            // live global registry (per-material bindings only affect this layer's draw).
+            if (!this.interactsWithDeform)
+                this.SetLodBuffer(ID_Interactors, GetDummyInteractorBuffer());
+            if (this.tiltSim?.TiltBuffer == null)
+                this.SetLodBuffer(ID_InstanceTilt, GetDummyTiltBuffer());
+
             this.cullCmd = new CommandBuffer { name = "InstancedPropEngine.Cull" };
             this.isBuilt = true;
         }
@@ -696,6 +707,57 @@ namespace WorldPainter
             if (this.lodMat0 != null) this.lodMat0.SetVector(id, v);
             if (this.lodMat1 != null) this.lodMat1.SetVector(id, v);
             if (this.lodMat2 != null) this.lodMat2.SetVector(id, v);
+        }
+
+        /// <summary>Sets a GraphicsBuffer on all three LOD material clones (per-material, never global).</summary>
+        private void SetLodBuffer(int id, GraphicsBuffer buf)
+        {
+            if (this.lodMat0 != null) this.lodMat0.SetBuffer(id, buf);
+            if (this.lodMat1 != null) this.lodMat1.SetBuffer(id, buf);
+            if (this.lodMat2 != null) this.lodMat2.SetBuffer(id, buf);
+        }
+
+        // ── Metal-safe dummy StructuredBuffers ────────────────────────────────
+        // 1-element placeholder buffers used to satisfy Metal's "every declared StructuredBuffer
+        // must be bound" contract when a prop layer has interactors/tilt disabled. Stride matches
+        // the shader struct sizes (Interactor = 32 B, InstanceTilt float4 = 16 B). Shared across
+        // engines and disposed on play-mode exit / domain reload.
+        private const int INTERACTOR_STRIDE_BYTES = 32;
+        private const int TILT_STRIDE_BYTES       = 16;
+        private static GraphicsBuffer? sharedDummyInteractorBuf;
+        private static GraphicsBuffer? sharedDummyTiltBuf;
+
+        private static GraphicsBuffer GetDummyInteractorBuffer()
+        {
+            if (sharedDummyInteractorBuf == null)
+                sharedDummyInteractorBuf = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured, 1, INTERACTOR_STRIDE_BYTES);
+            return sharedDummyInteractorBuf;
+        }
+
+        private static GraphicsBuffer GetDummyTiltBuffer()
+        {
+            if (sharedDummyTiltBuf == null)
+                sharedDummyTiltBuf = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured, 1, TILT_STRIDE_BYTES);
+            return sharedDummyTiltBuf;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void RegisterDummyBufferCleanup()
+        {
+            Application.quitting -= DisposeSharedDummyBuffers;
+            Application.quitting += DisposeSharedDummyBuffers;
+#if UNITY_EDITOR
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= DisposeSharedDummyBuffers;
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += DisposeSharedDummyBuffers;
+#endif
+        }
+
+        private static void DisposeSharedDummyBuffers()
+        {
+            sharedDummyInteractorBuf?.Release(); sharedDummyInteractorBuf = null;
+            sharedDummyTiltBuf?.Release();       sharedDummyTiltBuf       = null;
         }
 
         /// <summary>
