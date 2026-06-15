@@ -3,7 +3,7 @@ name: t1k:unity:editor:profiling
 description: Unity Profiler API, Memory Profiler, Frame Debugger, ProfilerMarker, custom counters, device profiling, and bottleneck identification for Unity 6.
 effort: medium
 keywords: [profiling, performance, unity profiler, optimization]
-version: 2.1.7
+version: 2.2.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

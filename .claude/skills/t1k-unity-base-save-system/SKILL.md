@@ -3,7 +3,7 @@ name: t1k:unity:base:save-system
 description: Save/load system patterns — JSON/binary serialization, versioning, migration, cloud save, and encryption for Unity 6. Use when implementing game persistence.
 effort: medium
 keywords: [save system, persistence, data, unity]
-version: 2.2.2
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

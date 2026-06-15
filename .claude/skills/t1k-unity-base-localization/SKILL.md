@@ -18,7 +18,7 @@ triggers:
   - I18n
 effort: medium
 keywords: [localization, i18n, translation, unity]
-version: 2.2.2
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

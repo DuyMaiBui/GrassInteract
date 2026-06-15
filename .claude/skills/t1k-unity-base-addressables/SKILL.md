@@ -15,7 +15,7 @@ triggers:
 effort: high
 context: fork
 keywords: [addressables, asset management, loading, unity]
-version: 2.2.2
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

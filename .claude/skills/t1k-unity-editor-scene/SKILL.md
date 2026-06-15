@@ -4,7 +4,7 @@ description: "Automate 5-step scene setup: Create Prefabs â†’ Build BDP Trees â†
 effort: medium
 argument-hint: "[demo-name] [--rebuild|--prefabs|--trees|--cache]"
 keywords: [scene, scene management, hierarchy, prefab wiring, baker, onvalidate, subscene]
-version: 2.1.7
+version: 2.2.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

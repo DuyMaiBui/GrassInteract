@@ -4,7 +4,7 @@ description: Turn a UI screenshot (popup, screen, HUD, panel) into a Unity-ready
 effort: low
 keywords: [describe ui, ui screenshot, mockup, layout breakdown, hierarchy, detail table, anchor pivot, rect transform, FullScreenLayout, popup layout, screen layout, isolate elements, ui plan, image to ui, anchored position, pivot, vertical layout group]
 argument-hint: "[image-path] (or paste/attach the screenshot)"
-version: 2.3.1
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui

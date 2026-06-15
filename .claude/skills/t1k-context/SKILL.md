@@ -4,7 +4,7 @@ description: "Check context usage limits, monitor time remaining, optimize token
 keywords: [tokens, optimize, context-window, agent-context, injection, degradation]
 argument-hint: "[topic or question]"
 effort: medium
-version: 2.17.3
+version: 2.18.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

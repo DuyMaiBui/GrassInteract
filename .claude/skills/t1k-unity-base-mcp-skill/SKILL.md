@@ -4,7 +4,7 @@ description: Orchestrate Unity Editor via MCP tools — GameObjects, scripts, sc
 effort: high
 context: fork
 keywords: [MCP, unity MCP, tool, bridge]
-version: 2.2.2
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
@@ -306,6 +306,21 @@ get_test_job(job_id=result["job_id"], wait_timeout=60, include_failed_tests=True
 - **`manage_asset(action="create")` does NOT support arbitrary ScriptableObject types — only Folder, Material, and PhysicsMaterial.** `execute_code` is the next approach but on Windows hits a Mono "filename too long" error (~260-char path limit) on both roslyn and codedom backends. **Reliable fallback on all platforms**: write the `.asset` YAML directly to disk using the script GUID from its `.cs.meta` file, then call `refresh_unity(mode="force", scope="assets")`. Full YAML template, field-name rules, and step-by-step guide: `references/workflow-scriptableobject-creation.md`.
 
 Field reports for the gotchas in this section: see [references/incidents.md](references/incidents.md).
+
+## Compile / Refresh Troubleshooting
+
+- **`refresh_unity` broken-pipe / timeout during compile.** `refresh_unity` drops the bridge on every domain reload — the MCP call returns `[Errno 32] Broken pipe` or times out. The editor is alive and reloading normally. RELIABLE alternatives to trigger recompilation without relying on `refresh_unity` returning cleanly:
+  1. `execute_menu_item(menu_path="Assets/Refresh")` — triggers `AssetDatabase.Refresh()` on the main thread; safer than the MCP reload path.
+  2. `execute_code` → `UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation()` — directly requests a script-only compile without a full asset refresh.
+  After either call, poll `stat Library/ScriptAssemblies/<asmdef-name>.dll` for an advancing mtime (the asmdef name matches the `"name"` field in the package's `.asmdef` file, e.g. `DOTSCombat.Runtime.dll`). Do NOT re-call `refresh_unity` immediately — the bridge reconnects automatically once Unity is ready; retry the original MCP call instead.
+
+- **STALE-DLL TRAP — `run_tests` against pre-edit compiled code.** `Assets/Refresh` imports new/changed files but does NOT always recompile an already-tracked assembly that has changed source. Symptoms: tests keep failing with byte-identical wrong values across multiple fix attempts; the test error message never changes; the system behaviour in test looks like the OLD code. Cause: `Library/ScriptAssemblies/<asmdef>.dll` still holds the pre-edit binary. **Fix:** `rm -rf Library/Bee/artifacts Library/BurstCache` then force a full recompile via `execute_code` → `CompilationPipeline.RequestScriptCompilation()`. ALWAYS verify the changed assembly's DLL mtime is newer than your edit before trusting a test-run result. The asmdef name is the `"name"` field in the package's Runtime `.asmdef` file (e.g. for `com.the1studio.dots-combat` → `DOTSCombat.Runtime`).
+
+- **New-file `CS0103 'X' does not exist` after `scope=scripts` compile.** A brand-new `.cs` file compiled via `refresh_unity(scope="scripts")` can give `CS0103 / CS0246` because the file has no `.meta` file yet (AssetDatabase hasn't imported it). Fix: issue a full `refresh_unity(mode="force", scope="all")` or `execute_menu_item("Assets/Refresh")` FIRST, then recompile. `manage_asset(action="reimport", path="Assets/Foo.cs")` does NOT work for untracked files (see existing gotcha below).
+
+- **Wedged compile pipeline — editor alive but Bee/artifacts stays empty.** The editor answers `read_console` and `execute_code` but DLLs never rebuild even after `rm -rf Library/Bee/artifacts Library/BurstCache Library/ScriptAssemblies` and `CompilationPipeline.RequestScriptCompilation()`. Symptom: `Library/Bee/artifacts/` stays empty; worker logs show no compile activity; mtime on DLLs never advances. Cause: the import/compile subsystem is wedged (typically after a series of rapid domain reloads during package resolution). **Recovery:** only a Unity Editor restart revives it — ask the user (hard rule: you cannot kill/restart Unity yourself, see `rules/unity-forbidden-operations.md`). Stop retrying; surface the situation clearly.
+
+- **MCP-noise EditMode test flake — random `Cannot access a disposed object` failure.** When `run_tests` triggers a domain reload at the start of the run, the MCP bridge briefly drops and Unity's global log-assert machinery attributes the `NetworkStream disposed` error to whatever test is in `SetUp` at that instant. Signature: the failing test changes each run (never the same test twice in a row), and the failure message contains `MCP-FOR-UNITY` / `NetworkStream` / `disposed`. These are NOT real code bugs. **Mitigation in DOTSTestBase:** add `UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;` in the `[SetUp]` of your test base class. This suppresses the bridge-noise assertions globally for that fixture. Do NOT use `LogAssert.Expect(...)` — that would mask real failures. Prefer running tests per-assembly (`run_tests assembly_names=[...]`) to reduce the likelihood of a reload coinciding with a `SetUp`.
 
 ## MCP Gaps — FIX-FIRST in our fork, do NOT just file an issue
 

@@ -4,7 +4,7 @@ description: "Discover available skills by keyword search across all activation 
 keywords: [discover, find, search, list, available, skills, lookup]
 argument-hint: "<query> [--all] [--installed-only]"
 effort: low
-version: 2.17.3
+version: 2.18.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

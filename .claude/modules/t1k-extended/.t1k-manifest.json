@@ -1,9 +1,9 @@
 {
   "module": "t1k-extended",
-  "version": "2.14.3",
+  "version": "2.15.0",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-12T07:03:09.194Z",
+  "generatedAt": "2026-06-15T04:29:09.397Z",
   "files": {
     "skills": [
       "t1k-architecture/SKILL.md",
@@ -61,6 +61,11 @@
       "t1k-game-arch/references/testing-strategy.md",
       "t1k-game-arch/references/unity-patterns.md",
       "t1k-handoff/SKILL.md",
+      "t1k-human-writing/SKILL.md",
+      "t1k-human-writing/references/ai-tells-catalog.md",
+      "t1k-human-writing/references/email-playbook.md",
+      "t1k-human-writing/references/lint-pass.md",
+      "t1k-human-writing/references/post-playbook.md",
       "t1k-library-decoupling/SKILL.md",
       "t1k-mcp-management/SKILL.md",
       "t1k-my-score/SKILL.md",
@@ -167,5 +172,5 @@
       "scripts/resolve_env.py"
     ]
   },
-  "checksum": "sha256:374f35c6b739c3dcf2055f9f6fc04c062800655e072ab64cd4ac379b7e8ccb01"
+  "checksum": "sha256:472a628d5938f82b1954c56cd67f3a41dba30d9ade3639bb65479eee6cf4bc56"
 }

@@ -4,7 +4,7 @@ description: "Create and update project documentation in docs/. Use for 'init do
 keywords: [documentation, docs, update, init, summarize, readme]
 argument-hint: "init|update|summarize"
 effort: low
-version: 2.17.3
+version: 2.18.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

@@ -4,7 +4,7 @@ description: LitMotion zero-alloc tween library for Unity — LMotion.Create, Bi
 effort: high
 context: fork
 keywords: [litmotion, tween, animation, zero-allocation]
-version: 2.2.2
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: animation

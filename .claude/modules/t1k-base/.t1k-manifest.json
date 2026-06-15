@@ -1,9 +1,9 @@
 {
   "module": "t1k-base",
-  "version": "2.17.3",
+  "version": "2.18.0",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-12T07:03:09.142Z",
+  "generatedAt": "2026-06-15T04:29:09.351Z",
   "files": {
     "skills": [
       "t1k-ask/SKILL.md",
@@ -129,6 +129,8 @@
       "t1k-review/references/task-management-reviews.md",
       "t1k-review/references/verification-before-completion.md",
       "t1k-scout/SKILL.md",
+      "t1k-statusline-full/SKILL.md",
+      "t1k-statusline-full/install.sh",
       "t1k-test/SKILL.md",
       "t1k-test/references/vitest-process-management.md",
       "t1k-watzup/SKILL.md",
@@ -191,5 +193,5 @@
       "scripts/t1k-issue-claim.cjs"
     ]
   },
-  "checksum": "sha256:c9336d11c99ce8fc9a8410fba1a33582941fccfa82cdda3ecb6417262744f22b"
+  "checksum": "sha256:74dcc10af167d875f02d3379eb1fa34564afd1aba843bce538854c5a9881d630"
 }

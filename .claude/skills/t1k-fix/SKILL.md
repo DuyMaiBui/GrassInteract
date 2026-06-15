@@ -5,7 +5,7 @@ keywords: [fix, bug, error, resolve, patch, repair, test-failure]
 argument-hint: "[issue] [--auto|--review|--quick|--parallel]"
 effort: medium
 tools: [Read, Glob, Grep, Bash, Write, Edit, MultiEdit, Task, Agent, TodoWrite, AskUserQuestion, Skill]
-version: 2.17.3
+version: 2.18.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

@@ -4,7 +4,7 @@ description: Unity uGUI Canvas UI system — Canvas, RectTransform, Image, Butto
 effort: high
 context: fork
 keywords: [uGUI, UI, canvas, unity]
-version: 2.3.1
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui

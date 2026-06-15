@@ -4,7 +4,7 @@ description: Author new generic Unity UI screen/popup prefabs as VARIANTS of UIB
 effort: low
 keywords: [ui prefab, screen prefab, popup prefab, prefab variant, UIBaseScreen, UIBasePopup, Background, Content, Foreground, Timeline_Grp, SafeArea, anchor pivot, responsive ui, FlexibleLayoutGroupVer2, RootUI, gdk core, common ui, generic ui, unity mcp, content children, field-driven, layout image]
 argument-hint: "[screen-name] [layout-image-path] (both optional)"
-version: 2.3.1
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui

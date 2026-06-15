@@ -4,7 +4,7 @@ description: "Author game-engine code with 4-layer Clean Architecture (Domain/Ap
 keywords: [game architecture, Clean Architecture, game module, module contract, refactor MonoBehaviour, refactor cc.Component, god component, god monobehaviour, asmdef, VContainer, signalBus, Vitest, NUnit, GDD, game design document, domain layer, application layer, presentation layer, infrastructure layer, ports and adapters, hexagonal, view logic separation, decouple game logic, unit testable game logic, refactor playbook, vertical module]
 argument-hint: "[refactor target | feature to design | engine: unity|cocos]"
 effort: medium
-version: 2.14.3
+version: 2.15.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

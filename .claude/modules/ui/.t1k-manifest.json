@@ -1,9 +1,9 @@
 {
   "module": "ui",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-11T04:34:00.644Z",
+  "generatedAt": "2026-06-15T04:28:47.282Z",
   "files": {
     "skills": [
       "t1k-unity-ui-create-prefab/SKILL.md",
@@ -26,5 +26,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:a8a4165824cfa22d377fdc19c1335b1951ba0668df1d5e47063e4248991b4949"
+  "checksum": "sha256:ee29a0fbf725264a4f529738dd05312d499a9c3c328b02a39b95ff17641966d0"
 }

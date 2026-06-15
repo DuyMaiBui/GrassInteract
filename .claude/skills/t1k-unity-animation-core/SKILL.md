@@ -4,7 +4,7 @@ description: Unity 6000.3.x animation — Mecanim state machines, blend trees, P
 effort: high
 context: fork
 keywords: [animation, animator, unity, clip, state machine]
-version: 2.2.2
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: animation
