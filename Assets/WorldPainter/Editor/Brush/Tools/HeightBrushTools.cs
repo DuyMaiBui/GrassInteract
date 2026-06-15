@@ -34,6 +34,7 @@ namespace WorldPainter.Editor
         {
             int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_SMOOTH);
             ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+            BrushMaskBinder.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_HeightRT", ctx.HeightRT);
             ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
         }
@@ -53,6 +54,7 @@ namespace WorldPainter.Editor
 
             int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_FLATTEN);
             ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+            BrushMaskBinder.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_HeightRT", ctx.HeightRT);
 
             // _FlattenTarget is normalized [0,1] in this tile's height range. The world-Y target
@@ -73,6 +75,7 @@ namespace WorldPainter.Editor
         {
             int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_RAISE_LOWER);
             ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+            BrushMaskBinder.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_HeightRT", ctx.HeightRT);
             ctx.Compute.SetFloat("_RaiseSign", sign);
             ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);

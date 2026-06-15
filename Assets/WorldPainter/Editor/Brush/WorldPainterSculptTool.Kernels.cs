@@ -8,9 +8,8 @@ namespace WorldPainter.Editor
     /// <summary>
     /// Layer-routing half of <see cref="WorldPainterSculptTool"/> (partial).
     ///
-    /// <see cref="BindAndDispatch"/> sets the common brush uniforms, then either routes a Biome
-    /// layer to the composite <see cref="WorldPainterBiomeStamp"/> (unchanged), or resolves the
-    /// active <see cref="IBrushTool"/> for the effective layer kind and invokes it. The per-kernel
+    /// <see cref="BindAndDispatch"/> sets the common brush uniforms, then resolves the active
+    /// <see cref="IBrushTool"/> for the effective layer kind and invokes it. The per-kernel
     /// dispatch logic lives in the tool implementations (Editor/Brush/Tools/), not here — adding a
     /// new brush behaviour no longer means editing this dispatcher.
     /// </summary>
@@ -45,30 +44,6 @@ namespace WorldPainter.Editor
             this.brushCompute.SetInt("_BrushShape",        (int)brush.shape);
 
             LayerType activeType = WorldPainterState.EffectiveLayerType(painter);
-
-            // Biome composite stamp keeps its own multi-channel path (not a brush tool).
-            if (activeType == LayerType.Biome && this.biomeStamp != null)
-            {
-                int biomeIdx = WorldPainterState.ActiveBiomeLayerIndex(painter);
-                if (biomeIdx >= 0 && biomeIdx < painter.Biomes.Count)
-                {
-                    var preset = painter.Biomes[biomeIdx];
-                    if (preset != null)
-                    {
-                        this.biomeStamp.Stamp(
-                            preset,
-                            this.biomeMuteMask,
-                            worldPos,
-                            tile,
-                            heightRT,
-                            this.brushCompute!,
-                            brush.size,
-                            brush.strength,
-                            surfaceSampler: null);
-                    }
-                }
-                return;
-            }
 
             // Generic brush-tool dispatch (height / palette / density / instance).
             var tool = BrushToolRegistry.ResolveActiveTool(

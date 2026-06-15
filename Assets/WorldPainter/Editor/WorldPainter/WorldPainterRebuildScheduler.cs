@@ -22,7 +22,7 @@ namespace WorldPainter.Editor
     /// </summary>
     internal static class WorldPainterRebuildScheduler
     {
-        private enum Kind { Grass, Prop }
+        private enum Kind { Grass, Prop, Terrain, TerrainRepaint }
 
         private readonly struct Key : System.IEquatable<Key>
         {
@@ -75,6 +75,37 @@ namespace WorldPainter.Editor
             }
         }
 
+        /// <summary>
+        /// Schedules a coalesced FULL terrain rebuild (<see cref="WorldPainter.TryBuild"/>) for
+        /// <paramref name="painter"/>. Used by the terrain-LOD setup panel: changing
+        /// <c>lodRangesM</c> requires re-baking each tile's CDLOD quadtree, so the whole terrain
+        /// rebuilds — coalesced to one rebuild per editor frame to avoid per-drag thrash.
+        /// </summary>
+        public static void MarkTerrainDirty(WorldPainter painter)
+        {
+            if (painter == null) return;
+            EnsureSubscribed();
+            // Layer slot reuses the painter ref so the Key stays non-null + de-dupes per painter.
+            pending.Add(new Key(painter, painter, Kind.Terrain));
+        }
+
+        /// <summary>
+        /// Schedules a coalesced repaint for <paramref name="painter"/>. When the painter is already
+        /// built — the common domain-reload / asset-import case, where <c>WorldPainter.OnEnable</c>
+        /// already rebuilt the GPU engines — the next <see cref="Flush"/> issues only
+        /// <see cref="SceneView.RepaintAll"/> (no GPU teardown); the resulting camera render submits
+        /// the existing terrain/scatter. When the painter is NOT built, Flush runs a full
+        /// <c>TryBuild()</c> + <c>RebuildScatterPreview()</c> to recover. Used by
+        /// <see cref="WorldPainterAutoRebuild"/> to fix the "black until manual rebuild" gap.
+        /// </summary>
+        public static void MarkTerrainRepaint(WorldPainter painter)
+        {
+            if (painter == null) return;
+            EnsureSubscribed();
+            // Layer slot reuses the painter ref so the Key stays non-null + de-dupes per painter.
+            pending.Add(new Key(painter, painter, Kind.TerrainRepaint));
+        }
+
         /// <summary>Schedules a coalesced rebuild for every <see cref="WorldPainter"/> in the scene
         /// whose <see cref="WorldPainter.Map"/> contains <paramref name="layer"/>.</summary>
         public static void MarkGrassDirty(GrassLayer layer)
@@ -102,15 +133,41 @@ namespace WorldPainter.Editor
             pending.CopyTo(snapshot);
             pending.Clear();
 
-            for (int i = 0; i < snapshot.Length; ++i)
+            // Bracket the rebuild so any asset write a rebuild path might emit (SetDirty/SaveAssets)
+            // cannot re-enter WorldPainterAutoRebuild's asset-import hook and spin a rebuild loop.
+            WorldPainterAutoRebuild.SuppressImportRebuild = true;
+            try
             {
-                Key k = snapshot[i];
-                if (k.Painter == null) continue;
-                switch (k.Kind)
+                for (int i = 0; i < snapshot.Length; ++i)
                 {
-                    case Kind.Prop  when k.Layer is PropLayer  p: k.Painter.RebuildPropLayer(p);  break;
-                    case Kind.Grass when k.Layer is GrassLayer g: k.Painter.RebuildGrassLayer(g); break;
+                    Key k = snapshot[i];
+                    if (k.Painter == null) continue;
+                    switch (k.Kind)
+                    {
+                        case Kind.Prop  when k.Layer is PropLayer  p: k.Painter.RebuildPropLayer(p);  break;
+                        case Kind.Grass when k.Layer is GrassLayer g: k.Painter.RebuildGrassLayer(g); break;
+                        case Kind.Terrain:
+                            // Re-bake every tile's CDLOD quadtree with the new lodRangesM, then
+                            // re-scatter so grass/props re-ground onto the rebuilt terrain.
+                            k.Painter.TryBuild();
+                            k.Painter.RebuildScatterPreview();
+                            break;
+                        case Kind.TerrainRepaint:
+                            // Domain-reload / asset-import driver: the build normally survived via
+                            // OnEnable.TryBuild, so we only need a camera render once (the
+                            // SceneView.RepaintAll below). Recover with a full rebuild if it didn't.
+                            if (!k.Painter.IsBuilt)
+                            {
+                                k.Painter.TryBuild();
+                                k.Painter.RebuildScatterPreview();
+                            }
+                            break;
+                    }
                 }
+            }
+            finally
+            {
+                WorldPainterAutoRebuild.SuppressImportRebuild = false;
             }
 
             SceneView.RepaintAll();

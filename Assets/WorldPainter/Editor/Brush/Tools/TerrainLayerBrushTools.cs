@@ -49,6 +49,7 @@ namespace WorldPainter.Editor
 
             int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_ALPHAMAP);
             ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+            BrushMaskBinder.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_AlphamapRT", alphaRT);
             ctx.Compute.SetInt("_AlphamapChannel", Mathf.Clamp(channel, 0, 3));
             ctx.Compute.SetInt("_AlphamapMode",    mode);

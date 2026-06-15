@@ -94,10 +94,15 @@ namespace WorldPainter.Editor
 
             EditorGUI.BeginChangeCheck();
 
-            DrawBox(SECTION_IDENTITY,  this.DrawIdentity);
-            DrawBox(SECTION_ANCHOR,    this.DrawAnchor);
-            DrawBox(SECTION_PLACEMENT, this.DrawPlacement);
-            DrawBox(SECTION_RENDER,    this.DrawRender);
+            // Prop layer fields are editable only inside the WorldPainter detail card; the
+            // standalone sub-asset inspector renders them read-only.
+            using (new EditorGUI.DisabledScope(!WorldPainterLayerEditContext.EditingInWorldPainter))
+            {
+                DrawBox(SECTION_IDENTITY,  this.DrawIdentity);
+                DrawBox(SECTION_ANCHOR,    this.DrawAnchor);
+                DrawBox(SECTION_PLACEMENT, this.DrawPlacement);
+                DrawBox(SECTION_RENDER,    this.DrawRender);
+            }
 
             bool changed = EditorGUI.EndChangeCheck();
             this.serializedObject.ApplyModifiedProperties();
@@ -158,7 +163,11 @@ namespace WorldPainter.Editor
 
         void DrawIdentity()
         {
-            EditorGUILayout.PropertyField(this.propAuthoredInstances!);
+            // Authored prop instances are populated by the Place / Single brush tools, never by
+            // hand — shown read-only (disabled even inside the WorldPainter card) so the list
+            // can't be edited directly.
+            using (new EditorGUI.DisabledScope(true))
+                EditorGUILayout.PropertyField(this.propAuthoredInstances!);
         }
 
         void DrawAnchor()
@@ -201,7 +210,8 @@ namespace WorldPainter.Editor
 
         void DrawRender()
         {
-            DrawNestedBox("Render Config", this.propRender!);
+            WorldPainterLodGui.DrawScatterLodSection(this.propRender!);
+            EditorGUILayout.Space(2f);
             DrawNestedBox("Wind",          this.propWind!);
             DrawNestedBox("Deform",        this.propDeform!);
             DrawNestedBox("Bounds",        this.propBounds!);

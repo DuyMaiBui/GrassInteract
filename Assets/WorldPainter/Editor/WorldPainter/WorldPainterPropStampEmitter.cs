@@ -117,15 +117,6 @@ namespace WorldPainter.Editor
             Vector3 anchor = propLayer.AnchorOffsetLocal;
             Vector3 pivot  = exactPos - rot * (anchor * scale);
 
-            // ── DIAGNOSTIC (remove once the place-vs-ghost mismatch is resolved) ─
-            // Prints the click world position the emitter saw, the stored pivot, the anchor
-            // and scale, and a stack-tag identifying who called us. Compare these against
-            // PropGhostPreview's ghostCursor (printed in OnSceneGui) to localise the bug.
-            UnityEngine.Debug.Log(
-                $"[EmitExactlyOneAt] exactPos={exactPos:F4} pivot={pivot:F4} " +
-                $"anchor={anchor:F4} scale={scale:F4} rot={rot.eulerAngles:F2} " +
-                $"workingCount={authored.WorkingList.Count + 1}");
-
             authored.AddRecord(new InstanceRecord
             {
                 position     = pivot,
@@ -183,10 +174,6 @@ namespace WorldPainter.Editor
             // (vertex = pivot + rot·(localPos·scale)) places anchor exactly at `pos`.
             Vector3 anchor = propLayer.AnchorOffsetLocal;
 
-            int requested  = this.DensityPerStamp;
-            int placed     = 0;
-            int slopeReject = 0;
-
             for (int i = 0; i < this.DensityPerStamp; ++i)
             {
                 float angle  = Random.value * Mathf.PI * 2f;
@@ -210,7 +197,7 @@ namespace WorldPainter.Editor
                     }
                 }
 
-                if (slopeDeg > maxSlopeDeg) { slopeReject++; continue; }
+                if (slopeDeg > maxSlopeDeg) continue;
 
                 float scale = midScale * (1f + (Random.value * 2f - 1f) * this.ScaleJitter);
                 scale = Mathf.Max(0.01f, scale);
@@ -225,13 +212,6 @@ namespace WorldPainter.Editor
                     scale        = scale,
                     overrideMask = InstanceOverrideMask.None,
                 });
-                placed++;
-            }
-
-            if (placed < requested)
-            {
-                Debug.Log($"[PropStampEmitter] {propLayer.name}: stamp placed {placed}/{requested} " +
-                          $"(slope-rejected={slopeReject}). Total authored now: {authored.Count}.");
             }
         }
 

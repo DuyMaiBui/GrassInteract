@@ -1,5 +1,4 @@
 #nullable enable
-using UnityEditor;
 using UnityEngine;
 
 namespace WorldPainter.Editor
@@ -8,7 +7,6 @@ namespace WorldPainter.Editor
     /// Enhanced scene-view input for WorldPainter sculpt:
     ///   - Radial scrub: hold modifier key + drag  (H = brush size, V = strength)
     ///   - Shift = inverse mode
-    ///   - Alt   = eyedropper (sample layer/biome under cursor)
     ///   - Ctrl  = smooth mode
     ///   - F1–F3 = recall brush preset slots
     ///   - X     = swap brush preset slot (save/recall)
@@ -74,14 +72,6 @@ namespace WorldPainter.Editor
                 if (e.type == EventType.MouseUp) { e.Use(); return true; }
             }
 
-            // Alt = eyedropper: sample layer/biome under cursor.
-            if (altKey && e.type == EventType.MouseDown && e.button == 0)
-            {
-                this.SampleLayerUnderCursor(painter);
-                e.Use();
-                return true;
-            }
-
             // Shift = inverse (invert strength sign flag, communicated via state).
             if (shiftKey && !ctrlKey)
             {
@@ -113,33 +103,5 @@ namespace WorldPainter.Editor
 
         /// <summary>True when Shift is held (inverse mode active).</summary>
         public static bool IsInverse => Event.current?.shift ?? false;
-
-        // ── Private ───────────────────────────────────────────────────────────
-
-        private void SampleLayerUnderCursor(WorldPainter painter)
-        {
-            // Eyedropper: raycast to terrain, sample biome or layer at hit position.
-            Ray ray = HandleUtility.GUIPointToWorldRay(Event.current.mousePosition);
-            if (!Physics.Raycast(ray, out var hit)) return;
-
-            // Find closest tile by coord mapping.
-            float tileSize = painter.WorldGridConfig.tileSizeM;
-            if (tileSize <= 0) tileSize = 256f;
-
-            int tileX = Mathf.FloorToInt(hit.point.x / tileSize);
-            int tileZ = Mathf.FloorToInt(hit.point.z / tileSize);
-
-            // Select the biome layer at that coord if one exists.
-            // Phase 5: SplatLayers/ScatterLayers removed from WorldPainter; biome sits at index 1+.
-            for (int i = 0; i < painter.Biomes.Count; i++)
-            {
-                var biome = painter.Biomes[i];
-                if (biome == null) continue;
-                // Simple heuristic: if cursor is in any tile, pick the first biome.
-                int stackIdx = 1 + i;
-                WorldPainterState.ActiveLayerIndex = stackIdx;
-                break;
-            }
-        }
     }
 }

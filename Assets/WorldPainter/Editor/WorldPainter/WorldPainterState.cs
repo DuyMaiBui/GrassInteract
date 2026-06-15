@@ -116,10 +116,9 @@ namespace WorldPainter.Editor
         /// ActiveLayerId is set), the kind is derived directly from <see cref="ActiveLayerKind"/>
         /// without relying on index arithmetic into the legacy lists.
         ///
-        /// Legacy index arithmetic is still used for Height (index=0/-1) and Biome rows
-        /// (which are not unified surface layers).
+        /// Otherwise the index 0/-1 fallback resolves to Height (the synthetic base row).
         /// </summary>
-        /// <param name="painter">The active WorldPainter.</param>
+        /// <param name="painter">The active WorldPainter (unused; kept for call-site symmetry).</param>
         /// <param name="splatChannel">
         /// Output: 0-based splat channel [0..3] if the active layer is Splat; -1 otherwise.
         /// </param>
@@ -128,7 +127,7 @@ namespace WorldPainter.Editor
         {
             splatChannel = -1;
 
-            // Phase 2 — unified surface layer is active: derive kind from ActiveLayerKind.
+            // Unified surface layer is active: derive kind from ActiveLayerKind.
             if (ActiveLayerKind != PaintLayerKind.None && !string.IsNullOrEmpty(ActiveLayerId))
             {
                 return ActiveLayerKind switch
@@ -140,70 +139,26 @@ namespace WorldPainter.Editor
                 };
             }
 
-            // Legacy path: derive from the raw display index.
-            int idx = ActiveLayerIndex;
-            if (idx <= 0) return LayerType.Height; // 0 or -1 = Height base
-
-            // Biome rows. The stack now lists only biome rows after unified surface rows
-            // (splatLayers/scatterLayers removed in Phase 5b — no index arithmetic available).
-            // Fall through to Height for any index we can't classify.
-            int biomeOffset = idx - 1; // legacy index 1+ maps to biome offset in the simple case
-            if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
-                return LayerType.Biome;
-
+            // Legacy path: index 0/-1 = Height base.
             return LayerType.Height;
         }
 
         /// <summary>
         /// The effective layer type that drives brush-tool dispatch + the contextual palette.
-        ///
-        /// Phase 2: combines THREE selection signals in priority order:
-        ///   1. <see cref="ActiveLayerKind"/> — unified surface layer (Splat/Meadow/Prop).
-        ///   2. <see cref="ActiveBiomeIndex"/> ≥ 0 — biome row selected via direct index.
-        ///   3. Legacy <see cref="ActiveLayerType"/> index path (Height fallback).
+        /// Prefers the unified <see cref="ActiveLayerKind"/>; falls back to the legacy
+        /// <see cref="ActiveLayerType"/> index path (Height base row).
         /// </summary>
         public static LayerType EffectiveLayerType(WorldPainter painter)
         {
             PaintLayerKind p5 = ActiveLayerKind;
 
-            // 1. Unified surface layer takes priority.
+            // Unified surface layer takes priority.
             if (p5 == PaintLayerKind.Splat)  return LayerType.Splat;
             if (p5 == PaintLayerKind.Meadow) return LayerType.Grass;
             if (p5 == PaintLayerKind.Prop)   return LayerType.Props;
 
-            // 2. Biome row selected directly (Phase 2 biome path).
-            if (ActiveBiomeIndex >= 0 && ActiveBiomeIndex < painter.Biomes.Count)
-                return LayerType.Biome;
-
-            // 3. Legacy index-based routing (Height base row, or legacy splat/scatter/biome).
-            LayerType legacy = ActiveLayerType(painter, out _);
-            if (legacy == LayerType.Splat)  return LayerType.Splat;
-            if (legacy == LayerType.Grass)  return LayerType.Grass;
-            if (legacy == LayerType.Props)  return LayerType.Props;
-            if (legacy == LayerType.Biome)  return LayerType.Biome;
-            return LayerType.Height;
-        }
-
-        /// <summary>
-        /// Returns the 0-based index into <see cref="WorldPainter.Biomes"/> for the
-        /// currently active layer, or -1 when the active layer is not a Biome layer.
-        ///
-        /// Phase 2: prefers <see cref="ActiveBiomeIndex"/> when it is ≥ 0 (set directly by
-        /// the stack's biome row selection). Falls back to the legacy display-index arithmetic
-        /// for tests and code that still sets <see cref="ActiveLayerIndex"/> directly.
-        /// </summary>
-        public static int ActiveBiomeLayerIndex(WorldPainter painter)
-        {
-            // Direct path: biome was selected by setting ActiveBiomeIndex directly.
-            if (ActiveBiomeIndex >= 0 && ActiveBiomeIndex < painter.Biomes.Count)
-                return ActiveBiomeIndex;
-
-            // Legacy fallback: derive from raw display index.
-            int idx         = ActiveLayerIndex;
-            int biomeOffset = idx - 1; // index 1+ used by biome rows when no surface layers
-            if (biomeOffset >= 0 && biomeOffset < painter.Biomes.Count)
-                return biomeOffset;
-            return -1;
+            // Fall back to the legacy index path (Height base row).
+            return ActiveLayerType(painter, out _);
         }
 
         // ── Brush settings (SSOT) ─────────────────────────────────────────────
@@ -313,14 +268,6 @@ namespace WorldPainter.Editor
         public static bool IsClickOnlyTool(string toolId) =>
             toolId == "instance.place" || toolId == "instance.single" || toolId == "instance.select";
 
-        // ── Active biome (P5) ─────────────────────────────────────────────────
-
-        /// <summary>
-        /// Index of the currently selected biome in <see cref="WorldPainter.Biomes"/>.
-        /// -1 = no biome selected.
-        /// </summary>
-        public static int ActiveBiomeIndex { get; set; } = -1;
-
         // ── Active TerrainLayer palette index (Phase 2a/2b — new splat path) ──
 
         /// <summary>
@@ -374,7 +321,6 @@ namespace WorldPainter.Editor
         {
             ActivePainter    = null;
             ActiveLayerIndex = -1;
-            ActiveBiomeIndex = -1;
             ActiveLayerId    = string.Empty;
             ActiveLayerKind  = PaintLayerKind.None;
             ActiveBrushToolId  = string.Empty;
@@ -434,6 +380,10 @@ namespace WorldPainter.Editor
 
         [Tooltip("Brush footprint shape — circle (Euclidean falloff) or square (Chebyshev falloff).")]
         public BrushShape shape = BrushShape.Circle;
+
+        [Tooltip("Optional imported grayscale brush mask. When set, the brush footprint is shaped " +
+                 "by this texture (multiplied with the falloff) instead of a plain circle.")]
+        public Texture2D? maskTexture = null;
 
         /// <summary>Returns a <see cref="BrushSettings"/> instance initialised to smart defaults.</summary>
         public static BrushSettings Default => new BrushSettings();

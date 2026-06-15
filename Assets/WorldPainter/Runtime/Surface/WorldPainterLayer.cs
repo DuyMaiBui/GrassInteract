@@ -38,6 +38,19 @@ namespace WorldPainter
         public string DisplayName =>
             string.IsNullOrEmpty(this.displayName) ? this.name : this.displayName;
 
+        [Tooltip("When off, this layer is skipped by scatter/render builds (the eye toggle in the WorldPainter layer stack).")]
+        [SerializeField] private bool enabled = true;
+
+        /// <summary>
+        /// When false the layer is excluded from scatter/render builds — the per-layer visibility
+        /// toggle in the WorldPainter layer stack. Defaults to true.
+        /// </summary>
+        public bool Enabled
+        {
+            get => this.enabled;
+            set => this.enabled = value;
+        }
+
         /// <summary>Concrete authoring kind.</summary>
         public abstract LayerKind Kind { get; }
 

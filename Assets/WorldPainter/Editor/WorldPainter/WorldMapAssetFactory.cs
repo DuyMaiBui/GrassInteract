@@ -85,7 +85,6 @@ namespace WorldPainter.Editor
             EditorGUIUtility.PingObject(map);
             Selection.activeObject = painter.gameObject;
 
-            Debug.Log($"[WorldMapAssetFactory] Created '{savePath}' with Tile_0_0 and assigned to '{painter.name}' in '{painter.gameObject.scene.name}'.");
             return map;
         }
 

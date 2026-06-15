@@ -7,28 +7,28 @@ using WorldPainter;
 namespace WorldPainter.Tests
 {
     /// <summary>
-    /// Tests for <see cref="TerrainColliderStreamer"/>:
-    ///   - Near-ring membership uses COLLIDER_RING_RADIUS.
+    /// Tests for the collider ring derivation used by <see cref="TerrainColliderStreamer"/>:
+    ///   - Near-ring membership uses the LOD-band nearest-edge metric (<see cref="TerrainColliderRing"/>).
     ///   - Cook amortisation caps per-tick builds at MAX_COOKS_PER_FRAME.
-    ///   - Eviction releases the collider handle (no leak).
+    ///   - Camera moves change the desired set (eviction trigger).
     ///
-    /// These tests exercise the TerrainResidencyRing helper used by the streamer,
-    /// and the TerrainColliderProvider.BuildHeightfield (stateless, testable without
-    /// a live Unity Physics engine).
+    /// These exercise the pure ring math + the stateless BuildHeightfield; the live streamer
+    /// wiring is covered by <see cref="TerrainColliderStreamerWiringTests"/>.
     /// </summary>
     [TestFixture]
     public sealed class TerrainColliderStreamerDiffTests
     {
-        private const float TILE = TerrainWorldGrid.TILE_SIZE_M;
+        private const float TILE         = TerrainWorldGrid.TILE_SIZE_M;
+        private const float LOD_RANGE_M  = 256f; // band 3 default → 3×3 around a tile centre
+        private const int   HF_RES       = 65;
 
-        // ── Near-ring membership ──────────────────────────────────────────────
+        // ── Near-ring membership (nearest-edge metric) ────────────────────────
 
         [Test]
         public void ColliderRing_CentreTile_IsInDesiredSet()
         {
-            var camPos = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
-            var desired = TerrainResidencyRing.ComputeDesired(camPos,
-                TerrainColliderConfig.COLLIDER_RING_RADIUS);
+            var camPos  = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f); // tile centre
+            var desired = TerrainColliderRing.ComputeDesired(camPos, LOD_RANGE_M);
 
             var centre = TerrainWorldGrid.WorldToTileCoord(camPos.x, camPos.z);
             Assert.IsTrue(desired.Contains(centre),
@@ -36,46 +36,60 @@ namespace WorldPainter.Tests
         }
 
         [Test]
-        public void ColliderRing_TileAtRadius_IsIncluded()
+        public void ColliderRing_AdjacentTile_IncludedAt256m()
         {
-            var camPos = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
-            var desired = TerrainResidencyRing.ComputeDesired(camPos,
-                TerrainColliderConfig.COLLIDER_RING_RADIUS);
+            var camPos  = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
+            var desired = TerrainColliderRing.ComputeDesired(camPos, LOD_RANGE_M);
 
-            var centre  = TerrainWorldGrid.WorldToTileCoord(camPos.x, camPos.z);
-            int r       = TerrainColliderConfig.COLLIDER_RING_RADIUS;
-            var edge    = new Vector2Int(centre.x + r, centre.y);
+            var centre = TerrainWorldGrid.WorldToTileCoord(camPos.x, camPos.z);
+            var edge   = new Vector2Int(centre.x + 1, centre.y); // nearest edge 128 m < 256 m
 
             Assert.IsTrue(desired.Contains(edge),
-                $"Tile at COLLIDER_RING_RADIUS={r} should be in the near ring.");
+                "Edge-adjacent tile (nearest edge 128 m) should be in the 256 m ring.");
         }
 
         [Test]
-        public void ColliderRing_TileBeyondRadius_IsExcluded()
+        public void ColliderRing_TwoTilesOut_IsExcludedAt256m()
         {
-            var camPos = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
-            var desired = TerrainResidencyRing.ComputeDesired(camPos,
-                TerrainColliderConfig.COLLIDER_RING_RADIUS);
+            var camPos  = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
+            var desired = TerrainColliderRing.ComputeDesired(camPos, LOD_RANGE_M);
 
-            var centre  = TerrainWorldGrid.WorldToTileCoord(camPos.x, camPos.z);
-            int beyond  = TerrainColliderConfig.COLLIDER_RING_RADIUS + 1;
-            var far     = new Vector2Int(centre.x + beyond, centre.y);
+            var centre = TerrainWorldGrid.WorldToTileCoord(camPos.x, camPos.z);
+            var far    = new Vector2Int(centre.x + 2, centre.y); // nearest edge 384 m > 256 m
 
             Assert.IsFalse(desired.Contains(far),
-                "Tile beyond COLLIDER_RING_RADIUS should be outside the near ring.");
+                "Tile two out (nearest edge 384 m) should be outside the 256 m ring.");
         }
 
         [Test]
-        public void ColliderRing_Size_IsSquaredDiameter()
+        public void ColliderRing_256m_AtTileCentre_IsFull3x3()
         {
-            var camPos  = new Vector3(TILE * 5.5f, 0f, TILE * 5.5f);
-            var desired = TerrainResidencyRing.ComputeDesired(camPos,
-                TerrainColliderConfig.COLLIDER_RING_RADIUS);
+            var camPos  = new Vector3(TILE * 5.5f, 0f, TILE * 5.5f); // tile centre
+            var desired = TerrainColliderRing.ComputeDesired(camPos, LOD_RANGE_M);
 
-            int r        = TerrainColliderConfig.COLLIDER_RING_RADIUS;
-            int expected = (2 * r + 1) * (2 * r + 1);
-            Assert.AreEqual(expected, desired.Count,
-                $"Collider ring at radius {r} should contain {expected} tiles.");
+            Assert.AreEqual(9, desired.Count,
+                "256 m band from a tile centre should cover exactly the 3×3 ring (9 tiles).");
+        }
+
+        [Test]
+        public void ColliderRing_Band0_32m_IsOwnTileOnly()
+        {
+            var camPos  = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
+            var desired = TerrainColliderRing.ComputeDesired(camPos, 32f); // adjacent edge 128 m > 32 m
+
+            Assert.AreEqual(1, desired.Count,
+                "32 m band should cook only the camera's own tile.");
+        }
+
+        [Test]
+        public void ColliderRing_LargerRange_IsSuperset()
+        {
+            var camPos = new Vector3(TILE * 3.5f, 0f, TILE * 3.5f);
+            var near   = TerrainColliderRing.ComputeDesired(camPos, 32f);
+            var far    = TerrainColliderRing.ComputeDesired(camPos, 256f);
+
+            Assert.IsTrue(far.IsSupersetOf(near),
+                "A larger range must include every tile a smaller range includes (monotonic).");
         }
 
         // ── Cook amortisation ─────────────────────────────────────────────────
@@ -87,15 +101,6 @@ namespace WorldPainter.Tests
                 "MAX_COOKS_PER_FRAME must be at least 1.");
         }
 
-        [Test]
-        public void ColliderRingRadius_IsLeOrEqualStreamingRingRadius()
-        {
-            Assert.LessOrEqual(TerrainColliderConfig.COLLIDER_RING_RADIUS,
-                               TerrainStreamingConfig.RING_RADIUS,
-                "COLLIDER_RING_RADIUS must be ≤ RING_RADIUS to avoid building colliders " +
-                "for tiles not yet loaded by the streaming manager.");
-        }
-
         // ── Heightfield parity used by provider ───────────────────────────────
 
         [Test]
@@ -105,7 +110,7 @@ namespace WorldPainter.Tests
             float minH = 0f;
             float maxH = 512f;
             int srcRes = 5;
-            int hfRes  = TerrainColliderConfig.HEIGHTFIELD_RES;
+            int hfRes  = HF_RES;
 
             var tile = ScriptableObject.CreateInstance<TerrainTileAsset>();
             tile.tileCoord = Vector2Int.zero;
@@ -131,19 +136,19 @@ namespace WorldPainter.Tests
         [Test]
         public void DesiredSet_ExcludesPreviousTiles_OnCameraMove()
         {
-            // Verify that when the camera moves one tile, the old outer ring tiles are
-            // no longer desired — this is the eviction trigger in the streamer.
-            var posA    = new Vector3(TILE * 5.5f, 0f, TILE * 5.5f);
-            var posB    = new Vector3(TILE * 6.5f, 0f, TILE * 5.5f);
+            // When the camera moves one tile, the trailing column of the old ring is no longer
+            // desired — this is the eviction trigger in the streamer.
+            var posA = new Vector3(TILE * 5.5f, 0f, TILE * 5.5f);
+            var posB = new Vector3(TILE * 6.5f, 0f, TILE * 5.5f);
 
-            var desiredA = TerrainResidencyRing.ComputeDesired(posA, TerrainColliderConfig.COLLIDER_RING_RADIUS);
-            var desiredB = TerrainResidencyRing.ComputeDesired(posB, TerrainColliderConfig.COLLIDER_RING_RADIUS);
+            var desiredA = TerrainColliderRing.ComputeDesired(posA, LOD_RANGE_M);
+            var desiredB = TerrainColliderRing.ComputeDesired(posB, LOD_RANGE_M);
 
             var toEvict = new HashSet<Vector2Int>(desiredA);
             toEvict.ExceptWith(desiredB);
 
             Assert.Greater(toEvict.Count, 0,
-                "After camera moves one tile there should be tiles to evict.");
+                "After the camera moves one tile there should be tiles to evict.");
         }
     }
 }

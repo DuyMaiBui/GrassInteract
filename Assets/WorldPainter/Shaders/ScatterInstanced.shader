@@ -63,6 +63,25 @@ Shader "WorldPainter/ScatterInstanced"
         // Per-flag deform gates. Set by MeshScatterEngine at Build time. Default 0 = static.
         _WindEnabled        ("Wind Enabled",        Float) = 0
         _InteractorsEnabled ("Interactors Enabled", Float) = 0
+        // Phase 2: PBR material properties (all default OFF/null — keyword toggles control activation).
+        [Toggle(_NORMALMAP)]  _UseNormalMap  ("Use Normal Map",   Float) = 0
+        [NoScaleOffset] _NormalMap ("Normal Map", 2D) = "bump" {}
+        _NormalStrength ("Normal Strength", Float) = 1.0
+        [Toggle(_PBR)]        _UsePbr        ("Use PBR Lighting", Float) = 0
+        [Toggle(_MASKMAP)]    _UseMaskMap    ("Use Mask Map (R=Metallic G=AO A=Smoothness)", Float) = 0
+        [NoScaleOffset] _MaskMap ("Mask Map", 2D) = "white" {}
+        [Toggle(_EMISSION)]   _UseEmission   ("Use Emission",     Float) = 0
+        [NoScaleOffset] _EmissionMap ("Emission Map", 2D) = "black" {}
+        [HDR] _EmissionColor ("Emission Color", Color) = (0,0,0,1)
+        // Phase 3: shadow properties (all default OFF/0 — keyword-off path == Phase 2 all-OFF baseline).
+        [Toggle(_RECEIVE_SHADOWS)] _ReceiveShadows ("Receive Shadows", Float) = 0
+        [Toggle(_SHADOW_TINT)]     _UseShadowTint  ("Shadow Tint",     Float) = 0
+        _ShadowStrength ("Shadow Strength", Range(0,1)) = 1.0
+        _ShadowTint     ("Shadow Tint Color", Color) = (1,1,1,1)
+        [Toggle(_ALPHACLIP_SHADOWS)] _AlphaclipShadows ("Alpha-Clip Shadows", Float) = 0
+        _Cutoff         ("Shadow Alpha Cutoff", Range(0,1)) = 0.5
+        _ShadowDepthBias  ("Shadow Depth Bias",  Float) = 0
+        _ShadowNormalBias ("Shadow Normal Bias", Float) = 0
     }
 
     SubShader
@@ -89,6 +108,20 @@ Shader "WorldPainter/ScatterInstanced"
             #pragma fragment frag
             // multi_compile_local so both variants survive player build (shader_feature_local strips unused).
             #pragma multi_compile_local _ SCATTER_ALIGN_TO_NORMAL
+            // Phase 2: PBR material feature toggles (shader_feature_local — stripped from build when unused).
+            // ALL DEFAULT OFF: with none of these defined, the original stylized path runs unchanged.
+            #pragma shader_feature_local _NORMALMAP
+            #pragma shader_feature_local _PBR
+            #pragma shader_feature_local _MASKMAP
+            #pragma shader_feature_local _EMISSION
+            // Phase 3: shadow feature toggles (shader_feature_local, all default OFF).
+            #pragma shader_feature_local _RECEIVE_SHADOWS
+            #pragma shader_feature_local _SHADOW_TINT
+            #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            // Phase 3: URP shadow sampling keywords (multi_compile so shadow variants are always in build).
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
+            #pragma multi_compile _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -109,10 +142,22 @@ Shader "WorldPainter/ScatterInstanced"
                 // Per-layer deform sampling anchor (local space). Wind phase + interactor lean sample from
                 // posWS + baseRot*(_AnchorOffset.xyz * scale) instead of the pivot. (0,0,0) = pivot (legacy).
                 float4 _AnchorOffset;
+                // Phase 2: PBR material uniforms.
+                float  _NormalStrength;
+                float4 _EmissionColor;
+                // Phase 3: shadow uniforms (only read under their respective keywords; defaults are inert).
+                float  _ShadowStrength;   // only under _SHADOW_TINT
+                float4 _ShadowTint;       // only under _SHADOW_TINT
+                float  _ShadowDepthBias;  // ShadowCaster VS (0 = no-op)
+                float  _ShadowNormalBias; // ShadowCaster VS (0 = no-op)
+                float  _Cutoff;           // ShadowCaster alpha-clip threshold (0.5 default)
             CBUFFER_END
 
-            TEXTURE2D(_BaseMap);
-            SAMPLER(sampler_BaseMap);
+            TEXTURE2D(_BaseMap);     SAMPLER(sampler_BaseMap);
+            TEXTURE2D(_NormalMap);   SAMPLER(sampler_NormalMap);
+            // Mask map: R=Metallic, G=Occlusion, B=unused, A=Smoothness (URP Lit convention).
+            TEXTURE2D(_MaskMap);     SAMPLER(sampler_MaskMap);
+            TEXTURE2D(_EmissionMap); SAMPLER(sampler_EmissionMap);
 
             // InstanceData struct — 20 B, byte-identical to BladeInstance in GrassCull.compute.
             // posWS MUST be first so the cull kernel reads posWS at the correct offset.
@@ -326,11 +371,64 @@ Shader "WorldPainter/ScatterInstanced"
                 float4 positionCS : SV_POSITION;
                 float3 normalWS   : TEXCOORD0;
                 float2 uv         : TEXCOORD1;
+                // Phase 2: world-space position and tangent for PBR/normal-map.
+                float3 positionWS : TEXCOORD2;
+                float3 tangentWS  : TEXCOORD3;
             };
+
+            // Compute world-space tangent using the SAME full transform chain as TransformInstance
+            // (baseRot → leanMat → tiltQ) so tangent and normal always share a basis.
+            // Omitting leanMat was the FIX3 bug: under wind/deform the tangent and normal diverged,
+            // producing a non-orthonormal TBN that skewed normal-map lighting on swaying props.
+            float3 SCATTER_TangentWS(InstanceData inst, float4 tiltQ, float3 tangentOS)
+            {
+                uint  hi     = (inst.packedYawScale >> 16) & 0xFFFFu;
+                uint  lo     =  inst.packedYawScale & 0xFFFFu;
+                float yawDeg = (float)hi / 65535.0f * 360.0f;
+                float scale  = (float)lo / 65535.0f * _ScaleMax2;
+
+                float3x3 baseRot  = SCATTER_BaseRot(inst, yawDeg);
+                float3   anchorWS = inst.posWS + mul(baseRot, _AnchorOffset.xyz * scale);
+
+                // Rebuild the same leanMat as TransformInstance so tangent follows the deformed basis.
+                float2 windXZ = float2(0, 0);
+                if (_WindEnabled >= 0.5f)
+                {
+                    float phase = (anchorWS.x * 0.37f + anchorWS.z * 0.21f) * _WindNoiseScale * SCATTER_TWO_PI;
+                    windXZ      = _WindDir * sin(_GrassTime * _WindFrequency + phase) * _WindStrength;
+                }
+                float2 bendXZ = float2(0, 0);
+                if (_InteractorsEnabled >= 0.5f)
+                {
+                    for (int i = 0; i < _InteractorCount; ++i)
+                    {
+                        SCATTER_InteractorGpu ip = _Interactors[i];
+                        float2 delta = anchorWS.xz - ip.posWS.xz;
+                        float  d     = length(delta);
+                        if (ip.radius <= 0.0f || d >= ip.radius) continue;
+                        float  fall  = 1.0f - d / ip.radius;
+                        float2 away  = (d > 1e-4f) ? delta / d : float2(0, 0);
+                        bendXZ += away * (fall * ip.strength * _BendStrength);
+                    }
+                }
+                float3x3 leanMat = float3x3(1,0,0, 0,1,0, 0,0,1);
+                if (_WindEnabled >= 0.5f || _InteractorsEnabled >= 0.5f)
+                {
+                    float2 lean     = windXZ + bendXZ;
+                    float leanPitch = lean.y * SCATTER_DEG_PER_METRE;
+                    float leanRoll  = -lean.x * SCATTER_DEG_PER_METRE;
+                    float magDeg    = sqrt(leanPitch * leanPitch + leanRoll * leanRoll);
+                    if (magDeg > SCATTER_MAX_LEAN_DEG) { float s = SCATTER_MAX_LEAN_DEG / magDeg; leanPitch *= s; leanRoll *= s; }
+                    leanMat = SCATTER_EulerMatrix(leanPitch, 0.0f, leanRoll);
+                }
+                // Apply baseRot → leanMat → tiltQ (same chain as normalWS in TransformInstance).
+                return SCATTER_RotateByQuat(mul(leanMat, mul(baseRot, tangentOS)), tiltQ);
+            }
 
             Varyings vert(
                 float4 posOS      : POSITION,
                 float3 normalOS   : NORMAL,
+                float4 tangentOS  : TANGENT,
                 float2 uv         : TEXCOORD0,
                 uint   instanceID : SV_InstanceID)
             {
@@ -343,26 +441,148 @@ Shader "WorldPainter/ScatterInstanced"
                 float3 posWS, normalWS;
                 TransformInstance(inst, tiltQ, posOS.xyz, normalOS, posWS, normalWS);
 
+                // FIX3: tangent now uses the FULL transform chain (baseRot + leanMat + tiltQ),
+                // matching normalWS so TBN stays orthonormal under wind/interactor deform.
+                float3 tangentWS = SCATTER_TangentWS(inst, tiltQ, tangentOS.xyz);
+
                 o.positionCS = TransformWorldToHClip(posWS);
                 o.normalWS   = normalWS;
                 o.uv         = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                o.positionWS = posWS;
+                o.tangentWS  = tangentWS;
                 return o;
             }
 
             half4 frag(Varyings i) : SV_Target
             {
+                float3 normalWS = normalize(i.normalWS);
+
+                // ── Normal map perturbation (runs before PBR or stylized branch) ──
+                #if defined(_NORMALMAP)
+                {
+                    float3 tangentWS = normalize(i.tangentWS);
+                    // Re-orthonormalize: remove any residual dot(tangent, normal) component that
+                    // may accumulate through the lean+tilt rotation chain (FIX3 safety measure).
+                    tangentWS = normalize(tangentWS - dot(tangentWS, normalWS) * normalWS);
+                    float3 bitangentWS = cross(normalWS, tangentWS);
+                    half4  nSample     = SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, i.uv);
+                    float3 nTS         = UnpackNormal(nSample);
+                    nTS.xy *= _NormalStrength;
+                    normalWS = normalize(tangentWS * nTS.x + bitangentWS * nTS.y + normalWS * nTS.z);
+                }
+                #endif
+
                 // Simple gradient: base→tip driven by world-space up-dot (approximates top color).
-                float upDot = saturate(dot(normalize(i.normalWS), float3(0, 1, 0)));
-                half4 tex   = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv);
-                half3 col   = lerp(_BaseColor.rgb, _TipColor.rgb, upDot) * tex.rgb;
+                float upDot      = saturate(dot(normalWS, float3(0, 1, 0)));
+                half4 tex        = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv);
+                half3 baseAlbedo = lerp(_BaseColor.rgb, _TipColor.rgb, upDot) * tex.rgb;
 
-                // Simple ambient + main light diffuse (single forward light, no shadow sample).
-                Light mainLight = GetMainLight();
-                float NdotL = saturate(dot(normalize(i.normalWS), mainLight.direction));
-                col *= mainLight.color * (0.5f + 0.5f * NdotL);
-                col += half3(0.05f, 0.05f, 0.05f); // ambient lift so props aren't pure black in shadow
+                #if defined(_PBR)
+                {
+                    // ── URP PBR path ─────────────────────────────────────────────
+                    SurfaceData surfaceData = (SurfaceData)0;
+                    surfaceData.albedo      = baseAlbedo;
+                    surfaceData.normalTS    = float3(0, 0, 1); // unused — world-space normal fed via inputData
+                    surfaceData.alpha       = 1.0f;
+                    #if defined(_MASKMAP)
+                    {
+                        half4 mask             = SAMPLE_TEXTURE2D(_MaskMap, sampler_MaskMap, i.uv);
+                        surfaceData.metallic   = mask.r;
+                        surfaceData.occlusion  = mask.g;
+                        surfaceData.smoothness = mask.a;
+                    }
+                    #else
+                    {
+                        surfaceData.metallic   = 0.0f;
+                        surfaceData.occlusion  = 1.0f;
+                        surfaceData.smoothness = 0.5f;
+                    }
+                    #endif
+                    #if defined(_EMISSION)
+                    {
+                        half4 emitTex          = SAMPLE_TEXTURE2D(_EmissionMap, sampler_EmissionMap, i.uv);
+                        surfaceData.emission   = emitTex.rgb * _EmissionColor.rgb;
+                    }
+                    #else
+                    {
+                        surfaceData.emission   = 0.0f;
+                    }
+                    #endif
 
-                return half4(col, 1.0f);
+                    InputData inputData = (InputData)0;
+                    inputData.positionWS        = i.positionWS;
+                    inputData.normalWS          = normalWS;
+                    inputData.viewDirectionWS   = GetWorldSpaceNormalizeViewDir(i.positionWS);
+                    // Phase 3: real shadow coord under _RECEIVE_SHADOWS; zero otherwise (no shadow sampling).
+                    // OFF path is byte-identical to Phase 2 (shadowCoord = 0 → UniversalFragmentPBR skips shadow).
+                    #if defined(_RECEIVE_SHADOWS)
+                        inputData.shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+                    #else
+                        inputData.shadowCoord = float4(0, 0, 0, 0);
+                    #endif
+                    inputData.fogCoord          = 0;
+                    inputData.bakedGI           = SampleSH(normalWS);
+                    inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(i.positionCS);
+                    inputData.shadowMask        = half4(1, 1, 1, 1);
+
+                    half4 pbr = UniversalFragmentPBR(inputData, surfaceData);
+
+                    // Phase 3: _SHADOW_TINT — modulate received shadow term by strength + tint color.
+                    #if defined(_SHADOW_TINT) && defined(_RECEIVE_SHADOWS)
+                    {
+                        Light mainLight = GetMainLight(inputData.shadowCoord);
+                        float shadow    = mainLight.shadowAttenuation;
+                        half3 tintedShadow = lerp(_ShadowTint.rgb, half3(1,1,1), shadow) * _ShadowStrength
+                                            + (1.0 - _ShadowStrength);
+                        pbr.rgb *= tintedShadow;
+                    }
+                    #endif
+
+                    return pbr;
+                }
+                #else
+                {
+                    // ── Stylized lighting path ────────────────────────────────
+                    // Byte-for-byte identical to pre-Phase-2 when _RECEIVE_SHADOWS is OFF.
+                    // When _RECEIVE_SHADOWS is ON, also samples the main-light shadow and
+                    // multiplies (or tints) the output — so props darken in shadow on the
+                    // cheap stylized path without requiring full PBR.
+                    half3 col = baseAlbedo;
+
+                    // Simple ambient + main light diffuse (single forward light).
+                    #if defined(_RECEIVE_SHADOWS)
+                    {
+                        float4 shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+                        Light mainLight    = GetMainLight(shadowCoord);
+                        float NdotL        = saturate(dot(normalWS, mainLight.direction));
+                        col *= mainLight.color * (0.5f + 0.5f * NdotL);
+                        col += half3(0.05f, 0.05f, 0.05f); // ambient lift
+                        half shadowAtten   = mainLight.shadowAttenuation;
+                        #if defined(_SHADOW_TINT)
+                        {
+                            half3 tintedShadow = lerp(_ShadowTint.rgb, half3(1,1,1), shadowAtten) * _ShadowStrength
+                                                + (1.0 - _ShadowStrength);
+                            col *= tintedShadow;
+                        }
+                        #else
+                        {
+                            col *= shadowAtten;
+                        }
+                        #endif
+                    }
+                    #else
+                    {
+                        // No shadow sampling — original GetMainLight() (no coord) path, unchanged.
+                        Light mainLight = GetMainLight();
+                        float NdotL = saturate(dot(normalWS, mainLight.direction));
+                        col *= mainLight.color * (0.5f + 0.5f * NdotL);
+                        col += half3(0.05f, 0.05f, 0.05f); // ambient lift so props aren't pure black in shadow
+                    }
+                    #endif
+
+                    return half4(col, 1.0f);
+                }
+                #endif
             }
             ENDHLSL
         }
@@ -384,6 +604,8 @@ Shader "WorldPainter/ScatterInstanced"
             #pragma fragment shadowFrag
             #pragma multi_compile _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #pragma multi_compile_local _ SCATTER_ALIGN_TO_NORMAL
+            // Phase 3: alpha-clip shadow caster. OFF = solid caster (Phase 2 behavior unchanged).
+            #pragma shader_feature_local _ALPHACLIP_SHADOWS
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
@@ -408,6 +630,10 @@ Shader "WorldPainter/ScatterInstanced"
             // Explicitly declare shadow-direction uniforms (mirrors GrassInteractIndirect.shader pattern).
             float3 _LightDirection;
             float3 _LightPosition;
+            // Phase 3: shadow bias + alpha-clip uniforms (0 = no-op so today's caster is unchanged).
+            float  _ShadowDepthBias;
+            float  _ShadowNormalBias;
+            float  _Cutoff;
 
             static const float SC_DEG_TO_RAD=0.01745329f,SC_TWO_PI=6.2831853f,SC_DPM=55.0f,SC_MAX_LEAN=80.0f;
             float3 SC_RotateByQuat(float3 v,float4 q){float3 t=2.0f*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
@@ -444,11 +670,19 @@ Shader "WorldPainter/ScatterInstanced"
                 }
             }
 
-            struct SV { float4 positionCS : SV_POSITION; };
+            // Phase 3: extend SV with uv when _ALPHACLIP_SHADOWS is active (alpha-clip in frag).
+            struct SV
+            {
+                float4 positionCS : SV_POSITION;
+                #if defined(_ALPHACLIP_SHADOWS)
+                float2 uv : TEXCOORD0;
+                #endif
+            };
 
             SV shadowVert(
                 float4 posOS    : POSITION,
                 float3 normalOS : NORMAL,
+                float2 uv       : TEXCOORD0,
                 uint   iid      : SV_InstanceID)
             {
                 SV o = (SV)0;
@@ -464,6 +698,10 @@ Shader "WorldPainter/ScatterInstanced"
                     float3 lightDir = _LightDirection;
                 #endif
 
+                // Phase 3: apply per-layer shadow bias offsets (0 = no-op; default is unchanged caster).
+                posWS += lightDir * _ShadowDepthBias;
+                posWS += nrmWS   * _ShadowNormalBias;
+
                 float4 clip = TransformWorldToHClip(ApplyShadowBias(posWS, nrmWS, lightDir));
                 #if UNITY_REVERSED_Z
                     clip.z = min(clip.z, UNITY_NEAR_CLIP_VALUE);
@@ -471,10 +709,24 @@ Shader "WorldPainter/ScatterInstanced"
                     clip.z = max(clip.z, UNITY_NEAR_CLIP_VALUE);
                 #endif
                 o.positionCS = clip;
+                #if defined(_ALPHACLIP_SHADOWS)
+                o.uv = uv;
+                #endif
                 return o;
             }
 
-            half4 shadowFrag(SV i) : SV_Target { return 0; }
+            // Phase 3: _ALPHACLIP_SHADOWS clips the shadow caster by base-map alpha.
+            // OFF path returns 0 immediately — byte-identical to the Phase 2 ShadowCaster.
+            TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+            float4 _BaseMap_ST;
+            half4 shadowFrag(SV i) : SV_Target
+            {
+                #if defined(_ALPHACLIP_SHADOWS)
+                    half alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv).a;
+                    clip(alpha - _Cutoff);
+                #endif
+                return 0;
+            }
             ENDHLSL
         }
 

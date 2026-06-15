@@ -99,14 +99,6 @@ namespace WorldPainter
         /// <summary>All registered tiles: coord → <see cref="TerrainTileAsset"/> ref.</summary>
         public List<TileEntry> Tiles => this.tiles;
 
-        // ── Biome presets (Tier-C refs) — P5 ─────────────────────────────────
-
-        [Header("Biome Presets")]
-        [SerializeField] private List<BiomePreset> biomes = new();
-
-        /// <summary>Biome preset references. Tier-A WorldPainter → Tier-C BiomePreset refs.</summary>
-        public List<BiomePreset> Biomes => this.biomes;
-
         // ── Deferred to P6 ────────────────────────────────────────────────────
 
         // brushPresets : List<BrushPreset ref>   — deferred to P6

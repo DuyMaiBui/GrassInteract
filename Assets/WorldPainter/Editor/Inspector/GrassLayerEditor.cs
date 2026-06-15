@@ -60,12 +60,17 @@ namespace WorldPainter.Editor
 
             EditorGUI.BeginChangeCheck();
 
-            DrawBox(SECTION_RENDER,    this.DrawRender);
-            DrawBox(SECTION_WIND,      this.DrawWind);
-            DrawBox(SECTION_DEFORM,    this.DrawDeform);
-            DrawBox(SECTION_BOUNDS,    this.DrawBounds);
-            DrawBox(SECTION_PLACEMENT, this.DrawPlacement);
-            DrawBox(SECTION_DENSITY,   this.DrawDensity);
+            // Grass layer fields are editable only inside the WorldPainter detail card; the
+            // standalone sub-asset inspector renders them read-only.
+            using (new EditorGUI.DisabledScope(!WorldPainterLayerEditContext.EditingInWorldPainter))
+            {
+                DrawBox(SECTION_RENDER,    this.DrawRender);
+                DrawBox(SECTION_WIND,      this.DrawWind);
+                DrawBox(SECTION_DEFORM,    this.DrawDeform);
+                DrawBox(SECTION_BOUNDS,    this.DrawBounds);
+                DrawBox(SECTION_PLACEMENT, this.DrawPlacement);
+                DrawBox(SECTION_DENSITY,   this.DrawDensity);
+            }
 
             bool changed = EditorGUI.EndChangeCheck();
             this.serializedObject.ApplyModifiedProperties();
@@ -124,7 +129,7 @@ namespace WorldPainter.Editor
             }
         }
 
-        void DrawRender()    => DrawChildrenFlat(this.propRender!);
+        void DrawRender()    => WorldPainterLodGui.DrawScatterLodSection(this.propRender!);
         void DrawWind()      => DrawChildrenFlat(this.propWind!);
         void DrawDeform()    => DrawChildrenFlat(this.propDeform!);
         void DrawBounds()    => DrawChildrenFlat(this.propBounds!);

@@ -22,7 +22,6 @@ namespace WorldPainter.Editor
             this.undoPushedCoords.Clear();
             this.strokeTouchedCoords.Clear();
             this.rtCache.ReleaseAll();
-            TerrainPaintTargetResolver.PinnedCoords.Clear();
 
             // Register the neighbour map for seam sync (P6) — must be done before the
             // first stamp so ApplySeamSync can find adjacent tiles at writeback time.
@@ -32,12 +31,7 @@ namespace WorldPainter.Editor
             Undo.IncrementCurrentGroup();
             this.undoGroupId = Undo.GetCurrentGroup();
 
-            // Use biome-specific group name when painting a biome layer (task 6).
-            LayerType startType = WorldPainterState.ActiveLayerType(painter, out _);
-            string groupName = startType == LayerType.Biome
-                ? "WorldPainter Biome Stroke"
-                : "WorldPainter Sculpt Stroke";
-            Undo.SetCurrentGroupName(groupName);
+            Undo.SetCurrentGroupName("WorldPainter Sculpt Stroke");
 
             GUIUtility.hotControl = controlId;
             this.stroke.Begin(worldPos);
@@ -145,7 +139,6 @@ namespace WorldPainter.Editor
             this.rtCache.ReleaseAll();
             this.strokeTouchedCoords.Clear();
             this.undoPushedCoords.Clear();
-            TerrainPaintTargetResolver.PinnedCoords.Clear();
         }
 
         // ── Per-stamp dispatch ────────────────────────────────────────────────
@@ -196,15 +189,6 @@ namespace WorldPainter.Editor
             }
 
             this.strokeTouchedCoords.Add(coord);
-
-            // Pin touched tiles against stream-out for biome stroke duration (P5 task 5).
-            var activePainter = WorldPainterState.ActivePainter;
-            if (activePainter != null)
-            {
-                LayerType lt = WorldPainterState.ActiveLayerType(activePainter, out _);
-                if (lt == LayerType.Biome)
-                    TerrainPaintTargetResolver.PinnedCoords.Add(coord);
-            }
 
             this.BindAndDispatch(worldPos, tile, heightRT);
 

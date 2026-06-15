@@ -91,10 +91,6 @@ namespace WorldPainter.Editor
             // is bounded by the authored instance count, not a full-world rescan).
             this.BakeFull(layer, buffer, fieldOrigin, meshBounds);
 
-            Debug.Log($"[WorldPainterIncrementalBake] Rebuilt buffer: " +
-                $"{buffer.TotalInstances} instances, {affected.Count} affected chunk(s), " +
-                $"chunkSize={chunkSize}m");
-
             // P8: emit per-tile baked assets for tiles overlapped by this stamp.
             this.EmitDirtyTiles(map, bakeManifest, bakeOutputFolder, stampPos, brushRadius);
         }
@@ -120,16 +116,8 @@ namespace WorldPainter.Editor
 
             // Determine which tile coords the brush circle overlaps.
             var dirtyCoords = ComputeDirtyTileCoords(stampPos, brushRadius);
-            int rebaked = 0;
             foreach (Vector2Int coord in dirtyCoords)
-            {
-                if (WorldMapBaker.BakeTile(map, coord, bakeOutputFolder!, bakeManifest))
-                    rebaked++;
-            }
-
-            if (rebaked > 0)
-                Debug.Log($"[WorldPainterIncrementalBake] Emitted {rebaked} dirty tile(s) " +
-                    $"to '{bakeOutputFolder}'.");
+                WorldMapBaker.BakeTile(map, coord, bakeOutputFolder!, bakeManifest);
         }
 
         /// <summary>

@@ -16,6 +16,7 @@ namespace WorldPainter.Tests
     {
         private const float TILE    = TerrainWorldGrid.TILE_SIZE_M;
         private const float EPSILON = 1.0f; // 1 m tolerance for heightfield downsampling
+        private const int   HF_RES  = 65;   // 2^6 + 1 (was TerrainColliderConfig.HEIGHTFIELD_RES)
 
         // ── Tile builders ─────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ namespace WorldPainter.Tests
             float minH  = 0f;
             float maxH  = 512f;
             var tile    = MakeFlatTile(h, minH, maxH);
-            int hfRes   = TerrainColliderConfig.HEIGHTFIELD_RES;
+            int hfRes   = HF_RES;
 
             float[,] hf = TerrainColliderProvider.BuildHeightfield(tile, hfRes);
 
@@ -63,7 +64,7 @@ namespace WorldPainter.Tests
             tile.heightData = new byte[0]; // invalid
             var parent = new GameObject("TestParent").transform;
 
-            var handle = TerrainColliderProvider.Build(tile, parent);
+            var handle = TerrainColliderProvider.Build(tile, parent, HF_RES);
 
             Assert.IsNull(handle, "Build should return null for a tile with empty heightData.");
             Object.DestroyImmediate(parent.gameObject);
@@ -73,9 +74,41 @@ namespace WorldPainter.Tests
         public void NullTile_ReturnsNullHandle()
         {
             var parent = new GameObject("TestParent").transform;
-            var handle = TerrainColliderProvider.Build(null!, parent);
+            var handle = TerrainColliderProvider.Build(null!, parent, HF_RES);
             Assert.IsNull(handle, "Build should return null for a null tile.");
             Object.DestroyImmediate(parent.gameObject);
+        }
+
+        // ── Cooked collider is physically hittable (runtime smoke) ────────────
+
+        [Test]
+        public void CookedCollider_DownwardRaycast_HitsAtExpectedHeight()
+        {
+            // Flat tile at height 50 in [0,100] → terrain surface at world y≈50 over tile (0,0).
+            var tile   = MakeFlatTile(50f, 0f, 100f);
+            var parent = new GameObject("RaycastSmokeParent").transform;
+            var handle = TerrainColliderProvider.Build(tile, parent, HF_RES);
+            Assert.IsNotNull(handle, "Build should cook a collider for a valid tile.");
+
+            Physics.SyncTransforms();
+            bool ok = Physics.Raycast(new Vector3(TILE * 0.5f, 1000f, TILE * 0.5f),
+                                      Vector3.down, out RaycastHit hit, 2000f);
+
+            Assert.IsTrue(ok, "Downward ray over the cooked tile should hit its TerrainCollider.");
+            Assert.IsInstanceOf<TerrainCollider>(hit.collider, "Ray should hit the cooked TerrainCollider.");
+            Assert.AreEqual(50f, hit.point.y, EPSILON, "Hit height should match the flat tile height.");
+
+            handle!.Release();
+            Object.DestroyImmediate(parent.gameObject);
+            Object.DestroyImmediate(tile);
+        }
+
+        [Test]
+        public void NearestValidHeightfieldRes_RoundsUpToPow2Plus1()
+        {
+            Assert.AreEqual(65,  TerrainColliderProvider.NearestValidHeightfieldRes(65),  "65 is already valid.");
+            Assert.AreEqual(129, TerrainColliderProvider.NearestValidHeightfieldRes(100), "100 rounds up to 129.");
+            Assert.AreEqual(33,  TerrainColliderProvider.NearestValidHeightfieldRes(10),  "Below-min clamps to 33.");
         }
 
         // ── Heightfield corner samples match R16 ──────────────────────────────
@@ -88,7 +121,7 @@ namespace WorldPainter.Tests
             int srcRes  = 9; // small resolution for test speed
             float minH  = 10f;
             float maxH  = 200f;
-            int hfRes   = TerrainColliderConfig.HEIGHTFIELD_RES;
+            int hfRes   = HF_RES;
 
             var tile = ScriptableObject.CreateInstance<TerrainTileAsset>();
             tile.tileCoord = Vector2Int.zero;

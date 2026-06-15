@@ -82,7 +82,6 @@ namespace WorldPainter.Editor
 
             SaveManifest(manifest);
 
-            Debug.Log($"[WorldMapBaker] Full bake complete: {bakCount} tile(s) → '{outputFolder}'.");
             return manifest;
         }
 
@@ -119,7 +118,6 @@ namespace WorldPainter.Editor
             manifest.SetEntry(coord, tilePath);
             SaveManifest(manifest);
 
-            Debug.Log($"[WorldMapBaker] Incremental bake: tile {coord} → '{tilePath}'.");
             return true;
         }
 

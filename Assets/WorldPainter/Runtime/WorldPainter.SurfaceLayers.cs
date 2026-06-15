@@ -56,6 +56,9 @@ namespace WorldPainter
 
             for (int i = 0; i < layers.Count; ++i)
             {
+                // Hidden layers (eye toggle off) are skipped — no engine built, nothing rendered.
+                if (layers[i] == null || !layers[i].Enabled) continue;
+
                 // Prop layers: one InstancedPropEngine per PropLayer (layer-global, not per-tile).
                 if (layers[i] is PropLayer prop)
                 {
@@ -78,6 +81,9 @@ namespace WorldPainter
             if (layer == null || this.map == null) return;
 
             this.DisposeGrassLayerEngines(layer);
+
+            // Hidden (eye toggle off) → stay disposed; the dispose above already removed its engines.
+            if (!layer.Enabled) return;
 
             // Resolve infra lazily — RebuildSurfaceLayers does the same. Safe to call repeatedly.
             this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
@@ -106,6 +112,9 @@ namespace WorldPainter
 
             this.DisposePropLayerEngines(layer);
 
+            // Hidden (eye toggle off) → stay disposed.
+            if (!layer.Enabled) return;
+
             this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
             this.ResolveScatterInfra();
             this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
@@ -132,7 +141,6 @@ namespace WorldPainter
 
                 if (!adapter.Validate(out string tileErr))
                 {
-                    Debug.Log($"[WorldPainter.SurfaceLayers] {adapter.name}: {tileErr} — skipped.", this);
                     DestroyAdapter(adapter);
                     continue;
                 }
@@ -275,9 +283,6 @@ namespace WorldPainter
 
             if (!adapter.Validate(out string error))
             {
-                Debug.Log(
-                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
-                    $"{error} — skipped.", this);
                 DestroyPropAdapter(adapter);
                 return;
             }
@@ -292,9 +297,6 @@ namespace WorldPainter
 
                 this.surfacePropEngines.Add(engine);
                 this.surfacePropAdapters.Add(adapter);
-
-                Debug.Log(
-                    $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}' → InstancedPropEngine.", this);
             }
             catch (System.Exception ex)
             {

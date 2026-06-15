@@ -51,14 +51,6 @@ namespace WorldPainter.Editor
 
         internal readonly WorldPainterPropStampEmitter propEmitter = new WorldPainterPropStampEmitter();
 
-        // ── Biome composite stamp (P5 task 2) ─────────────────────────────────
-
-        internal WorldPainterBiomeStamp? biomeStamp;
-
-        // ── Biome channel mute mask (P5 task 4) ───────────────────────────────
-
-        internal BiomeChannelMask biomeMuteMask = BiomeChannelMask.None;
-
         // ── Flatten target (P8 — captured per stroke when the Flatten tool is active) ──
         // World-space Y under the cursor at mouse-down; normalized per-tile at dispatch time.
 
@@ -82,10 +74,6 @@ namespace WorldPainter.Editor
         {
             this.brushCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Assets/WorldPainter/Shaders/TerrainBrush.compute");
-
-            // Initialise biome composite stamp (P5).
-            this.biomeStamp = new WorldPainterBiomeStamp(
-                this.propEmitter, this.densityEncoder, this.falloffLut);
 
             // Upload initial falloff LUT from current brush settings.
             var brush = WorldPainterState.Brush;
@@ -264,10 +252,6 @@ namespace WorldPainter.Editor
             switch (e.GetTypeForControl(controlId))
             {
                 case EventType.MouseDown when e.button == 0 && !e.alt && hasHit:
-                    // ── DIAGNOSTIC (remove with the matching prints) ─────────────
-                    UnityEngine.Debug.Log(
-                        $"[MouseDown] mousePx={e.mousePosition} worldPoint={worldPoint:F4} " +
-                        $"hasHit={hasHit}");
                     this.HandleMouseDown(painter, worldPoint, controlId);
                     e.Use();
                     break;
@@ -339,7 +323,6 @@ namespace WorldPainter.Editor
                 : (effective == LayerType.Height ? "Height (base)" : "—");
             bool noLayerSelected =
                 WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.None &&
-                WorldPainterState.ActiveBiomeIndex < 0 &&
                 WorldPainterState.ActiveLayerIndex < 0;
             bool splatNoChannel =
                 WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Splat &&

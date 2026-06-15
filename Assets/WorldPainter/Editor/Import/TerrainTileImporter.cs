@@ -60,8 +60,6 @@ namespace WorldPainter.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            Debug.Log($"[TerrainTileImporter] Created asset '{outputAssetPath}' from '{rawFilePath}' " +
-                      $"({heightRes}² R16, tile={tileCoord}, range=[{minHeight},{maxHeight}]).");
             return asset;
         }
     }

@@ -45,12 +45,12 @@ namespace WorldPainter.Editor
             title.AddToClassList("wp-section-title");
             dock.Add(title);
 
-            // Paint Mode toggle — replaces the Scene-view toolbar Brush icon. When OFF the
-            // scene-input driver short-circuits (no brush ring, no strokes). Auto-flips ON
-            // when a paintable layer is selected.
-            dock.Add(this.BuildPaintModeToggle());
+            // Paint Mode has no manual toggle button — it is driven automatically by layer
+            // selection (continuous-stroke layers auto-enable) and tool clicks. The scene-input
+            // driver short-circuits when WorldPainterState.PaintModeActive is false.
 
             var brush = WorldPainterState.Brush;
+            brush.shape = BrushShape.Circle; // only the circle brush is exposed (square removed)
 
             // Phase 2c — TerrainLayer palette strip: 64×64 diffuse thumbnails for the
             // map's TerrainPalette + an "Add TerrainLayer" ObjectField + per-entry "×"
@@ -65,12 +65,12 @@ namespace WorldPainter.Editor
             // because Place / Single / Select / Erase don't use a brush footprint (they
             // operate at the cursor). Showing them then would be confusing UX.
             this.brushSettingsContainer = new VisualElement();
-            this.brushSettingsContainer.Add(this.BuildShapeToggle());
             this.brushSettingsContainer.Add(this.BuildSlider("Size (m)", 0.5f, 256f,
                 () => brush.size, v => brush.size = v));
             this.brushSettingsContainer.Add(this.BuildSlider("Strength", 0f, 1f,
                 () => brush.strength, v => brush.strength = v));
             this.brushSettingsContainer.Add(this.BuildCurveField(brush));
+            this.brushSettingsContainer.Add(this.BuildBrushMaskField());
             this.brushSettingsContainer.Add(this.BuildSlider("Spacing (m)", 0.1f, 64f,
                 () => brush.spacing, v => brush.spacing = v));
             this.brushSettingsContainer.Add(this.BuildSlider("Flow", 0f, 1f,
@@ -311,45 +311,6 @@ namespace WorldPainter.Editor
             this.PopulatePaletteStrip();
         }
 
-        // ── Paint Mode toggle (Phase 1 — replaces Scene-view brush toolbar icon) ──
-
-        private VisualElement BuildPaintModeToggle()
-        {
-            var row = new VisualElement();
-            row.AddToClassList("wp-mode-toggle-row");
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginBottom  = 4;
-
-            var btn = new Button { text = PaintModeLabel() };
-            btn.AddToClassList("wp-mode-btn");
-            btn.style.flexGrow = 1;
-            if (WorldPainterState.PaintModeActive)
-                btn.AddToClassList("wp-mode-btn--active");
-
-            btn.clicked += () =>
-            {
-                WorldPainterState.PaintModeActive = !WorldPainterState.PaintModeActive;
-            };
-
-            // Keep the button label + active class in sync with state flips from elsewhere
-            // (layer selection auto-engages, tool click engages, programmatic disable in OnDisable).
-            System.Action<bool> onPaintMode = on =>
-            {
-                btn.text = PaintModeLabel();
-                if (on) btn.AddToClassList("wp-mode-btn--active");
-                else    btn.RemoveFromClassList("wp-mode-btn--active");
-            };
-            WorldPainterState.PaintModeChanged += onPaintMode;
-            btn.RegisterCallback<DetachFromPanelEvent>(_ =>
-                WorldPainterState.PaintModeChanged -= onPaintMode);
-
-            row.Add(btn);
-            return row;
-        }
-
-        private static string PaintModeLabel() =>
-            WorldPainterState.PaintModeActive ? "● Paint Mode: ON" : "○ Paint Mode: OFF";
-
         // ── Contextual tool palette (tools per active layer kind) ─────────────
 
         /// <summary>
@@ -420,9 +381,7 @@ namespace WorldPainter.Editor
             var tools = BrushToolRegistry.ToolsFor(kind);
             if (tools.Count == 0)
             {
-                var hint = new Label(kind == LayerType.Biome
-                    ? "Biome uses contribution toggles"
-                    : "Select a layer to paint");
+                var hint = new Label("Select a layer to paint");
                 hint.style.fontSize   = 9;
                 hint.style.color      = new StyleColor(new Color(0.6f, 0.6f, 0.6f));
                 hint.style.marginLeft = 4;
@@ -469,38 +428,6 @@ namespace WorldPainter.Editor
 
                 this.toolPaletteRoot.Add(btn);
             }
-        }
-
-        // ── Shape toggle (Circle / Square) ────────────────────────────────────
-        private VisualElement BuildShapeToggle()
-        {
-            var row = new VisualElement();
-            row.AddToClassList("wp-mode-toggle-row");
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginBottom  = 4;
-
-            var shapes = new[] { "Circle", "Square" };
-            var values = new[] { BrushShape.Circle, BrushShape.Square };
-
-            for (int i = 0; i < shapes.Length; i++)
-            {
-                int capturedIdx = i;
-                var btn = new Button(() =>
-                {
-                    WorldPainterState.Brush.shape = values[capturedIdx];
-                    WorldPainterState.RaiseBrushFalloffDirty(); // nudge repaint/preview refresh
-                });
-                btn.text = shapes[i];
-                btn.AddToClassList("wp-mode-btn");
-                btn.style.flexGrow = 1;
-
-                if (WorldPainterState.Brush.shape == values[i])
-                    btn.AddToClassList("wp-mode-btn--active");
-
-                row.Add(btn);
-            }
-
-            return row;
         }
 
         // ── Preset bar ────────────────────────────────────────────────────────
@@ -592,6 +519,58 @@ namespace WorldPainter.Editor
 
             row.Add(slider);
             return row;
+        }
+
+        // ── Brush mask (import brush as texture) ──────────────────────────────
+
+        /// <summary>
+        /// ObjectField to import/select an optional grayscale brush-mask texture. When set, the
+        /// brush footprint is shaped by the texture (multiplied with the falloff) instead of a
+        /// plain circle. The picked texture is forced uncompressed + linear + readable so the
+        /// stamp kernel's Load() sampling works on all platforms.
+        /// </summary>
+        private VisualElement BuildBrushMaskField()
+        {
+            var row = new VisualElement();
+            row.AddToClassList("wp-field-row");
+
+            var field = new ObjectField("Brush Mask")
+            {
+                objectType        = typeof(Texture2D),
+                allowSceneObjects = false,
+                value             = WorldPainterState.Brush.maskTexture,
+                tooltip           = "Optional grayscale texture that shapes the brush footprint. " +
+                                    "None = circle. Black = no deposit, white = full deposit.",
+            };
+            field.RegisterValueChangedCallback(evt =>
+            {
+                var tex = evt.newValue as Texture2D;
+                if (tex != null) EnsureBrushMaskReadable(tex);
+                WorldPainterState.Brush.maskTexture = tex;
+                WorldPainterState.RaiseBrushFalloffDirty(); // nudge preview refresh
+            });
+
+            row.Add(field);
+            return row;
+        }
+
+        /// <summary>
+        /// Forces an imported brush-mask texture to uncompressed + linear + CPU-readable so the
+        /// compute kernel's point Load() works (block-compressed textures are not reliably
+        /// Load-able across platforms).
+        /// </summary>
+        private static void EnsureBrushMaskReadable(Texture2D tex)
+        {
+            string path = AssetDatabase.GetAssetPath(tex);
+            if (string.IsNullOrEmpty(path)) return;
+            if (AssetImporter.GetAtPath(path) is not TextureImporter importer) return;
+
+            bool dirty = false;
+            if (importer.textureCompression != TextureImporterCompression.Uncompressed)
+            { importer.textureCompression = TextureImporterCompression.Uncompressed; dirty = true; }
+            if (!importer.isReadable) { importer.isReadable  = true;  dirty = true; }
+            if (importer.sRGBTexture) { importer.sRGBTexture = false; dirty = true; }
+            if (dirty) importer.SaveAndReimport();
         }
 
         private VisualElement BuildCurveField(BrushSettings brush)

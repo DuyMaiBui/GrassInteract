@@ -83,7 +83,9 @@ namespace WorldPainter
                 this.renderParams = new RenderParams(this.grassMaterial)
                 {
                     shadowCastingMode = render.ShadowCastingMode,
-                    receiveShadows = false,
+                    // Phase 3: driven from config (no hardcoded false) so CPU + GPU grass tiers agree.
+                    // Default OFF preserves Phase 2 baseline (grass was always receive=false before).
+                    receiveShadows = render.ReceiveShadows,
                     layer = 0,
                     camera = null, // render in ALL cameras (game + scene view) — see class summary
                 };

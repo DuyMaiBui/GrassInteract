@@ -27,7 +27,6 @@ namespace WorldPainter.Editor
 
         // ── Sub-views (created once, reused on repaint) ───────────────────────
 
-        private WorldPainterFilterChips? filterChips;
         private WorldPainterLayerStackView? layerStack;
         private WorldPainterBrushDock? brushDock;
 
@@ -170,8 +169,7 @@ namespace WorldPainter.Editor
                 bool noTiles = painter.Map == null && painter.Tiles.Count == 0;
                 int surfaceLayerCount = painter.Map != null ? painter.Map.SurfaceLayers.Count : 0;
                 // Phase 5: SplatLayers/ScatterLayers removed from WorldPainter; use SurfaceLayers.
-                bool noLayers = surfaceLayerCount == 0 &&
-                                painter.Biomes.Count == 0;
+                bool noLayers = surfaceLayerCount == 0;
                 bool hasNoMap = painter.Map == null;
                 emptyTilesState.style.display = noTiles
                     ? DisplayStyle.Flex : DisplayStyle.None;
@@ -185,9 +183,16 @@ namespace WorldPainter.Editor
             root.Add(createMapBtn);
             root.Add(emptyStackState);
 
-            // ── Filter chips (All / Height / Splat / Grass / Props) ───────────
-            this.filterChips = new WorldPainterFilterChips();
-            root.Add(this.filterChips.Build());
+            // ── Animate in Edit Mode toggle ───────────────────────────────────
+            var animToggle = new Toggle("Animate in Edit Mode")
+            {
+                value = WorldPainterAnimPump.Enabled,
+                tooltip = "Continuously advance _GrassTime in edit mode so wind sway and interactor lean " +
+                          "animate in the SceneView without manual interaction. Throttled to ~30 fps.",
+            };
+            animToggle.RegisterValueChangedCallback(evt =>
+                WorldPainterAnimPump.Enabled = evt.newValue);
+            root.Add(animToggle);
 
             // ── Brush dock (constant — sits directly under the layer filter) ──
             this.brushDock = new WorldPainterBrushDock();
@@ -196,8 +201,7 @@ namespace WorldPainter.Editor
             // ── Layer stack ───────────────────────────────────────────────────
             this.layerStack = new WorldPainterLayerStackView(
                 this.serializedObject,
-                painter,
-                this.filterChips);
+                painter);
             root.Add(this.layerStack.Build());
 
             // ── Per-layer coach-mark zone ─────────────────────────────────────
@@ -274,9 +278,46 @@ namespace WorldPainter.Editor
                     var imgui = new IMGUIContainer(() =>
                     {
                         if (capturedEditor == null || capturedEditor.target == null) return;
-                        capturedEditor.OnInspectorGUI();
+                        // Grass/prop layer fields are editable ONLY here, inside the WorldPainter
+                        // detail card. Selecting the sub-asset directly renders it read-only —
+                        // GrassLayerEditor / PropLayerEditor gate on this flag.
+                        WorldPainterLayerEditContext.EditingInWorldPainter = true;
+                        try { capturedEditor.OnInspectorGUI(); }
+                        finally { WorldPainterLayerEditContext.EditingInWorldPainter = false; }
                     });
                     cardArea.Add(imgui);
+                }
+                else if (WorldPainterState.ActiveLayerType(painter, out _) == LayerType.Height)
+                {
+                    // Terrain (Height base) selected → inline CDLOD distance-band editor,
+                    // mirroring the grass/prop inline LOD section (no popup).
+                    var terrainLabel = new Label("[Terrain] LOD");
+                    terrainLabel.AddToClassList("wp-layer-name");
+                    terrainLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    terrainLabel.style.marginTop = 6;
+                    cardArea.Add(terrainLabel);
+
+                    var terrainImgui = new IMGUIContainer(() =>
+                    {
+                        // Own SerializedObject (not this.serializedObject, which the layer-stack
+                        // shares) so terrain-band edits never race the inspector's Update/Apply cycle.
+                        var so = new SerializedObject(painter);
+                        so.Update();
+                        var ranges = so.FindProperty("lodRangesM");
+                        if (ranges == null)
+                        {
+                            EditorGUILayout.HelpBox("lodRangesM not found on WorldPainter.", MessageType.Error);
+                            return;
+                        }
+                        EditorGUI.BeginChangeCheck();
+                        EditorGUILayout.LabelField("Terrain LOD (CDLOD distance bands)", EditorStyles.boldLabel);
+                        WorldPainterLodGui.DrawTerrainLodSection(ranges);
+                        bool terrainChanged = EditorGUI.EndChangeCheck();
+                        so.ApplyModifiedProperties();
+                        if (terrainChanged)
+                            WorldPainterRebuildScheduler.MarkTerrainDirty(painter);
+                    });
+                    cardArea.Add(terrainImgui);
                 }
                 // Legacy scatter/prop cards removed (Phase 5 SSOT consolidation).
                 // Unified surface-layer detail (activeSurfaceLayer != null branch above) is the
@@ -366,7 +407,6 @@ namespace WorldPainter.Editor
             painter.TryBuild();
             painter.RebuildScatterPreview();
             SceneView.RepaintAll();
-            Debug.Log("[WorldPainter] Manual rebuild complete.", painter);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

@@ -25,7 +25,6 @@ namespace WorldPainter.Editor
         private const string KEY_SEEN_GRASS  = "WP_CoachMark_GrassLayer_Seen";
         private const string KEY_SEEN_SPLAT  = "WP_CoachMark_SplatLayer_Seen";
         private const string KEY_SEEN_PROPS  = "WP_CoachMark_PropsLayer_Seen";
-        private const string KEY_SEEN_BIOME  = "WP_CoachMark_BiomeLayer_Seen";
 
         // ── State ─────────────────────────────────────────────────────────────
 
@@ -121,7 +120,6 @@ namespace WorldPainter.Editor
                 LayerType.Grass => KEY_SEEN_GRASS,
                 LayerType.Splat => KEY_SEEN_SPLAT,
                 LayerType.Props => KEY_SEEN_PROPS,
-                LayerType.Biome => KEY_SEEN_BIOME,
                 _               => null,
             };
 
@@ -131,8 +129,7 @@ namespace WorldPainter.Editor
             {
                 LayerType.Grass => "Paint grass density by dragging. Shift=erase, Ctrl=smooth.",
                 LayerType.Splat => "Paint surface blend weights. Shift=invert, F1-F3=preset slots.",
-                LayerType.Props => "Stamp props by clicking. Alt=eyedropper to sample from scene.",
-                LayerType.Biome => "Biome brush writes multiple channels at once. Use channel toggles.",
+                LayerType.Props => "Stamp props by clicking.",
                 _               => string.Empty,
             };
 

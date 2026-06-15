@@ -13,27 +13,9 @@ namespace WorldPainter.Editor
     ///
     /// Phase 3 resident-set is optional: if non-null only tiles that are currently
     /// resident are returned (avoids loading new tiles mid-stroke).
-    ///
-    /// Phase 5 (biome): <see cref="PinnedCoords"/> prevents stream-out of tiles
-    /// touched by a biome stroke; cleared at stroke end.
     /// </summary>
     public static class TerrainPaintTargetResolver
     {
-        // ── Residency pin (P5 biome multi-tile) ───────────────────────────────
-
-        /// <summary>
-        /// Set of tile coords currently pinned against stream-out.
-        /// <see cref="TerrainStreamingManager"/> checks this before evicting a tile.
-        /// Pinning is set at biome stroke start; cleared at stroke end.
-        /// </summary>
-        public static readonly System.Collections.Generic.HashSet<Vector2Int> PinnedCoords =
-            new System.Collections.Generic.HashSet<Vector2Int>();
-
-        /// <summary>
-        /// Returns true when the tile coord is pinned against stream-out.
-        /// Called by <see cref="TerrainStreamingManager"/> before eviction.
-        /// </summary>
-        public static bool IsPinned(Vector2Int coord) => PinnedCoords.Contains(coord);
         /// <summary>
         /// Collect all tile coordinates whose world extent overlaps the brush circle.
         /// Results are appended to <paramref name="results"/> (not cleared).

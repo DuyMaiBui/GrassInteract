@@ -133,9 +133,6 @@ namespace WorldPainter.Editor
 
             if (selectForSculpt && tile != null)
                 Selection.activeObject = tile;
-
-            Debug.Log($"[WorldPainterTileGhostHandler] Added tile at {coord}" +
-                      (selectForSculpt ? " (selected for sculpt)." : "."));
         }
 
         private static void TryRemoveTile(WorldPainter painter, WorldMapAsset map, Vector2Int coord)
@@ -160,8 +157,6 @@ namespace WorldPainter.Editor
             painter.RemoveTileFromRender(coord);
             WorldMapAssetLifecycle.RemoveTile(map, coord);
             EditorUtility.SetDirty(map);
-
-            Debug.Log($"[WorldPainterTileGhostHandler] Removed tile at {coord}.");
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

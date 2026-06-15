@@ -23,42 +23,6 @@
     background-color: rgb(45, 45, 45);
 }
 
-/* ── Filter chip bar ─────────────────────────────────────────────────────── */
-.wp-filter-bar {
-    flex-direction: row;
-    flex-shrink: 0;
-    padding: 4px 4px 2px 4px;
-    flex-wrap: wrap;
-}
-
-.wp-chip {
-    border-radius: 8px;
-    font-size: 12px;
-    padding: 2px 8px;
-    margin: 2px;
-    border-width: 1px;
-    height: 22px;
-    transition-property: background-color, border-color;
-    transition-duration: 0.1s;
-}
-
-.pro .wp-chip {
-    background-color: rgb(62, 62, 62);
-    color: rgb(180, 180, 180);
-    border-color: rgb(40, 40, 40);
-}
-
-.pro .wp-chip:hover {
-    background-color: rgb(75, 75, 75);
-    color: rgb(210, 210, 210);
-}
-
-.pro .wp-chip--active {
-    background-color: rgba(77, 153, 255, 0.25);
-    color: rgb(77, 153, 255);
-    border-color: rgb(77, 153, 255);
-}
-
 /* ── Stack root ──────────────────────────────────────────────────────────── */
 .wp-stack-root {
     flex-direction: column;

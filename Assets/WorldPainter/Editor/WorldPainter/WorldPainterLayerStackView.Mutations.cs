@@ -1,7 +1,6 @@
 #nullable enable
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.UIElements;
 using WorldPainter;
 
 namespace WorldPainter.Editor
@@ -9,28 +8,18 @@ namespace WorldPainter.Editor
     /// <summary>
     /// Mutation half of <see cref="WorldPainterLayerStackView"/> (partial).
     ///
-    /// Phase 5b: drag-reorder legacy methods removed (depended on splatLayersProp).
-    /// Contains: add-menu, unified add/remove mutations, biome row mutations.
+    /// Contains: unified grass/prop add mutations, surface-layer removal, and the per-layer
+    /// enable/disable toggle. Layers are created via explicit "+ Grass" / "+ Props" header
+    /// buttons (the old GenericMenu add-flow and the biome subsystem were removed).
     /// </summary>
     internal sealed partial class WorldPainterLayerStackView
     {
-        // ── Add menu ──────────────────────────────────────────────────────────
-
-        private void ShowAddMenu()
-        {
-            var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("Grass layer"), false, () => this.AddGrassLayerUnified());
-            menu.AddItem(new GUIContent("Props layer"), false, () => this.AddPropLayerUnified());
-            menu.AddItem(new GUIContent("Biome preset"), false, () => this.AddBiomeRow());
-            menu.ShowAsContext();
-        }
-
-        // ── Unified add mutations (Phase 2 — all go through WorldMapAssetLifecycle) ──
+        // ── Unified add mutations (all go through WorldMapAssetLifecycle) ──────
 
         /// <summary>
         /// Adds an empty unified <see cref="GrassLayer"/> — material + per-tile empty density
-        /// textures only, NO blade mesh. The user assigns LODs via the setup panel
-        /// (<see cref="WorldPainterLayerSetupWindow"/>) before painting.
+        /// textures only, NO blade mesh. The user assigns LODs via the inline LOD editor shown in
+        /// the inspector detail card when the layer is selected, before painting.
         /// Requires a saved WorldMapAsset.
         /// </summary>
         private void AddGrassLayerUnified()
@@ -46,7 +35,7 @@ namespace WorldPainter.Editor
             GrassLayer newLayer = WorldMapAssetLifecycle.AddGrassLayer(map!, layerName);
             this.SelectSurfaceLayer(newLayer);
             this.RefreshStack();
-            WorldPainterLayerSetupWindow.Open(newLayer, this.painter);
+            // Selecting the new layer surfaces its inline LOD editor in the inspector detail card.
         }
 
         /// <summary>
@@ -66,7 +55,7 @@ namespace WorldPainter.Editor
             PropLayer newLayer = WorldMapAssetLifecycle.AddPropLayer(map!, layerName);
             this.SelectSurfaceLayer(newLayer);
             this.RefreshStack();
-            WorldPainterLayerSetupWindow.Open(newLayer, this.painter);
+            // Selecting the new layer surfaces its inline LOD editor in the inspector detail card.
         }
 
         /// <summary>
@@ -101,20 +90,24 @@ namespace WorldPainter.Editor
             this.RefreshStack();
         }
 
-        // ── Biome row mutation (unchanged from Phase 1) ───────────────────────
+        // ── Per-layer enable / disable (eye toggle) ───────────────────────────
 
-        private void RemoveBiomeLayer(int index)
+        /// <summary>
+        /// Sets the layer's <see cref="WorldPainterLayer.Enabled"/> flag and rebuilds just that
+        /// layer's engines (coalesced) so a hidden layer disappears / a shown layer reappears
+        /// immediately. Undo-recorded.
+        /// </summary>
+        private void SetLayerEnabled(WorldPainterLayer layer, bool enabled)
         {
-            if (this.biomesProp == null) return;
-            if (index < 0 || index >= this.biomesProp.arraySize) return;
+            if (layer == null || layer.Enabled == enabled) return;
 
-            Undo.RecordObject(this.painter, "Remove Biome Preset");
-            this.biomesProp.GetArrayElementAtIndex(index).objectReferenceValue = null;
-            this.biomesProp.DeleteArrayElementAtIndex(index);
-            this.serializedObject.ApplyModifiedProperties();
+            Undo.RecordObject(layer, enabled ? "Show Layer" : "Hide Layer");
+            layer.Enabled = enabled;
+            EditorUtility.SetDirty(layer);
 
-            WorldPainterState.ActiveLayerIndex =
-                Mathf.Max(0, WorldPainterState.ActiveLayerIndex - 1);
+            if (layer is GrassLayer grass)     WorldPainterRebuildScheduler.MarkGrassDirty(grass);
+            else if (layer is PropLayer prop)  WorldPainterRebuildScheduler.MarkPropDirty(prop);
+
             this.RefreshStack();
         }
 
@@ -136,7 +129,6 @@ namespace WorldPainter.Editor
             return true;
         }
 
-        // Row helpers (SelectLayer, SelectSurfaceLayer, CreateBaseRow, MakeEyeToggle, MakeLockToggle,
-        // LayerIcon, AddBiomeRow) are in WorldPainterLayerStackView.RowHelpers.cs
+        // Selection + toggle factories are in WorldPainterLayerStackView.RowHelpers.cs.
     }
 }

@@ -79,6 +79,22 @@ namespace WorldPainter
         internal void EndAlphamapPreview(Vector2Int coord, int alphamapIdx)
             => this.EngineForCoord(coord)?.EndAlphamapPreview(alphamapIdx);
 
+        // ── Collider LOD seam (for TerrainColliderStreamer) ───────────────────
+
+        /// <summary>Number of configured terrain LOD bands (0 when none).</summary>
+        internal int LodBandCount => this.lodRangesM != null ? this.lodRangesM.Length : 0;
+
+        /// <summary>
+        /// Max camera distance (metres) for a collider LOD band. Clamps the index into the
+        /// configured range and returns 0 when no bands exist (→ collider ring stays empty).
+        /// </summary>
+        internal float LodRangeMetres(int band)
+        {
+            if (this.lodRangesM == null || this.lodRangesM.Length == 0) return 0f;
+            int i = Mathf.Clamp(band, 0, this.lodRangesM.Length - 1);
+            return this.lodRangesM[i];
+        }
+
         // ── Unity lifecycle ───────────────────────────────────────────────────
 
         private void OnEnable()

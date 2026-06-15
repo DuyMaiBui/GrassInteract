@@ -43,6 +43,24 @@ namespace WorldPainter
         private static readonly int ID_InstanceTilt          = Shader.PropertyToID("_InstanceTilt");
         private static readonly int ID_TiltEnabled           = Shader.PropertyToID("_TiltEnabled");
         private static readonly int ID_AnchorOffset          = Shader.PropertyToID("_AnchorOffset");
+        // Phase 2: PBR material property IDs.
+        private static readonly int ID_NormalMap             = Shader.PropertyToID("_NormalMap");
+        private static readonly int ID_NormalStrength        = Shader.PropertyToID("_NormalStrength");
+        private static readonly int ID_MaskMap               = Shader.PropertyToID("_MaskMap");
+        private static readonly int ID_EmissionMap           = Shader.PropertyToID("_EmissionMap");
+        private static readonly int ID_EmissionColor         = Shader.PropertyToID("_EmissionColor");
+        private const string KW_NormalMap                    = "_NORMALMAP";
+        private const string KW_Pbr                         = "_PBR";
+        private const string KW_MaskMap                     = "_MASKMAP";
+        private const string KW_Emission                    = "_EMISSION";
+        // Phase 3: Shadow material property IDs and keywords.
+        private static readonly int ID_ShadowStrength        = Shader.PropertyToID("_ShadowStrength");
+        private static readonly int ID_ShadowTint            = Shader.PropertyToID("_ShadowTint");
+        private static readonly int ID_ShadowDepthBias       = Shader.PropertyToID("_ShadowDepthBias");
+        private static readonly int ID_ShadowNormalBias      = Shader.PropertyToID("_ShadowNormalBias");
+        private const string KW_ReceiveShadows               = "_RECEIVE_SHADOWS";
+        private const string KW_ShadowTint                   = "_SHADOW_TINT";
+        private const string KW_AlphaclipShadows             = "_ALPHACLIP_SHADOWS";
 
         // ── Injected ─────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -94,6 +112,10 @@ namespace WorldPainter
         private float lod1MaxSqrDist;
         private float maxSqrDistance;
         private float bladeCullMargin;
+
+        // ── Phase 3: shadow config snapshot ──────────────────────────────────
+        private UnityEngine.Rendering.ShadowCastingMode shadowCastingMode;
+        private bool receiveShadows;
 
         // ── Deform state ──────────────────────────────────────────────────────
         private bool affectedByWind;
@@ -276,6 +298,14 @@ namespace WorldPainter
             this.lodMat0.SetFloat(ID_InteractorsEnabled, interactorsFlag);
             this.lodMat1.SetFloat(ID_InteractorsEnabled, interactorsFlag);
             this.lodMat2.SetFloat(ID_InteractorsEnabled, interactorsFlag);
+
+            // Phase 2: PBR material keyword + texture binding.
+            this.ApplyPbrKeywords(layer.Render);
+
+            // Phase 3: snapshot shadow config; bind shadow keywords + params.
+            this.shadowCastingMode = layer.Render.ShadowCastingMode;
+            this.receiveShadows    = layer.Render.ReceiveShadows;
+            this.ApplyShadowKeywords(layer.Render);
 
             if (this.interactsWithDeform)
             {
@@ -668,12 +698,115 @@ namespace WorldPainter
             if (this.lodMat2 != null) this.lodMat2.SetVector(id, v);
         }
 
+        /// <summary>
+        /// Phase 2: Binds PBR textures and sets shader_feature_local keywords on all LOD material clones.
+        /// All defaults are OFF — with no toggles enabled the original stylized lighting path runs unchanged.
+        /// Props use mesh tangents for normal mapping (imported meshes already have tangent data).
+        /// </summary>
+        private void ApplyPbrKeywords(ScatterRenderConfig cfg)
+        {
+            Material?[] mats = { this.lodMat0, this.lodMat1, this.lodMat2 };
+            foreach (Material? mat in mats)
+            {
+                if (mat == null) continue;
+
+                // _NORMALMAP — props use mesh tangents (no blade-basis synthesis needed)
+                if (cfg.UseNormalMap && cfg.NormalMap != null)
+                {
+                    mat.EnableKeyword(KW_NormalMap);
+                    mat.SetTexture(ID_NormalMap, cfg.NormalMap);
+                    mat.SetFloat(ID_NormalStrength, cfg.NormalStrength);
+                }
+                else
+                {
+                    mat.DisableKeyword(KW_NormalMap);
+                }
+
+                // _PBR + _MASKMAP (sub-feature inside PBR)
+                if (cfg.UsePbr)
+                {
+                    mat.EnableKeyword(KW_Pbr);
+                    if (cfg.MaskMap != null)
+                    {
+                        mat.EnableKeyword(KW_MaskMap);
+                        mat.SetTexture(ID_MaskMap, cfg.MaskMap);
+                    }
+                    else
+                    {
+                        mat.DisableKeyword(KW_MaskMap);
+                    }
+                }
+                else
+                {
+                    mat.DisableKeyword(KW_Pbr);
+                    mat.DisableKeyword(KW_MaskMap);
+                }
+
+                // _EMISSION
+                if (cfg.UseEmission)
+                {
+                    mat.EnableKeyword(KW_Emission);
+                    if (cfg.EmissionMap != null)
+                        mat.SetTexture(ID_EmissionMap, cfg.EmissionMap);
+                    mat.SetColor(ID_EmissionColor, cfg.EmissionColor);
+                }
+                else
+                {
+                    mat.DisableKeyword(KW_Emission);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Phase 3: Binds shadow keywords and per-layer shadow params on all LOD material clones.
+        /// All defaults are OFF/0 — keyword-off path is byte-identical to the Phase 2 all-OFF baseline.
+        /// </summary>
+        private void ApplyShadowKeywords(ScatterRenderConfig cfg)
+        {
+            Material?[] mats = { this.lodMat0, this.lodMat1, this.lodMat2 };
+            foreach (Material? mat in mats)
+            {
+                if (mat == null) continue;
+
+                // _RECEIVE_SHADOWS — enable URP shadow coord lookup (only meaningful when _PBR is also on).
+                if (cfg.ReceiveShadows)
+                    mat.EnableKeyword(KW_ReceiveShadows);
+                else
+                    mat.DisableKeyword(KW_ReceiveShadows);
+
+                // _SHADOW_TINT — modulate received shadow term by strength + tint.
+                // Only meaningful when _RECEIVE_SHADOWS is also on; kept separate for granular control.
+                if (cfg.ReceiveShadows && (cfg.ShadowStrength < 0.999f || cfg.ShadowTint != Color.white))
+                {
+                    mat.EnableKeyword(KW_ShadowTint);
+                    mat.SetFloat(ID_ShadowStrength, cfg.ShadowStrength);
+                    mat.SetColor(ID_ShadowTint, cfg.ShadowTint);
+                }
+                else
+                {
+                    mat.DisableKeyword(KW_ShadowTint);
+                }
+
+                // _ALPHACLIP_SHADOWS — alpha-clip the shadow caster by base-map alpha.
+                // Default OFF (solid-quad caster). _Cutoff defaults to 0.5 in the shader property.
+                if (cfg.UseAlphaclipShadows)
+                    mat.EnableKeyword(KW_AlphaclipShadows);
+                else
+                    mat.DisableKeyword(KW_AlphaclipShadows);
+
+                // Bias values — always set (zero is the safe default; no keyword needed for 0-offsets).
+                mat.SetFloat(ID_ShadowDepthBias,  cfg.ShadowDepthBias);
+                mat.SetFloat(ID_ShadowNormalBias, cfg.ShadowNormalBias);
+            }
+        }
+
         private RenderParams MakeRenderParams(Material mat, Camera? drawCamera) =>
             new RenderParams(mat)
             {
                 worldBounds       = this.worldBounds,
-                shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On,
-                receiveShadows    = true,
+                // Phase 3: ShadowCastingMode driven from config (no hardcoded On); receive from config (no hardcoded true).
+                shadowCastingMode = this.shadowCastingMode, // honors layer.Render.ShadowCastingMode
+                receiveShadows    = this.receiveShadows,    // honors layer.Render.ReceiveShadows (default false)
                 camera            = drawCamera,
                 layer             = 0,
             };

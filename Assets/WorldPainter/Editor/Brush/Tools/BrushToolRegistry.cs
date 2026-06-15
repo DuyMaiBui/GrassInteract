@@ -49,14 +49,14 @@ namespace WorldPainter.Editor
 
         private static readonly IBrushTool[] NoTools = System.Array.Empty<IBrushTool>();
 
-        /// <summary>Returns the ordered tool set for <paramref name="kind"/> (empty for Biome / unknown).</summary>
+        /// <summary>Returns the ordered tool set for <paramref name="kind"/> (empty for unknown kinds).</summary>
         public static IReadOnlyList<IBrushTool> ToolsFor(LayerType kind) => kind switch
         {
             LayerType.Height => HeightTools,
             LayerType.Splat  => SplatTools,
             LayerType.Grass  => DensityTools,
             LayerType.Props  => InstanceTools,
-            _                => NoTools, // Biome composites via WorldPainterBiomeStamp, not a brush tool.
+            _                => NoTools,
         };
 
         /// <summary>

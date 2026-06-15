@@ -48,6 +48,7 @@ namespace WorldPainter.Editor
 
                 int k = ctx.Compute.FindKernel(TerrainSculptConfig.KERNEL_PAINT_DENSITY);
                 ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
+                BrushMaskBinder.BindToCompute(ctx.Compute, k);
                 ctx.Compute.SetTexture(k, "_DensityRT", dRT);
                 ctx.Compute.SetInt("_DensityMode", mode);
                 ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);

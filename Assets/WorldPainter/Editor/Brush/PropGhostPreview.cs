@@ -34,13 +34,6 @@ namespace WorldPainter.Editor
         private static double      lastSet = -1000d;
         private const  double      FRESH_SECONDS = 0.25;
 
-        // ── Diagnostic throttle ───────────────────────────────────────────────
-        // Logging on every Repaint floods the console — instead, the Draw() entry point logs
-        // a single line whenever ghostCursor moves more than DIAG_LOG_THRESHOLD_M from the
-        // last logged value. Captures every meaningful cursor change, suppresses idle frames.
-        private static Vector3 lastLoggedCursor = new Vector3(float.NaN, float.NaN, float.NaN);
-        private const  float   DIAG_LOG_THRESHOLD_M = 0.25f;
-
         // ── Cached resources ──────────────────────────────────────────────────
         private static Material? previewMaterial;
         private static Material? previewSourceMaterial;
@@ -72,19 +65,6 @@ namespace WorldPainter.Editor
         /// </summary>
         public static void Draw(PropLayer layer, Vector3 cursorWorld, bool valid)
         {
-            // ── DIAGNOSTIC (remove once the place-vs-ghost mismatch is resolved) ─
-            // Throttle: log only when ghostCursor moves meaningfully. Bypasses the per-frame
-            // Repaint noise so the log line right before a click is easy to find.
-            bool moved = float.IsNaN(lastLoggedCursor.x) ||
-                         (cursorWorld - lastLoggedCursor).sqrMagnitude >
-                            DIAG_LOG_THRESHOLD_M * DIAG_LOG_THRESHOLD_M;
-            if (moved)
-            {
-                UnityEngine.Debug.Log(
-                    $"[PropGhostPreview.Draw] cursorWorld={cursorWorld:F4} valid={valid}");
-                lastLoggedCursor = cursorWorld;
-            }
-
             ghostLayer    = layer;
             ghostCursor   = cursorWorld;
             ghostValid    = valid;

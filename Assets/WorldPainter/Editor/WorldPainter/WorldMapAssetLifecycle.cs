@@ -752,16 +752,20 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Builds a default indirect-instanced material for a PropLayer. Reuses the same
-        /// "WorldPainter/IndirectGrass" shader that grass uses (it consumes the BladeInstance
-        /// StructuredBuffer that InstancedPropEngine binds). Marked as a sub-asset of the map.
+        /// Builds a default GPU-instanced mesh-prop material for a PropLayer on the
+        /// "WorldPainter/ScatterInstanced" shader. This is the shader <see cref="InstancedPropEngine"/>
+        /// drives: it reads the <c>_Instances</c> (<c>StructuredBuffer&lt;InstanceData&gt;</c>) the engine
+        /// binds and transforms the LOD mesh vertices per instance. The grass shader
+        /// ("WorldPainter/IndirectGrass") is NOT interchangeable — it reads a different buffer
+        /// (<c>_Blades</c> / <c>BladeInstance</c>) and builds procedural grass blades, so a prop material
+        /// on it renders nothing. Marked as a sub-asset of the map.
         /// </summary>
         private static Material? CreatePropMaterial(string layerName)
         {
-            var shader = Shader.Find("WorldPainter/IndirectGrass");
+            var shader = Shader.Find("WorldPainter/ScatterInstanced");
             if (shader == null)
             {
-                Debug.LogWarning("[WorldPainter] WorldPainter/IndirectGrass shader missing — " +
+                Debug.LogWarning("[WorldPainter] WorldPainter/ScatterInstanced shader missing — " +
                                  "PropLayer material left unassigned. Assign one manually.");
                 return null;
             }

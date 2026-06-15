@@ -39,6 +39,25 @@ Shader "WorldPainter/IndirectGrass"
         // Per-flag deform gates. Default 1 = on (preserves existing always-on grass behavior).
         _WindEnabled        ("Wind Enabled",        Float) = 1
         _InteractorsEnabled ("Interactors Enabled", Float) = 1
+        // Phase 2: PBR material properties (all default OFF/null — keyword toggles control activation).
+        [Toggle(_NORMALMAP)]  _UseNormalMap  ("Use Normal Map",   Float) = 0
+        [NoScaleOffset] _NormalMap ("Normal Map", 2D) = "bump" {}
+        _NormalStrength ("Normal Strength", Float) = 1.0
+        [Toggle(_PBR)]        _UsePbr        ("Use PBR Lighting", Float) = 0
+        [Toggle(_MASKMAP)]    _UseMaskMap    ("Use Mask Map (R=Metallic G=AO A=Smoothness)", Float) = 0
+        [NoScaleOffset] _MaskMap ("Mask Map", 2D) = "white" {}
+        [Toggle(_EMISSION)]   _UseEmission   ("Use Emission",     Float) = 0
+        [NoScaleOffset] _EmissionMap ("Emission Map", 2D) = "black" {}
+        [HDR] _EmissionColor ("Emission Color", Color) = (0,0,0,1)
+        // Phase 3: shadow properties (all default OFF/0 — keyword-off path == Phase 2 all-OFF baseline).
+        [Toggle(_RECEIVE_SHADOWS)] _ReceiveShadows ("Receive Shadows", Float) = 0
+        [Toggle(_SHADOW_TINT)]     _UseShadowTint  ("Shadow Tint",     Float) = 0
+        _ShadowStrength ("Shadow Strength", Range(0,1)) = 1.0
+        _ShadowTint     ("Shadow Tint Color", Color) = (1,1,1,1)
+        [Toggle(_ALPHACLIP_SHADOWS)] _AlphaclipShadows ("Alpha-Clip Shadows", Float) = 0
+        _Cutoff         ("Shadow Alpha Cutoff", Range(0,1)) = 0.5
+        _ShadowDepthBias  ("Shadow Depth Bias",  Float) = 0
+        _ShadowNormalBias ("Shadow Normal Bias", Float) = 0
     }
 
     SubShader
@@ -72,8 +91,26 @@ Shader "WorldPainter/IndirectGrass"
             #pragma multi_compile_local _ _LOD2_BILLBOARD
             // Wind model: _WIND_PERLIN swaps the directional sin() wind for a 2-octave Perlin gust+ripple.
             #pragma multi_compile_local _ _WIND_PERLIN
+            // Phase 2: PBR material feature toggles (shader_feature_local — stripped from build when unused).
+            // ALL DEFAULT OFF: with none of these defined, the original stylized path runs byte-for-byte unchanged.
+            #pragma shader_feature_local _NORMALMAP
+            #pragma shader_feature_local _PBR
+            #pragma shader_feature_local _MASKMAP
+            #pragma shader_feature_local _EMISSION
+            // Phase 3: shadow feature toggles (shader_feature_local, all default OFF).
+            // _RECEIVE_SHADOWS: compute real URP shadow coord + receive shadows (only meaningful with _PBR).
+            // _SHADOW_TINT:     modulate received shadow term by _ShadowStrength/_ShadowTint.
+            // _ALPHACLIP_SHADOWS: unused in forward pass (applies in ShadowCaster). Declared for parity.
+            #pragma shader_feature_local _RECEIVE_SHADOWS
+            #pragma shader_feature_local _SHADOW_TINT
+            #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            // Phase 3: URP shadow sampling keywords (multi_compile so shadow variants are always in build).
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
+            #pragma multi_compile _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseColor;
@@ -85,10 +122,22 @@ Shader "WorldPainter/IndirectGrass"
                 // Independent deform gates. Default 1 = on (preserves existing always-on grass behavior).
                 float _WindEnabled;
                 float _InteractorsEnabled;
+                // Phase 2: PBR material uniforms (only read under their respective keywords).
+                float  _NormalStrength;
+                float4 _EmissionColor;
+                // Phase 3: shadow uniforms (only read under their respective keywords; defaults are inert).
+                float  _ShadowStrength;   // only under _SHADOW_TINT
+                float4 _ShadowTint;       // only under _SHADOW_TINT
+                float  _ShadowDepthBias;  // ShadowCaster VS (0 = no-op)
+                float  _ShadowNormalBias; // ShadowCaster VS (0 = no-op)
+                float  _Cutoff;           // ShadowCaster alpha-clip threshold (0.5 default)
             CBUFFER_END
 
-            TEXTURE2D(_BaseMap);
-            SAMPLER(sampler_BaseMap);
+            TEXTURE2D(_BaseMap);    SAMPLER(sampler_BaseMap);
+            TEXTURE2D(_NormalMap);  SAMPLER(sampler_NormalMap);
+            // Mask map: R=Metallic, G=Occlusion, B=unused, A=Smoothness (URP Lit convention).
+            TEXTURE2D(_MaskMap);    SAMPLER(sampler_MaskMap);
+            TEXTURE2D(_EmissionMap); SAMPLER(sampler_EmissionMap);
 
             // BladeInstance struct — 20 B, must match ChunkedBladeBuffer BLADE_STRIDE.
             // hash: legacy=decorrelation hash; oriented=octNormal(hi16)|pitch8|roll8 (ChunkedBladeBuffer SSOT).
@@ -347,7 +396,43 @@ Shader "WorldPainter/IndirectGrass"
                 float4 positionCS : SV_POSITION;
                 float2 uv         : TEXCOORD0;
                 float  heightT    : TEXCOORD1;
+                // Phase 2: world-space position and TBN for PBR/normal-map.
+                // Always interpolated; only consumed in the _PBR / _NORMALMAP branches.
+                // Blade TBN: tangent = blade width axis (rot col 0), normal = blade face normal (rot col 2).
+                float3 positionWS : TEXCOORD2;
+                float3 normalWS   : TEXCOORD3;
+                float3 tangentWS  : TEXCOORD4;
             };
+
+            // Helper: reconstruct the blade's world-space face normal and width-tangent from the
+            // same rotation matrix that places blade vertices.
+            //
+            // The blade quad mesh has local-space face normal = (0,0,1) and width tangent = (1,0,0).
+            //   normalWS  = mul(rot, float3(0,0,1)) = third column of rot
+            //   tangentWS = mul(rot, float3(1,0,0)) = first column of rot
+            //
+            // `rot` here is leanMat * baseRot (the same matrix used in ReconstructBladeVertexWS to
+            // transform local positions). We rebuild it from the same yaw/orient/lean inputs so the
+            // TBN is guaranteed to match the vertex positions.
+            void GRASS_BladeWorldTBN(BladeInstance b, out float3 normalWS, out float3 tangentWS)
+            {
+                uint  hi      = (b.packedYawScale >> 16) & 0xFFFFu;
+                uint  lo      =  b.packedYawScale & 0xFFFFu;
+                float yawDeg  = (float)hi / 65535.0 * 360.0;
+
+                // Wind/interactor lean is omitted for TBN: normals represent the blade's REST orientation.
+                // Per-vertex lean already bends the geometry; recomputing lean per-fragment in the normal map
+                // would require re-running the full deform loop in the FS — too expensive.
+                // The normal map encodes detail relative to the blade face; lean is macro-scale and is already
+                // captured by the geometry's silhouette. TBN from baseRot only is correct for this use case.
+                float3x3 rot = GRASS_BaseRotation(b, yawDeg);
+
+                // Blade quad mesh: local face normal = +Z, local width tangent = +X.
+                // rot is row-major in HLSL: rot[row][col], so first column is (rot[0].x, rot[1].x, rot[2].x)
+                // = mul(rot, float3(1,0,0)) = float3(rot._m00, rot._m10, rot._m20).
+                tangentWS = normalize(float3(rot._m00, rot._m10, rot._m20));
+                normalWS  = normalize(float3(rot._m02, rot._m12, rot._m22));
+            }
 
             Varyings vert(float4 posOS : POSITION, float2 uv : TEXCOORD0, uint instanceID : SV_InstanceID)
             {
@@ -364,14 +449,130 @@ Shader "WorldPainter/IndirectGrass"
                 o.positionCS = TransformWorldToHClip(posWS);
                 o.uv         = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 o.heightT    = saturate(uv.y);
+                o.positionWS = posWS;
+
+                float3 nWS, tWS;
+                GRASS_BladeWorldTBN(b, nWS, tWS);
+                o.normalWS  = nWS;
+                o.tangentWS = tWS;
                 return o;
             }
 
             half4 frag(Varyings i) : SV_Target
             {
                 half4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv);
-                half3 col = lerp(_BaseColor.rgb, _TipColor.rgb, i.heightT) * tex.rgb;
-                return half4(col, 1.0);
+                half3 baseAlbedo = lerp(_BaseColor.rgb, _TipColor.rgb, i.heightT) * tex.rgb;
+
+                // ── Normal map perturbation (runs before PBR or stylized branch) ──
+                float3 normalWS = normalize(i.normalWS);
+                #if defined(_NORMALMAP)
+                {
+                    float3 tangentWS   = normalize(i.tangentWS);
+                    float3 bitangentWS = cross(normalWS, tangentWS); // left-hand cross gives correct bi-tangent for blade face
+                    half4  nSample     = SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, i.uv);
+                    float3 nTS         = UnpackNormal(nSample);
+                    nTS.xy *= _NormalStrength;
+                    normalWS = normalize(tangentWS * nTS.x + bitangentWS * nTS.y + normalWS * nTS.z);
+                }
+                #endif
+
+                #if defined(_PBR)
+                {
+                    // ── URP PBR path ─────────────────────────────────────────────
+                    SurfaceData surfaceData = (SurfaceData)0;
+                    surfaceData.albedo      = baseAlbedo;
+                    surfaceData.normalTS    = float3(0, 0, 1); // unused — we feed world-space normal directly
+                    surfaceData.alpha       = 1.0;
+                    #if defined(_MASKMAP)
+                    {
+                        half4 mask          = SAMPLE_TEXTURE2D(_MaskMap, sampler_MaskMap, i.uv);
+                        surfaceData.metallic   = mask.r;
+                        surfaceData.occlusion  = mask.g;
+                        surfaceData.smoothness = mask.a;
+                    }
+                    #else
+                    {
+                        surfaceData.metallic   = 0.0;
+                        surfaceData.occlusion  = 1.0;
+                        surfaceData.smoothness = 0.5;
+                    }
+                    #endif
+                    #if defined(_EMISSION)
+                    {
+                        half4 emitTex          = SAMPLE_TEXTURE2D(_EmissionMap, sampler_EmissionMap, i.uv);
+                        surfaceData.emission   = emitTex.rgb * _EmissionColor.rgb;
+                    }
+                    #else
+                    {
+                        surfaceData.emission   = 0.0;
+                    }
+                    #endif
+
+                    InputData inputData = (InputData)0;
+                    inputData.positionWS        = i.positionWS;
+                    inputData.normalWS          = normalWS;
+                    inputData.viewDirectionWS   = GetWorldSpaceNormalizeViewDir(i.positionWS);
+                    // Phase 3: real shadow coord under _RECEIVE_SHADOWS; zero otherwise (no shadow sampling).
+                    // OFF path is byte-identical to Phase 2 (shadowCoord = 0 → UniversalFragmentPBR skips shadow).
+                    #if defined(_RECEIVE_SHADOWS)
+                        inputData.shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+                    #else
+                        inputData.shadowCoord = float4(0, 0, 0, 0);
+                    #endif
+                    inputData.fogCoord          = 0;
+                    inputData.bakedGI           = SampleSH(normalWS);
+                    inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(i.positionCS);
+                    inputData.shadowMask        = half4(1, 1, 1, 1);
+
+                    half4 pbr = UniversalFragmentPBR(inputData, surfaceData);
+
+                    // Phase 3: _SHADOW_TINT — modulate received shadow by strength + tint color.
+                    // Only active when _RECEIVE_SHADOWS is also on; adds a colored/attenuated shadow term.
+                    #if defined(_SHADOW_TINT) && defined(_RECEIVE_SHADOWS)
+                    {
+                        Light mainLight = GetMainLight(inputData.shadowCoord);
+                        float shadow    = mainLight.shadowAttenuation;
+                        // Blend from full shadow tint (shadow=0) to neutral (shadow=1) by strength.
+                        half3 tintedShadow = lerp(_ShadowTint.rgb, half3(1,1,1), shadow) * _ShadowStrength
+                                            + (1.0 - _ShadowStrength);
+                        pbr.rgb *= tintedShadow;
+                    }
+                    #endif
+
+                    return pbr;
+                }
+                #else
+                {
+                    // ── Stylized lighting path ────────────────────────────────
+                    // Byte-for-byte identical to pre-Phase-2 when _RECEIVE_SHADOWS is OFF.
+                    // When _RECEIVE_SHADOWS is ON, also samples the main-light shadow and
+                    // multiplies (or tints) the output — so grass/props darken in shadow on
+                    // the cheap stylized path without requiring full PBR.
+                    half3 col = baseAlbedo;
+                    #if defined(_RECEIVE_SHADOWS)
+                    {
+                        float4 shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+                        Light mainLight    = GetMainLight(shadowCoord);
+                        half  shadowAtten  = mainLight.shadowAttenuation;
+                        #if defined(_SHADOW_TINT)
+                        {
+                            // Tint path: lerp toward _ShadowTint in shadow, then modulate by strength.
+                            // Matches the PBR path's tint math for visual consistency.
+                            half3 tintedShadow = lerp(_ShadowTint.rgb, half3(1,1,1), shadowAtten) * _ShadowStrength
+                                                + (1.0 - _ShadowStrength);
+                            col *= tintedShadow;
+                        }
+                        #else
+                        {
+                            // Simple multiply: darken in shadow proportionally.
+                            col *= shadowAtten;
+                        }
+                        #endif
+                    }
+                    #endif
+                    return half4(col, 1.0);
+                }
+                #endif
             }
             ENDHLSL
         }
@@ -394,6 +595,8 @@ Shader "WorldPainter/IndirectGrass"
             #pragma multi_compile _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #pragma multi_compile_local _ _LOD2_BILLBOARD
             #pragma multi_compile_local _ _WIND_PERLIN
+            // Phase 3: alpha-clip shadow caster. OFF = solid-quad caster (Phase 2 behavior unchanged).
+            #pragma shader_feature_local _ALPHACLIP_SHADOWS
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
@@ -425,6 +628,10 @@ Shader "WorldPainter/IndirectGrass"
             float  _OrientMode; float4 _RotationOffsetEuler;
             float  _WindEnabled; float _InteractorsEnabled;
             float3 _LightDirection; float3 _LightPosition;
+            // Phase 3: shadow bias + alpha-clip uniforms (declared globally; 0 = no-op so today's caster is unchanged).
+            float  _ShadowDepthBias;
+            float  _ShadowNormalBias;
+            float  _Cutoff; // alpha-clip threshold; only sampled under _ALPHACLIP_SHADOWS
 
             static const float GRASS_TWO_PI=6.2831853, DEG_PER_METRE=55.0, MAX_LEAN_DEGREES=90.0, DEG_TO_RAD=0.01745329; // TRAIL DEFORM: MAX_LEAN_DEGREES lifted 80→90
 
@@ -527,7 +734,14 @@ Shader "WorldPainter/IndirectGrass"
                 return b.posWS+mul(rot,float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
             }
 
-            struct SV { float4 positionCS : SV_POSITION; };
+            // Phase 3: extend SV with uv when _ALPHACLIP_SHADOWS is active (alpha-clip in frag).
+            struct SV
+            {
+                float4 positionCS : SV_POSITION;
+                #if defined(_ALPHACLIP_SHADOWS)
+                float2 uv : TEXCOORD0;
+                #endif
+            };
 
             SV shadowVert(float4 posOS : POSITION, float3 nrmOS : NORMAL, float2 uv : TEXCOORD0, uint iid : SV_InstanceID)
             {
@@ -544,6 +758,9 @@ Shader "WorldPainter/IndirectGrass"
                 #else
                     float3 ld=_LightDirection;
                 #endif
+                // Phase 3: apply per-layer shadow bias offsets (0 = no-op; default is unchanged caster).
+                posWS += ld * _ShadowDepthBias;
+                posWS += nWS * _ShadowNormalBias;
                 float4 clip=TransformWorldToHClip(ApplyShadowBias(posWS,nWS,ld));
                 #if UNITY_REVERSED_Z
                     clip.z=min(clip.z,UNITY_NEAR_CLIP_VALUE);
@@ -551,9 +768,24 @@ Shader "WorldPainter/IndirectGrass"
                     clip.z=max(clip.z,UNITY_NEAR_CLIP_VALUE);
                 #endif
                 o.positionCS=clip;
+                #if defined(_ALPHACLIP_SHADOWS)
+                o.uv = uv;
+                #endif
                 return o;
             }
-            half4 shadowFrag(SV i):SV_Target{return 0;}
+
+            // Phase 3: _ALPHACLIP_SHADOWS clips the shadow caster by base-map alpha.
+            // OFF path returns 0 immediately — byte-identical to the Phase 2 ShadowCaster.
+            TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+            float4 _BaseMap_ST;
+            half4 shadowFrag(SV i):SV_Target
+            {
+                #if defined(_ALPHACLIP_SHADOWS)
+                    half alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, i.uv).a;
+                    clip(alpha - _Cutoff);
+                #endif
+                return 0;
+            }
             ENDHLSL
         }
 

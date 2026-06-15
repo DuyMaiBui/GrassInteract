@@ -3,21 +3,14 @@
 namespace WorldPainter
 {
     /// <summary>
-    /// Named constants for the Phase 4 heightfield collider streaming system.
-    /// All ring / cap / cook-budget values live here — NO inline literals.
+    /// Named constants for the heightfield collider streaming system.
+    ///
+    /// Collider RANGE is no longer a fixed ring radius — it derives from a WorldPainter LOD band
+    /// (see <see cref="TerrainColliderStreamer"/> + <see cref="TerrainColliderRing"/>). Heightfield
+    /// RESOLUTION is a per-component setting on the streamer. Only the cook-budget constant lives here.
     /// </summary>
     public static class TerrainColliderConfig
     {
-        // ── Collider ring ─────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Chebyshev half-radius (in tile units) for the near-tile collider ring.
-        /// Must be ≤ <see cref="TerrainStreamingConfig.RING_RADIUS"/> so colliders only cover
-        /// resident tiles.
-        /// COLLIDER_RING_RADIUS=1 → 3×3 = 9 tiles with active colliders around the camera.
-        /// </summary>
-        public const int COLLIDER_RING_RADIUS = 1;
-
         // ── Cook amortisation ─────────────────────────────────────────────────
 
         /// <summary>
@@ -26,15 +19,5 @@ namespace WorldPainter
         /// crosses a tile boundary and multiple colliders need building at once.
         /// </summary>
         public const int MAX_COOKS_PER_FRAME = 1;
-
-        // ── Heightfield resolution ────────────────────────────────────────────
-
-        /// <summary>
-        /// Heightfield resolution per tile edge fed to <c>TerrainData</c>.
-        /// Lower than R16 source resolution to reduce cook time and memory.
-        /// Must be (2^n + 1) for Unity's HeightmapResolution constraint.
-        /// 65 = 2^6 + 1; covers 256 m / 64 cells = 4 m/cell resolution.
-        /// </summary>
-        public const int HEIGHTFIELD_RES = 65;
     }
 }
