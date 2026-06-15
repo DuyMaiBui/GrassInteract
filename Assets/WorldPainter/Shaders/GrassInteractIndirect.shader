@@ -368,16 +368,15 @@ Shader "WorldPainter/IndirectGrass"
                 if (_Flatten > 0.0 && _BendStrength > 1e-5)
                     scaleY = scaleXZ * (1.0 - _Flatten * saturate(bendMag / _BendStrength));
 
-                // Accumulated horizontal lean in metres (wind + interactor + trail). We no longer
-                // rotate the whole blade by this — instead it becomes a per-vertex sweep capped at
-                // MAX_LEAN_METRES (the rotation-era clamp converted back through DEG_PER_METRE so
-                // existing _WindStrength / _BendStrength values produce roughly the same tip
-                // amplitude as the old rigid-rotation path).
+                // Accumulated horizontal lean in metres (wind + interactor + trail). The raw
+                // accumulation can be far larger than the blade is tall (a strong interactor at
+                // fall=1 contributes _BendStrength metres in ONE call), so we convert via the
+                // original DEG_PER_METRE / sin() curve: lean_metres → equivalent rotation angle
+                // → sin(angle) gives the tip's REACH as a fraction of the blade length. Tip
+                // displacement therefore caps at scaleY (blade height) no matter how strong the
+                // interactor is — same physical envelope as the pre-refactor rigid-rotation path.
                 float2 lean    = windXZ + bendXZ;
                 float  leanMag = length(lean);
-                const float MAX_LEAN_METRES = MAX_LEAN_DEGREES / DEG_PER_METRE;
-                if (leanMag > MAX_LEAN_METRES)
-                    lean *= (MAX_LEAN_METRES / leanMag);
 
                 // Billboard: override yaw to face camera (LOD2 only).
                 if (billboard)
@@ -387,21 +386,39 @@ Shader "WorldPainter/IndirectGrass"
                 }
 
                 // baseRot = oriented (align*Euler(p,y,r)*offset) or legacy (yaw+offset). Only
-                // handles orientation (yaw / surface alignment / authored offset); the WIND/
-                // INTERACTOR LEAN is applied per-vertex below so the base of the blade stays put
-                // and only the upper portion sweeps in the wind.
+                // handles orientation (yaw / surface alignment / authored offset). The wind /
+                // interactor LEAN is applied per-vertex below via a Rodrigues rotation around
+                // a horizontal axis, so the blade FLEXES — base stays planted, tip arcs —
+                // WITHOUT changing the spacing between rows of vertices (a horizontal shear
+                // would have stretched the blade by ~√2× at 90° lean).
                 float3x3 baseRot = GRASS_BaseRotation(b, yawDeg);
                 float3 scaled    = float3(localPos.x * scaleXZ, localPos.y * scaleY, localPos.z * scaleXZ);
                 float3 baseVert  = mul(baseRot, scaled);
 
-                // Per-vertex bend: horizontal world-XZ offset proportional to vertex height. The
-                // tip (bendT=1) reaches `lean * scaleY` metres, matching the original rigid-rotation
-                // tip amplitude; the base (bendT=0) stays at b.posWS. Use bendT² for a softer
-                // arc (tip moves more, base/midshaft stay closer to vertical) — visually closer
-                // to a real grass blade than a linear shear.
-                float bendShape  = bendT * bendT;
-                float3 bendOffset = float3(lean.x, 0.0, lean.y) * (bendShape * scaleY);
-                return b.posWS + baseVert + bendOffset;
+                // Convert lean magnitude → equivalent rotation angle (clamp angle, NOT the lean
+                // vector — `sin` saturates so a strong interactor can't push the tip past the
+                // blade length). Direction is the unit lean vector for the rotation axis.
+                float leanAngDeg = min(leanMag * DEG_PER_METRE, MAX_LEAN_DEGREES);
+                float maxAngRad  = leanAngDeg * DEG_TO_RAD;
+                float2 leanDir   = (leanMag > 1e-4) ? lean / leanMag : float2(0, 0);
+
+                // Per-vertex bend angle — bendT² gives a soft cantilever curve where the upper
+                // half does most of the bending while the lower half stays near vertical. At
+                // bendT=0 (base row) the angle is 0 → no displacement, blade stays planted.
+                float vertAng = maxAngRad * bendT * bendT;
+                float c       = cos(vertAng);
+                float s       = sin(vertAng);
+
+                // Rodrigues rotation about the horizontal axis perpendicular to leanDir.
+                //   axis = (leanDir.y, 0, -leanDir.x)  → unit, horizontal, ⊥ to leanDir in XZ.
+                // Rotating the upright baseVert around this axis PRESERVES |baseVert|, so the
+                // distance from blade base to every vertex stays constant while the column curls
+                // toward leanDir. No stretching, no oversized top↔bottom gap.
+                float3 axis    = float3(leanDir.y, 0.0, -leanDir.x);
+                float3 crossAV = cross(axis, baseVert);
+                float  dotAV   = dot(axis, baseVert);
+                float3 bentVert = baseVert * c + crossAV * s + axis * (dotAV * (1.0 - c));
+                return b.posWS + bentVert;
             }
 
             struct Varyings
@@ -748,18 +765,22 @@ Shader "WorldPainter/IndirectGrass"
                 // TRAIL DEFORM END
                 float bm=length(bx);
                 if(_Flatten>0&&_BendStrength>1e-5) sy2=sxz*(1-_Flatten*saturate(bm/_BendStrength));
-                // Clamp lean magnitude to the rotation-era cap so existing wind/bend settings
-                // produce equivalent tip amplitude on the new per-vertex path.
-                float2 ln=wt+bx; float lm=length(ln);
-                const float MAX_LEAN_METRES_S = MAX_LEAN_DEGREES / DEG_PER_METRE;
-                if (lm > MAX_LEAN_METRES_S) ln *= (MAX_LEAN_METRES_S / lm);
+                // Per-vertex Rodrigues rotation — see forward pass for rationale. Preserves blade
+                // length while flexing, so the shadow silhouette doesn't grow in the wind.
+                float2 ln = wt+bx; float lm = length(ln);
+                float lnAng = min(lm * DEG_PER_METRE, MAX_LEAN_DEGREES);
+                float maxAng = lnAng * DEG_TO_RAD;
+                float2 lnDir = (lm > 1e-4) ? ln / lm : float2(0,0);
                 if(bb){float2 tc=_CamPosWS.xz-b.posWS.xz;yaw=atan2(tc.x,tc.y)*(180/3.14159265);}
-                // Orientation only — bend is added per-vertex below (tip moves, base sits still).
                 float3x3 baseRot=GS_BaseRot(b,yaw);
                 float3 baseVert=mul(baseRot, float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
-                float bendShape=bendT*bendT;
-                float3 bendOffset=float3(ln.x,0.0,ln.y) * (bendShape * sy2);
-                return b.posWS + baseVert + bendOffset;
+                float vertAng = maxAng * bendT * bendT;
+                float cV = cos(vertAng), sV = sin(vertAng);
+                float3 axis = float3(lnDir.y, 0.0, -lnDir.x);
+                float3 crossAV = cross(axis, baseVert);
+                float dotAV = dot(axis, baseVert);
+                float3 bentVert = baseVert * cV + crossAV * sV + axis * (dotAV * (1.0 - cV));
+                return b.posWS + bentVert;
             }
 
             // Phase 3: extend SV with uv when _ALPHACLIP_SHADOWS is active (alpha-clip in frag).
@@ -946,15 +967,21 @@ Shader "WorldPainter/IndirectGrass"
                 // TRAIL DEFORM END
                 float bm=length(bx);
                 if(_Flatten>0&&_BendStrength>1e-5) sy2=sxz*(1-_Flatten*saturate(bm/_BendStrength));
-                float2 ln=wt+bx; float lm=length(ln);
-                const float MAX_LEAN_METRES_D = MAX_LEAN_DEGREES / DEG_PER_METRE;
-                if (lm > MAX_LEAN_METRES_D) ln *= (MAX_LEAN_METRES_D / lm);
+                // Per-vertex Rodrigues rotation — see forward pass for rationale.
+                float2 ln = wt+bx; float lm = length(ln);
+                float lnAng = min(lm * DEG_PER_METRE, MAX_LEAN_DEGREES);
+                float maxAng = lnAng * DEG_TO_RAD;
+                float2 lnDir = (lm > 1e-4) ? ln / lm : float2(0,0);
                 if(bb){float2 tc=_CamPosWS.xz-b.posWS.xz;yaw=atan2(tc.x,tc.y)*(180/3.14159265);}
                 float3x3 baseRot=GD_BaseRot(b,yaw);
                 float3 baseVert=mul(baseRot, float3(lp.x*sxz,lp.y*sy2,lp.z*sxz));
-                float bendShape=bendT*bendT;
-                float3 bendOffset=float3(ln.x,0.0,ln.y) * (bendShape * sy2);
-                return b.posWS + baseVert + bendOffset;
+                float vertAng = maxAng * bendT * bendT;
+                float cV = cos(vertAng), sV = sin(vertAng);
+                float3 axis = float3(lnDir.y, 0.0, -lnDir.x);
+                float3 crossAV = cross(axis, baseVert);
+                float dotAV = dot(axis, baseVert);
+                float3 bentVert = baseVert * cV + crossAV * sV + axis * (dotAV * (1.0 - cV));
+                return b.posWS + bentVert;
             }
 
             struct DV
