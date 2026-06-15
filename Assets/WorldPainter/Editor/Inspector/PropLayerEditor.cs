@@ -82,10 +82,14 @@ namespace WorldPainter.Editor
             this.previewUtil?.Cleanup();
             this.previewUtil = null;
 
-            if (lineAxisMesh != null) { Object.DestroyImmediate(lineAxisMesh); lineAxisMesh = null; }
+            // Instance-owned axis meshes (per-inspector, never static) — see DrawAxisLine.
+            if (this.axisMeshX != null) { Object.DestroyImmediate(this.axisMeshX); this.axisMeshX = null; }
+            if (this.axisMeshY != null) { Object.DestroyImmediate(this.axisMeshY); this.axisMeshY = null; }
+            if (this.axisMeshZ != null) { Object.DestroyImmediate(this.axisMeshZ); this.axisMeshZ = null; }
             if (this.lineMaterialRed   != null) { Object.DestroyImmediate(this.lineMaterialRed);   this.lineMaterialRed   = null; }
             if (this.lineMaterialGreen != null) { Object.DestroyImmediate(this.lineMaterialGreen); this.lineMaterialGreen = null; }
             if (this.lineMaterialBlue  != null) { Object.DestroyImmediate(this.lineMaterialBlue);  this.lineMaterialBlue  = null; }
+            if (this.fallbackMaterial  != null) { Object.DestroyImmediate(this.fallbackMaterial);  this.fallbackMaterial  = null; }
         }
 
         public override void OnInspectorGUI()
@@ -267,10 +271,32 @@ namespace WorldPainter.Editor
             cam.transform.position = rotation * new Vector3(0f, 0f, -this.previewDistance);
             cam.transform.rotation = rotation;
 
-            // Draw mesh if available
+            // Lights — PreviewRenderUtility's default lights are off; without this an URP/Lit
+            // mesh renders near-black and looks like nothing is being drawn. Two-light key+fill
+            // is the standard preview setup.
+            if (this.previewUtil.lights != null && this.previewUtil.lights.Length > 0 && this.previewUtil.lights[0] != null)
+            {
+                this.previewUtil.lights[0].intensity         = 1.4f;
+                this.previewUtil.lights[0].transform.rotation = Quaternion.Euler(30f, 30f, 0f);
+                if (this.previewUtil.lights.Length > 1 && this.previewUtil.lights[1] != null)
+                {
+                    this.previewUtil.lights[1].intensity         = 0.8f;
+                    this.previewUtil.lights[1].transform.rotation = Quaternion.Euler(60f, -160f, 0f);
+                }
+            }
+            this.previewUtil.ambientColor = new Color(0.5f, 0.5f, 0.5f, 1f);
+
+            // Draw mesh — ALWAYS use the inspector preview material (stock URP Lit), regardless
+            // of layer.Render.Material. The layer material typically uses WorldPainter/ScatterInstanced
+            // (or similar) which reads procedural-instancing StructuredBuffers (_Instances,
+            // _VisibleIndices, _Interactors, _InstanceTilt) that only exist while the GPU engine
+            // is running. PreviewRenderUtility.DrawMesh doesn't bind any of them, so on Metal
+            // the draw is silently skipped and the mesh disappears. Using a stock Lit material —
+            // with _BaseMap and _BaseColor copied from the layer material so the user still sees
+            // their texture and tint — sidesteps the buffer dependency entirely.
             if (mesh != null)
             {
-                var mat = layer.Render.Material;
+                var mat = this.GetOrCreatePreviewMaterial(layer.Render.Material);
                 if (mat != null)
                     this.previewUtil.DrawMesh(mesh, Matrix4x4.identity, mat, 0);
             }
@@ -296,36 +322,74 @@ namespace WorldPainter.Editor
         {
             if (this.previewUtil == null) return;
 
-            // We cannot use Handles inside PreviewRenderUtility easily, so we draw
-            // thin axis lines by rendering a small GL immediate-mode pass.
-            // Use GL.Begin inside BeginPreview/camera.Render block — not supported externally.
-            // Instead draw via previewUtil.DrawMesh with a Line primitive workaround:
-            // Simplest approach: create a temporary 1-pixel line mesh for each axis.
-
-            this.DrawAxisLineMesh(pos, pos + new Vector3(AXIS_LENGTH, 0f, 0f), Color.red);
-            this.DrawAxisLineMesh(pos, pos + new Vector3(0f, AXIS_LENGTH, 0f), Color.green);
-            this.DrawAxisLineMesh(pos, pos + new Vector3(0f, 0f, AXIS_LENGTH), Color.blue);
+            // Three separate meshes — one per axis — so each previewUtil.DrawMesh queues a
+            // distinct mesh reference. A single shared/static mesh mutated three times
+            // collapses to whichever axis was set LAST (camera.Render plays the queued
+            // material draws against the mesh's current state, not a snapshot), so only
+            // one line ended up rendering — that's why the anchor crosshair "didn't work".
+            this.DrawAxisLine(ref this.axisMeshX, pos, pos + new Vector3(AXIS_LENGTH, 0f, 0f), Color.red);
+            this.DrawAxisLine(ref this.axisMeshY, pos, pos + new Vector3(0f, AXIS_LENGTH, 0f), Color.green);
+            this.DrawAxisLine(ref this.axisMeshZ, pos, pos + new Vector3(0f, 0f, AXIS_LENGTH), Color.blue);
         }
 
-        static Mesh? lineAxisMesh;
+        Mesh? axisMeshX;
+        Mesh? axisMeshY;
+        Mesh? axisMeshZ;
 
-        void DrawAxisLineMesh(Vector3 from, Vector3 to, Color color)
+        void DrawAxisLine(ref Mesh? mesh, Vector3 from, Vector3 to, Color color)
         {
-            if (lineAxisMesh == null)
-            {
-                lineAxisMesh = new Mesh { hideFlags = HideFlags.HideAndDontSave };
-            }
-            lineAxisMesh.SetVertices(new[] { from, to });
-            lineAxisMesh.SetIndices(new[] { 0, 1 }, MeshTopology.Lines, 0);
+            if (mesh == null)
+                mesh = new Mesh { hideFlags = HideFlags.HideAndDontSave };
+            mesh.SetVertices(new[] { from, to });
+            mesh.SetIndices(new[] { 0, 1 }, MeshTopology.Lines, 0);
 
             var mat = this.GetOrCreateLineMaterial(color);
             if (mat != null)
-                this.previewUtil!.DrawMesh(lineAxisMesh, Matrix4x4.identity, mat, 0);
+                this.previewUtil!.DrawMesh(mesh, Matrix4x4.identity, mat, 0);
         }
 
         Material? lineMaterialRed;
         Material? lineMaterialGreen;
         Material? lineMaterialBlue;
+        Material? fallbackMaterial;
+
+        // Inspector preview material — stock URP Lit (or Standard / Internal-Colored as a
+        // last resort) so the mesh renders WITHOUT needing the GPU engine's StructuredBuffers
+        // bound. When the layer has its own material assigned we copy across just the visible
+        // style (_BaseMap + tint) so the preview matches the user's artistic intent without
+        // inheriting the procedural-instancing shader requirements.
+        Material? GetOrCreatePreviewMaterial(Material? layerMat)
+        {
+            if (this.fallbackMaterial == null)
+            {
+                var shader = Shader.Find("Universal Render Pipeline/Lit")
+                          ?? Shader.Find("Standard")
+                          ?? Shader.Find("Hidden/Internal-Colored");
+                if (shader == null) return null;
+                this.fallbackMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+
+            // Default neutral tint when no layer material — gray so the mesh shape reads cleanly.
+            Color tint    = new Color(0.65f, 0.65f, 0.65f, 1f);
+            Texture? tex  = null;
+            if (layerMat != null)
+            {
+                if (layerMat.HasProperty("_BaseColor")) tint = layerMat.GetColor("_BaseColor");
+                if (layerMat.HasProperty("_BaseMap"))   tex  = layerMat.GetTexture("_BaseMap");
+            }
+
+            if (this.fallbackMaterial.HasProperty("_BaseColor"))
+                this.fallbackMaterial.SetColor("_BaseColor", tint);
+            this.fallbackMaterial.color = tint;
+            if (this.fallbackMaterial.HasProperty("_BaseMap"))
+                this.fallbackMaterial.SetTexture("_BaseMap", tex);
+            // Standard/Internal-Colored expose the legacy "_MainTex" name — set both so whichever
+            // the chosen shader actually samples gets the texture.
+            if (this.fallbackMaterial.HasProperty("_MainTex"))
+                this.fallbackMaterial.SetTexture("_MainTex", tex);
+
+            return this.fallbackMaterial;
+        }
 
         Material? GetOrCreateLineMaterial(Color color)
         {
