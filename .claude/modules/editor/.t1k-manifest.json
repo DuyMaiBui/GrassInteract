@@ -1,9 +1,9 @@
 {
   "module": "editor",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-15T10:01:44.904Z",
+  "generatedAt": "2026-06-16T13:13:24.474Z",
   "files": {
     "skills": [
       "t1k-unity-editor-balance/SKILL.md",
@@ -41,5 +41,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:97e13e4af83a913b582c5862b33ebc89a7683de92209b107cf51d999ab23b5bc"
+  "checksum": "sha256:11884daf17fcf85fe948e65b248dd0b7dd152852e1a4ad298599c34a9624dc4c"
 }

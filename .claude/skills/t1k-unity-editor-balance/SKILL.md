@@ -4,7 +4,7 @@ description: "Balance review — stat formulas, DPS curves, difficulty scaling, 
 effort: low
 argument-hint: "[area] [--audit|--compare|--report]"
 keywords: [balance, game balance, tuning, design]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

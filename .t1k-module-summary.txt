@@ -1,3 +1,3 @@
 designer|modules-20260603-1150|none|
-unity|modules-20260611-0434|none|base,animation,audio,editor,ui
-core|modules-20260612-0703|none|t1k-base,t1k-extended
+unity|modules-20260616-1313|none|base,animation,audio,editor,ui
+core|modules-20260615-0919|none|t1k-base,t1k-extended

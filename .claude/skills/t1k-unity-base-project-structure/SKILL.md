@@ -4,7 +4,7 @@ description: TheOne Unity Assets/ folder layout — 3-layer structure, _Game/<Ga
 effort: medium
 context: fork
 keywords: [project structure, folder structure, _Game, asset placement, where to put, scaffold, file layout, assets folder, scripts folder]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

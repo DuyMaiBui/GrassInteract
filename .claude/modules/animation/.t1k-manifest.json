@@ -1,9 +1,9 @@
 {
   "module": "animation",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-15T10:01:44.764Z",
+  "generatedAt": "2026-06-16T13:13:24.364Z",
   "files": {
     "skills": [
       "t1k-unity-animation-core/SKILL.md",
@@ -23,5 +23,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:0420629f68a5b08b1d4df02193178aceaa9b226029a6c416e1ec848221be8730"
+  "checksum": "sha256:681964d774702828ede04c45ac503cf9b70b5dfd72d8e97786d59e6a785a0dc5"
 }

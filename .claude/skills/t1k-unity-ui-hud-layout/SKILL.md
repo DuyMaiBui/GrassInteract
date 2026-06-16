@@ -3,7 +3,7 @@ name: t1k:unity:ui:hud-layout
 description: Unity HUD layout discipline — zone-based design, LayoutGroup recipes per zone, modal vs HUD canvas separation, FloatingLayer/OverlayLayer patterns, anti-pattern catalog. Use when designing or refactoring runtime game HUDs (>3 widgets in a single RectTransform).
 effort: medium
 keywords: [HUD layout, screen overlap, widget anchor, RectTransform stack, zone, LayoutGroup, FloatingLayer, OverlayLayer, HUD zoning, widget overlap]
-version: 2.5.0
+version: 2.6.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui

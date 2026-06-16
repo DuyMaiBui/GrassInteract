@@ -4,7 +4,7 @@ description: "Compare CK updates against GameKit baseline, suggest which changes
 effort: low
 argument-hint: "[--check|--apply|--update-baseline]"
 keywords: [sync, synchronization, collaboration]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

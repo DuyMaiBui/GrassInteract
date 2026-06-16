@@ -4,7 +4,7 @@ description: DOTS RPG grid inventory, item passive effects, and set bonuses — 
 effort: high
 context: fork
 keywords: [inventory, grid, DOTS, UI]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

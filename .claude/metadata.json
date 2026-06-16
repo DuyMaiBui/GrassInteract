@@ -420,7 +420,7 @@
       ]
     },
     "unity": {
-      "version": "modules-20260615-1001",
+      "version": "modules-20260616-1313",
       "installedAt": "2026-06-09T07:07:01.429Z",
       "files": [
         {
@@ -4507,31 +4507,31 @@
   "schemaVersion": 3,
   "installedModules": {
     "base": {
-      "version": "2.4.0",
+      "version": "2.5.0",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "animation": {
-      "version": "2.4.0",
+      "version": "2.5.0",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "audio": {
-      "version": "2.3.0",
+      "version": "2.4.0",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "editor": {
-      "version": "2.3.0",
+      "version": "2.4.0",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "ui": {
-      "version": "2.5.0",
+      "version": "2.6.0",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"

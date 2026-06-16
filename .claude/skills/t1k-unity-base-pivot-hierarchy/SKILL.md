@@ -3,7 +3,7 @@ name: t1k:unity:base:pivot-hierarchy
 description: "Unity GameObject pivot control — visual pivot offset, rotation pivots, orbit systems, weapon sockets, detachable parts, scale isolation, DOTS hierarchy baking"
 effort: medium
 keywords: [pivot, hierarchy, transform, unity]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

@@ -4,7 +4,7 @@ description: Orchestrate Unity Editor via MCP tools — GameObjects, scripts, sc
 effort: high
 context: fork
 keywords: [MCP, unity MCP, tool, bridge]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

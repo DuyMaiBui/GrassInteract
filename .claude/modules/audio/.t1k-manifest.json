@@ -1,9 +1,9 @@
 {
   "module": "audio",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-15T10:01:44.788Z",
+  "generatedAt": "2026-06-16T13:13:24.377Z",
   "files": {
     "skills": [
       "t1k-unity-audio-core/SKILL.md",
@@ -16,5 +16,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:517ddcae7d7f9a2e1c2605152573ffc5caf640c69d012fe50b6f2044abe30ec0"
+  "checksum": "sha256:f4fcc67aff85a47ab4b7b8bea44bae1aadee328a56dd124abc61c9ea3ec86853"
 }

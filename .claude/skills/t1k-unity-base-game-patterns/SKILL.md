@@ -3,7 +3,7 @@ name: t1k:unity:base:game-patterns
 description: Unity MonoBehaviour game patterns — object pooling, state machines, command pattern, ScriptableObjects, save systems, scene management, input handling.
 effort: medium
 keywords: [game patterns, design patterns, architecture, unity]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

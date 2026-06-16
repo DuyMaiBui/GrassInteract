@@ -25,7 +25,7 @@ triggers:
   - InvokeRepeating
   - WaitForSeconds
 keywords: [MonoBehaviour, component, unity, lifecycle]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base

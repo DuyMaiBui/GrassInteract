@@ -4,7 +4,7 @@ description: LitMotion zero-alloc tween library for Unity — LMotion.Create, Bi
 effort: high
 context: fork
 keywords: [litmotion, tween, animation, zero-allocation]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: animation
@@ -12,6 +12,24 @@ protected: false
 ---
 
 # LitMotion — Lightning-Fast Tween Library
+
+## Policy — LitMotion over DOTween
+
+**DOTween is BANNED. LitMotion is the ONLY approved tweening library.** Do NOT add `using DG.Tweening;` or `.DO*()` calls. Migrate existing DOTween calls when touching a file. Why: LitMotion is zero-alloc, Burst+Jobs internally, MIT-licensed; DOTween allocates ~200B/tween and is a paid legacy plugin (`Assets/Plugins/Demigiant/`).
+
+| DOTween (banned) | LitMotion equivalent |
+|---|---|
+| `transform.DOMove(to, dur)` | `LMotion.Create(transform.position, to, dur).BindToPosition(transform)` |
+| `transform.DOScale(to, dur)` | `LMotion.Create(transform.localScale, to, dur).BindToLocalScale(transform)` |
+| `canvasGroup.DOFade(to, dur)` | `LMotion.Create(cg.alpha, to, dur).BindToAlpha(canvasGroup)` |
+| `image.DOColor(to, dur)` | `LMotion.Create(img.color, to, dur).BindToColor(image)` |
+| `DOTween.To(() => v, x => v=x, to, dur)` | `LMotion.Create(from, to, dur).Bind(x => v = x)` |
+| `DOTween.Sequence()` | `LSequence.Create().Append(...).Join(...).Run()` |
+| `.SetEase(e)` / `.SetDelay(t)` / `.Kill()` | `.WithEase(e)` / `.WithDelay(t)` / `handle.Cancel()` |
+
+Full migration: [`references/dotween-migration-guide.md`](references/dotween-migration-guide.md)
+
+---
 
 ## Skill Purpose
 

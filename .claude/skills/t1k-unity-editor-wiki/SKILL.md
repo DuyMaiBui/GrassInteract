@@ -4,7 +4,7 @@ description: "Wiki page management — create, update, audit game design wiki pa
 effort: low
 argument-hint: "[demo-name] [--create|--update|--audit]"
 keywords: [wiki, documentation, knowledge base]
-version: 2.3.0
+version: 2.4.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor
