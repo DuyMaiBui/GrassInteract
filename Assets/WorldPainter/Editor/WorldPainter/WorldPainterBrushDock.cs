@@ -26,6 +26,14 @@ namespace WorldPainter.Editor
         private VisualElement? toolPaletteRoot;
         private VisualElement? brushSettingsContainer;
 
+        // Set Height row — shown only when the Height layer is active (Raise/Lower target).
+        private VisualElement? setHeightRow;
+
+        // Brush-mask gallery (thumbnails from the project's Brushes folder) + the drag/drop field.
+        private const string BRUSH_FOLDER = "Assets/WorldPainter/Editor/Resources/Brushes";
+        private VisualElement? brushGalleryRoot;
+        private ObjectField?   brushMaskField;
+
         // ── Preset slot labels ────────────────────────────────────────────────
 
         private Label[] presetLabels = new Label[WorldPainterPresetSlots.SLOT_COUNT];
@@ -61,32 +69,48 @@ namespace WorldPainter.Editor
             // Contextual tool palette (tools for the active layer kind)
             dock.Add(this.BuildToolPalette());
 
-            // Brush size / falloff / spacing / flow are bundled — hidden for prop layers
-            // because Place / Single / Select / Erase don't use a brush footprint (they
-            // operate at the cursor). Showing them then would be confusing UX.
+            // Brush size / strength / set-height / falloff / mask are bundled — hidden for prop
+            // layers because Place / Single / Select / Erase don't use a brush footprint (they
+            // operate at the cursor). Spacing + Flow were removed: Flow was a no-op for sculpting
+            // and Spacing now uses a fixed internal default (strokes stay speed-independent).
             this.brushSettingsContainer = new VisualElement();
             this.brushSettingsContainer.Add(this.BuildSlider("Size (m)", 0.5f, 256f,
                 () => brush.size, v => brush.size = v));
             this.brushSettingsContainer.Add(this.BuildSlider("Strength", 0f, 1f,
                 () => brush.strength, v => brush.strength = v));
+
+            // Set Height (Raise/Lower target). Only meaningful for the Height layer — its row is
+            // shown/hidden by RefreshBrushSettingsVisibility. Raise rises toward it (ceiling),
+            // Lower drops toward it (floor).
+            this.setHeightRow = this.BuildSlider("Set Height (m)", -20f, 20f,
+                () => brush.setHeight, v => brush.setHeight = v);
+            this.brushSettingsContainer.Add(this.setHeightRow);
+
             this.brushSettingsContainer.Add(this.BuildCurveField(brush));
+
+            // Brush mask: a clickable thumbnail gallery from the project's Brushes folder plus a
+            // drag/drop field for importing custom masks (no longer drag/drop-only).
+            this.brushSettingsContainer.Add(this.BuildBrushGallery());
             this.brushSettingsContainer.Add(this.BuildBrushMaskField());
-            this.brushSettingsContainer.Add(this.BuildSlider("Spacing (m)", 0.1f, 64f,
-                () => brush.spacing, v => brush.spacing = v));
-            this.brushSettingsContainer.Add(this.BuildSlider("Flow", 0f, 1f,
-                () => brush.flow, v => brush.flow = v));
             dock.Add(this.brushSettingsContainer);
 
             // P6: preset slots bar
             dock.Add(this.BuildPresetBar());
 
-            // Hook layer-kind changes so the brush-settings container hides for prop layers.
+            // Hook layer changes so the container hides for prop layers and the Set Height row
+            // shows only for the Height layer. Both the kind change (ActiveLayerChanged) and the
+            // stack-index change (ActiveLayerIndexChanged → Height base row) can flip the answer.
             this.RefreshBrushSettingsVisibility();
             System.Action<string, WorldPainterState.PaintLayerKind> onActive =
                 (_, __) => this.RefreshBrushSettingsVisibility();
-            WorldPainterState.ActiveLayerChanged += onActive;
+            System.Action onIndex = this.RefreshBrushSettingsVisibility;
+            WorldPainterState.ActiveLayerChanged      += onActive;
+            WorldPainterState.ActiveLayerIndexChanged += onIndex;
             dock.RegisterCallback<DetachFromPanelEvent>(_ =>
-                WorldPainterState.ActiveLayerChanged -= onActive);
+            {
+                WorldPainterState.ActiveLayerChanged      -= onActive;
+                WorldPainterState.ActiveLayerIndexChanged -= onIndex;
+            });
 
             return dock;
         }
@@ -101,6 +125,15 @@ namespace WorldPainter.Editor
             if (this.brushSettingsContainer == null) return;
             bool isProp = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
             this.brushSettingsContainer.style.display = isProp ? DisplayStyle.None : DisplayStyle.Flex;
+
+            // Set Height drives only the Height layer's Raise/Lower brushes — hide it elsewhere.
+            // EffectiveLayerType ignores its painter argument, so a null ActivePainter is safe.
+            if (this.setHeightRow != null)
+            {
+                bool isHeight = WorldPainterState.EffectiveLayerType(WorldPainterState.ActivePainter!)
+                                == LayerType.Height;
+                this.setHeightRow.style.display = isHeight ? DisplayStyle.Flex : DisplayStyle.None;
+            }
         }
 
         // ── TerrainLayer palette strip (Phase 2c) ─────────────────────────────
@@ -536,6 +569,103 @@ namespace WorldPainter.Editor
             return row;
         }
 
+        // ── Brush mask gallery (pick from the project's Brushes folder) ───────
+
+        /// <summary>
+        /// Builds the brush-mask gallery: a "None" (plain falloff) cell plus a clickable thumbnail
+        /// for every Texture2D under <see cref="BRUSH_FOLDER"/>. Clicking a cell sets the active
+        /// brush mask. Re-highlights whenever the mask changes (incl. via the drag/drop field).
+        /// </summary>
+        private VisualElement BuildBrushGallery()
+        {
+            var container = new VisualElement();
+
+            var title = new Label("BRUSH MASK");
+            title.AddToClassList("wp-section-title");
+            container.Add(title);
+
+            this.brushGalleryRoot = new VisualElement();
+            this.brushGalleryRoot.style.flexDirection = FlexDirection.Row;
+            this.brushGalleryRoot.style.flexWrap      = Wrap.Wrap;
+            this.brushGalleryRoot.style.marginBottom  = 4;
+            container.Add(this.brushGalleryRoot);
+
+            this.PopulateBrushGallery();
+
+            // Mask changes raise BrushFalloffDirty (gallery clicks and the drag/drop field both
+            // do) — repopulate so the active-cell highlight follows the current mask.
+            System.Action onMaskChanged = this.PopulateBrushGallery;
+            WorldPainterState.BrushFalloffDirty += onMaskChanged;
+            this.brushGalleryRoot.RegisterCallback<DetachFromPanelEvent>(_ =>
+                WorldPainterState.BrushFalloffDirty -= onMaskChanged);
+
+            return container;
+        }
+
+        private void PopulateBrushGallery()
+        {
+            if (this.brushGalleryRoot == null) return;
+            this.brushGalleryRoot.Clear();
+
+            var current = WorldPainterState.Brush.maskTexture;
+
+            // "None" → plain circle/square falloff (no mask).
+            this.brushGalleryRoot.Add(this.BuildBrushCell(null, current == null, "None (plain falloff)"));
+
+            if (AssetDatabase.IsValidFolder(BRUSH_FOLDER))
+            {
+                foreach (var guid in AssetDatabase.FindAssets("t:Texture2D", new[] { BRUSH_FOLDER }))
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    var    tex  = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                    if (tex != null)
+                        this.brushGalleryRoot.Add(this.BuildBrushCell(tex, tex == current, tex.name));
+                }
+            }
+        }
+
+        private VisualElement BuildBrushCell(Texture2D? tex, bool isActive, string tooltip)
+        {
+            var cell = new VisualElement();
+            cell.style.width = cell.style.height = 40;
+            cell.style.marginTop = cell.style.marginRight =
+                cell.style.marginBottom = cell.style.marginLeft = 2;
+            cell.style.borderTopWidth = cell.style.borderRightWidth =
+                cell.style.borderBottomWidth = cell.style.borderLeftWidth = 2;
+            var border = isActive
+                ? new Color(0.30f, 0.60f, 1.00f)  // active blue
+                : new Color(0.30f, 0.30f, 0.30f);
+            cell.style.borderTopColor = cell.style.borderRightColor =
+                cell.style.borderBottomColor = cell.style.borderLeftColor = new StyleColor(border);
+            cell.tooltip = tooltip;
+
+            if (tex != null)
+            {
+                var img = new Image { image = tex, scaleMode = ScaleMode.ScaleToFit };
+                img.style.flexGrow = 1;
+                cell.Add(img);
+            }
+            else
+            {
+                var lbl = new Label("○");
+                lbl.style.fontSize = 18;
+                lbl.style.unityTextAlign = TextAnchor.MiddleCenter;
+                lbl.style.flexGrow = 1;
+                cell.Add(lbl);
+            }
+
+            cell.RegisterCallback<ClickEvent>(_ => this.SelectBrushMask(tex));
+            return cell;
+        }
+
+        private void SelectBrushMask(Texture2D? tex)
+        {
+            if (tex != null) EnsureBrushMaskReadable(tex);
+            WorldPainterState.Brush.maskTexture = tex;
+            this.brushMaskField?.SetValueWithoutNotify(tex); // keep the drag/drop field in sync
+            WorldPainterState.RaiseBrushFalloffDirty();       // refresh preview + re-highlight gallery
+        }
+
         // ── Brush mask (import brush as texture) ──────────────────────────────
 
         /// <summary>
@@ -549,14 +679,15 @@ namespace WorldPainter.Editor
             var row = new VisualElement();
             row.AddToClassList("wp-field-row");
 
-            var field = new ObjectField("Brush Mask")
+            var field = new ObjectField("Import Mask")
             {
                 objectType        = typeof(Texture2D),
                 allowSceneObjects = false,
                 value             = WorldPainterState.Brush.maskTexture,
-                tooltip           = "Optional grayscale texture that shapes the brush footprint. " +
-                                    "None = circle. Black = no deposit, white = full deposit.",
+                tooltip           = "Import a custom grayscale brush mask. Or pick one from the " +
+                                    "gallery above. None = plain falloff. Black = no deposit, white = full.",
             };
+            this.brushMaskField = field;
             field.RegisterValueChangedCallback(evt =>
             {
                 var tex = evt.newValue as Texture2D;

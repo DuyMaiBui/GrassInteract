@@ -252,7 +252,8 @@ namespace WorldPainter.Editor
                 if (!suppressBrushRing)
                 {
                     var previewColor = new Color(0.3f, 0.7f, 1.0f); // WorldPainter blue
-                    TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape, s_heightFn);
+                    TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape,
+                        s_heightFn, brush.maskTexture);
                 }
                 HandleUtility.Repaint();
 

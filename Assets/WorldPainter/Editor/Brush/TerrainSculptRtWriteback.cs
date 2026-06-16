@@ -47,11 +47,23 @@ namespace WorldPainter.Editor
         private readonly Dictionary<Vector2Int, TerrainTileAsset> neighbourMap =
             new Dictionary<Vector2Int, TerrainTileAsset>();
 
-        public void RegisterNeighbours(IEnumerable<(Vector2Int coord, TerrainTileAsset tile)> tiles)
+        // Parallel coord → GPU resources map so seam sync can re-upload a neighbour's height
+        // texture after it edits the neighbour's CPU edge bytes (non-resident tiles have no
+        // entry — they aren't rendered, so no upload is needed).
+        private readonly Dictionary<Vector2Int, TerrainTileGpuResources> neighbourGpuMap =
+            new Dictionary<Vector2Int, TerrainTileGpuResources>();
+
+        public void RegisterNeighbours(
+            IEnumerable<(Vector2Int coord, TerrainTileAsset tile, TerrainTileGpuResources? gpu)> tiles)
         {
             this.neighbourMap.Clear();
-            foreach (var (coord, tile) in tiles)
+            this.neighbourGpuMap.Clear();
+            foreach (var (coord, tile, gpu) in tiles)
+            {
                 this.neighbourMap[coord] = tile;
+                if (gpu != null)
+                    this.neighbourGpuMap[coord] = gpu;
+            }
         }
 
         // ── Async ────────────────────────────────────────────────────────────
@@ -194,25 +206,40 @@ namespace WorldPainter.Editor
             var coord = sourceTile.tileCoord;
 
             var plusX = new Vector2Int(coord.x + 1, coord.y);
-            if (this.neighbourMap.TryGetValue(plusX, out var neighX) && neighX != null)
-                SyncHeightColumn(sourceTile, neighX, isRight: true);
+            if (this.neighbourMap.TryGetValue(plusX, out var neighX) && neighX != null
+                && SyncHeightColumn(sourceTile, neighX, isRight: true))
+                this.UploadNeighbour(plusX, neighX);
 
             var minusX = new Vector2Int(coord.x - 1, coord.y);
-            if (this.neighbourMap.TryGetValue(minusX, out var neighMX) && neighMX != null)
-                SyncHeightColumn(sourceTile, neighMX, isRight: false);
+            if (this.neighbourMap.TryGetValue(minusX, out var neighMX) && neighMX != null
+                && SyncHeightColumn(sourceTile, neighMX, isRight: false))
+                this.UploadNeighbour(minusX, neighMX);
 
             var plusZ = new Vector2Int(coord.x, coord.y + 1);
-            if (this.neighbourMap.TryGetValue(plusZ, out var neighZ) && neighZ != null)
-                SyncHeightRow(sourceTile, neighZ, isTop: true);
+            if (this.neighbourMap.TryGetValue(plusZ, out var neighZ) && neighZ != null
+                && SyncHeightRow(sourceTile, neighZ, isTop: true))
+                this.UploadNeighbour(plusZ, neighZ);
 
             var minusZ = new Vector2Int(coord.x, coord.y - 1);
-            if (this.neighbourMap.TryGetValue(minusZ, out var neighMZ) && neighMZ != null)
-                SyncHeightRow(sourceTile, neighMZ, isTop: false);
+            if (this.neighbourMap.TryGetValue(minusZ, out var neighMZ) && neighMZ != null
+                && SyncHeightRow(sourceTile, neighMZ, isTop: false))
+                this.UploadNeighbour(minusZ, neighMZ);
         }
 
-        private static void SyncHeightColumn(TerrainTileAsset src, TerrainTileAsset dst, bool isRight)
+        // Re-upload a neighbour tile whose shared-edge bytes were just rewritten by seam sync.
+        // Without this, the neighbour's GPU height texture keeps its own (divergent) edge and a
+        // visible crack opens at the seam — the Smooth-tool symptom, since Smooth is the only
+        // kernel whose edge value diverges between tiles (it box-averages within one tile's RT).
+        private void UploadNeighbour(Vector2Int coord, TerrainTileAsset neighbour)
         {
-            if (!src.IsHeightValid || !dst.IsHeightValid) return;
+            if (neighbour.IsHeightValid
+                && this.neighbourGpuMap.TryGetValue(coord, out var gpu) && gpu != null)
+                gpu.Upload(neighbour);
+        }
+
+        private static bool SyncHeightColumn(TerrainTileAsset src, TerrainTileAsset dst, bool isRight)
+        {
+            if (!src.IsHeightValid || !dst.IsHeightValid) return false;
 
             int srcRes = src.heightRes;
             int dstRes = dst.heightRes;
@@ -231,11 +258,12 @@ namespace WorldPainter.Editor
                 dst.heightData[dstByte]     = src.heightData[srcByte];
                 dst.heightData[dstByte + 1] = src.heightData[srcByte + 1];
             }
+            return true;
         }
 
-        private static void SyncHeightRow(TerrainTileAsset src, TerrainTileAsset dst, bool isTop)
+        private static bool SyncHeightRow(TerrainTileAsset src, TerrainTileAsset dst, bool isTop)
         {
-            if (!src.IsHeightValid || !dst.IsHeightValid) return;
+            if (!src.IsHeightValid || !dst.IsHeightValid) return false;
 
             int srcRes = src.heightRes;
             int dstRes = dst.heightRes;
@@ -254,6 +282,7 @@ namespace WorldPainter.Editor
                 dst.heightData[dstByte]     = src.heightData[srcByte];
                 dst.heightData[dstByte + 1] = src.heightData[srcByte + 1];
             }
+            return true;
         }
     }
 }

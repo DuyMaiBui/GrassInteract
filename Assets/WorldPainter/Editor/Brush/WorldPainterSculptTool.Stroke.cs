@@ -173,6 +173,17 @@ namespace WorldPainter.Editor
                 residencySet: null,
                 this.resolveResults);
 
+            // Pre-create the working RT for every overlapped tile BEFORE dispatching any of them,
+            // so the seam-aware Smooth kernel can sample a straddled neighbour's RT — which must
+            // already exist when the first tile of the stamp dispatches. GetOrCreate is idempotent;
+            // DispatchOneTile re-fetches the same RT.
+            foreach (var coord in this.resolveResults)
+            {
+                var prepGpu = this.FindGpu(painter, coord);
+                if (prepGpu != null)
+                    this.rtCache.GetOrCreate(coord, prepGpu, out _);
+            }
+
             foreach (var coord in this.resolveResults)
                 this.DispatchOneTile(painter, worldPos, coord);
         }
@@ -333,11 +344,13 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Enumerates all (coord, tile) pairs in the painter for seam-sync neighbour registration.
-        /// Covers both the map-based SSOT path (P2+) and the legacy inline-Tiles path.
+        /// Enumerates all (coord, tile, gpu) triples in the painter for seam-sync neighbour
+        /// registration. The GPU resources let seam sync re-upload a neighbour's height texture
+        /// after it rewrites the neighbour's shared edge (null for non-resident tiles, which are
+        /// not rendered). Covers both the map-based SSOT path (P2+) and the legacy inline-Tiles path.
         /// </summary>
-        private static IEnumerable<(Vector2Int coord, TerrainTileAsset tile)> EnumerateTileEntries(
-            WorldPainter painter)
+        private static IEnumerable<(Vector2Int coord, TerrainTileAsset tile, TerrainTileGpuResources? gpu)>
+            EnumerateTileEntries(WorldPainter painter)
         {
             if (painter.Map != null)
             {
@@ -345,7 +358,7 @@ namespace WorldPainter.Editor
                 {
                     var tile = painter.Map.GetTile(coord);
                     if (tile != null)
-                        yield return (coord, tile);
+                        yield return (coord, tile, painter.ResourcesForCoord(coord));
                 }
                 yield break;
             }
@@ -353,7 +366,7 @@ namespace WorldPainter.Editor
             foreach (var entry in painter.Tiles)
             {
                 if (entry.tileAsset != null)
-                    yield return (entry.coord, entry.tileAsset!);
+                    yield return (entry.coord, entry.tileAsset!, painter.ResourcesForCoord(entry.coord));
             }
         }
 

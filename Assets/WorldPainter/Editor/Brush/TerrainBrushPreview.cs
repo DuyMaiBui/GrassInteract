@@ -56,7 +56,15 @@ namespace WorldPainter.Editor
         private static Color      tintColor;
         private static BrushShape brushShape;
         private static HeightFn?  heightAt;
+        private static Texture2D? maskTexture;
         private static double     lastSetTime = -1000d;
+
+        // ── Mask-decal resources (lazily created, editor-only) ─────────────────
+
+        private const string DECAL_SHADER = "Hidden/WorldPainter/BrushDecal";
+        private const float  DECAL_ALPHA  = 0.30f;
+        private static Material? decalMat;
+        private static Mesh?     quadMesh;
 
         // ── Perimeter buffer (reused per frame to avoid per-draw alloc) ────────
 
@@ -75,6 +83,8 @@ namespace WorldPainter.Editor
             SceneView.duringSceneGui -= OnSceneGui;
             AssemblyReloadEvents.beforeAssemblyReload -= Cleanup;
             perimeter.Clear();
+            if (decalMat != null) { Object.DestroyImmediate(decalMat); decalMat = null; }
+            if (quadMesh != null) { Object.DestroyImmediate(quadMesh); quadMesh = null; }
         }
 
         // ── Public API ────────────────────────────────────────────────────────
@@ -84,13 +94,15 @@ namespace WorldPainter.Editor
         /// is hovering a surface. <paramref name="height"/> lets the ring conform to the terrain;
         /// pass null to fall back to a flat ring at the hit point.
         /// </summary>
-        internal static void Set(Vector3 worldPoint, float radius, Color tint, BrushShape shape, HeightFn? height)
+        internal static void Set(Vector3 worldPoint, float radius, Color tint, BrushShape shape,
+            HeightFn? height, Texture2D? mask = null)
         {
             hitPoint    = worldPoint;
             brushRadius = radius;
             tintColor   = tint;
             brushShape  = shape;
             heightAt    = height;
+            maskTexture = mask;
             lastSetTime = EditorApplication.timeSinceStartup;
         }
 
@@ -104,6 +116,11 @@ namespace WorldPainter.Editor
             if (!IsFinite(hitPoint) || hitPoint.sqrMagnitude > MAX_HIT_SQR ||
                 !IsFinite(brushRadius) || brushRadius <= 0f)
                 return;
+
+            // Mask decal first (under everything): shows the brush mask's SHAPE projected on the
+            // ground at the footprint. Only when a mask texture is set — plain circle/square brushes
+            // keep just the ring below.
+            DrawMaskDecal();
 
             BuildPerimeter();
             if (perimeter.Count < 3) return;
@@ -127,6 +144,60 @@ namespace WorldPainter.Editor
             Handles.DrawAAPolyLine(OUTLINE_COLOR_WIDTH, pts);
 
             sceneView.Repaint();
+        }
+
+        // ── Mask decal ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Draws the brush mask as a tinted, semi-transparent quad on the XZ plane at the brush
+        /// footprint (size = 2×radius, lifted above the surface), so the artist sees the actual
+        /// mask shape while painting. Flat (not terrain-conformed) — a footprint decal, paired with
+        /// the conformed ring below. No-op when no mask is set or the shader can't be found.
+        /// </summary>
+        private static void DrawMaskDecal()
+        {
+            if (maskTexture == null) return;
+
+            if (decalMat == null)
+            {
+                var shader = Shader.Find(DECAL_SHADER);
+                if (shader == null) return; // shader not imported → skip the decal, keep the ring
+                decalMat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+            if (quadMesh == null) quadMesh = BuildGroundQuad();
+
+            float lift = Mathf.Max(Y_OFFSET_MIN, brushRadius * Y_OFFSET_FRACTION);
+            var color  = tintColor;
+            color.a    = DECAL_ALPHA;
+
+            decalMat.SetTexture("_MainTex", maskTexture);
+            decalMat.SetColor("_Color", color);
+
+            // Square brush half-extent = radius; circle's bounding box is also 2×radius. The mask
+            // texture fills the footprint either way.
+            var matrix = Matrix4x4.TRS(
+                new Vector3(hitPoint.x, hitPoint.y + lift, hitPoint.z),
+                Quaternion.identity,
+                new Vector3(brushRadius * 2f, 1f, brushRadius * 2f));
+
+            if (decalMat.SetPass(0))
+                Graphics.DrawMeshNow(quadMesh, matrix);
+        }
+
+        /// <summary>Unit quad (1×1) centred on origin, lying flat on the XZ plane, UVs 0..1.</summary>
+        private static Mesh BuildGroundQuad()
+        {
+            var mesh = new Mesh { name = "WorldPainterBrushDecalQuad", hideFlags = HideFlags.HideAndDontSave };
+            mesh.vertices = new[]
+            {
+                new Vector3(-0.5f, 0f, -0.5f),
+                new Vector3( 0.5f, 0f, -0.5f),
+                new Vector3( 0.5f, 0f,  0.5f),
+                new Vector3(-0.5f, 0f,  0.5f),
+            };
+            mesh.uv        = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
+            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            return mesh;
         }
 
         // ── Perimeter construction ────────────────────────────────────────────

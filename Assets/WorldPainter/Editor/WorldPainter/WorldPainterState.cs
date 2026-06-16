@@ -358,6 +358,7 @@ namespace WorldPainter.Editor
         private const float DEFAULT_STRENGTH  = 0.4f;
         private const float DEFAULT_SPACING_M = 2f;
         private const float DEFAULT_FLOW      = 0.8f;
+        private const float DEFAULT_SET_HEIGHT = 0f;
 
         [Tooltip("Brush radius in world-space metres.")]
         [UnityEngine.Range(0.5f, 256f)]
@@ -366,6 +367,12 @@ namespace WorldPainter.Editor
         [Tooltip("Brush strength / opacity [0..1].")]
         [UnityEngine.Range(0f, 1f)]
         public float strength = DEFAULT_STRENGTH;
+
+        [Tooltip("Raise/Lower target height in world metres. Raise rises toward this height " +
+                 "(acts as a ceiling); Lower drops toward it (acts as a floor). Strength + Falloff " +
+                 "still control how fast/where; Set Height is the limit the stroke converges to.")]
+        [UnityEngine.Range(-20f, 20f)]
+        public float setHeight = DEFAULT_SET_HEIGHT;
 
         [Tooltip("Falloff curve: X=normalized distance from centre [0..1], Y=weight [0..1].")]
         public AnimationCurve falloff = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);

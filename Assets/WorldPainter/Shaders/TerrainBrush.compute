@@ -40,6 +40,11 @@ int    _UseFalloffLUT;
 /// +1 = raise, -1 = lower.
 float _RaiseSign;
 
+/// Set Height target, normalized [0,1] in this tile's [minHeight,maxHeight] range (pre-clamped
+/// on the CPU). Raise treats it as a ceiling (never pushes above it); Lower as a floor (never
+/// below it). The stroke converges toward this height instead of running away unbounded.
+float _SetHeightTarget;
+
 // ── Flatten parameters ───────────────────────────────────────────────────────
 
 /// Target normalized height for Flatten kernel.
@@ -101,13 +106,63 @@ void RaiseLower(uint3 id : SV_DispatchThreadID)
     float  weight = TexelWeight(uv);
     if (weight <= 0.0f) return;
 
-    float cur   = _HeightRT[id.xy];
-    float delta = _Strength * weight * _RaiseSign * 0.01f; // 0.01 keeps strokes gentle
-    _HeightRT[id.xy] = saturate(cur + delta);
+    float cur    = _HeightRT[id.xy];
+    float delta  = _Strength * weight * _RaiseSign * 0.01f; // 0.01 keeps strokes gentle
+    float raw    = cur + delta;
+    float target = saturate(_SetHeightTarget);
+
+    // Set Height clamp: Raise (+1) is a ceiling — only push up, never past the target, and never
+    // pull down a vertex already above it. Lower (-1) is the mirror floor. The stroke therefore
+    // converges to the target plateau instead of running away.
+    float result;
+    if (_RaiseSign > 0.0f) result = (cur < target) ? min(raw, target) : cur;
+    else                   result = (cur > target) ? max(raw, target) : cur;
+
+    _HeightRT[id.xy] = saturate(result);
 }
 
 // ── Smooth kernel ─────────────────────────────────────────────────────────────
-// Box-blurs the height RT within the brush radius (radius-3 fixed kernel).
+// Box-blurs the height RT within the brush radius (radius-3 window). Seam-aware: when a
+// neighbour tile's working texture is bound (the brush straddles that seam), samples that cross
+// the tile border read the neighbour instead of being skipped — so the shared edge is averaged
+// over the SAME neighbourhood on both tiles and the smoothed surface stays continuous across the
+// seam (no kink, no crack). Neighbour working textures share _RTRes on an aligned grid, and the
+// shared edge column/row is duplicated (tileA col _RTRes-1 == tileB col 0), so a +X overflow of d
+// maps to neighbour column d. With no neighbour bound the sample is skipped, exactly reproducing
+// the original single-tile box blur at true world borders.
+
+Texture2D<float> _NeighborPosX;  int _HasNeighborPosX;
+Texture2D<float> _NeighborNegX;  int _HasNeighborNegX;
+Texture2D<float> _NeighborPosZ;  int _HasNeighborPosZ;
+Texture2D<float> _NeighborNegZ;  int _HasNeighborNegZ;
+
+// Resolves one neighbourhood tap. Returns false (caller skips, preserving the original behaviour)
+// when the tap is outside this tile AND no neighbour is bound in that direction. Diagonal
+// (both-axis) overflow with no in-tile component is skipped — the 4-tile-corner texel, negligible.
+bool SampleNeighborhood(int2 nb, out float h)
+{
+    bool inX = (nb.x >= 0 && nb.x < _RTRes);
+    bool inY = (nb.y >= 0 && nb.y < _RTRes);
+    if (inX && inY) { h = _HeightRT[nb]; return true; }
+
+    if (!inX && inY)
+    {
+        if (nb.x >= _RTRes && _HasNeighborPosX != 0)
+        { h = _NeighborPosX.Load(int3(nb.x - (_RTRes - 1), nb.y, 0)); return true; }
+        if (nb.x < 0 && _HasNeighborNegX != 0)
+        { h = _NeighborNegX.Load(int3((_RTRes - 1) + nb.x, nb.y, 0)); return true; }
+    }
+    else if (inX && !inY)
+    {
+        if (nb.y >= _RTRes && _HasNeighborPosZ != 0)
+        { h = _NeighborPosZ.Load(int3(nb.x, nb.y - (_RTRes - 1), 0)); return true; }
+        if (nb.y < 0 && _HasNeighborNegZ != 0)
+        { h = _NeighborNegZ.Load(int3(nb.x, (_RTRes - 1) + nb.y, 0)); return true; }
+    }
+
+    h = 0.0f;
+    return false;
+}
 
 [numthreads(8, 8, 1)]
 void Smooth(uint3 id : SV_DispatchThreadID)
@@ -118,17 +173,18 @@ void Smooth(uint3 id : SV_DispatchThreadID)
     float  weight = TexelWeight(uv);
     if (weight <= 0.0f) return;
 
-    // 3x3 box average.
     float sum = 0.0f;
     float cnt = 0.0f;
     for (int dy = -3; dy <= 3; ++dy)
     {
         for (int dx = -3; dx <= 3; ++dx)
         {
-            int2 nb = int2(id.xy) + int2(dx, dy);
-            if (nb.x < 0 || nb.x >= _RTRes || nb.y < 0 || nb.y >= _RTRes) continue;
-            sum += _HeightRT[nb];
-            cnt += 1.0f;
+            float h;
+            if (SampleNeighborhood(int2(id.xy) + int2(dx, dy), h))
+            {
+                sum += h;
+                cnt += 1.0f;
+            }
         }
     }
     float avg = (cnt > 0.0f) ? (sum / cnt) : _HeightRT[id.xy];

@@ -36,7 +36,43 @@ namespace WorldPainter.Editor
             ctx.Tool.falloffLut.BindToCompute(ctx.Compute, k);
             BrushMaskBinder.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_HeightRT", ctx.HeightRT);
+
+            // Seam-aware smoothing: bind any adjacent tile's working RT so the box blur reads
+            // across the shared edge instead of clamping at the tile border. Without this each
+            // tile smooths its edge from only its own interior, so the two tiles' shared edge
+            // heights diverge → a kink/crack at the seam. Unbound directions get a placeholder +
+            // flag 0 (never sampled) so every declared texture stays bound for the dispatch.
+            var coord = ctx.Tile.tileCoord;
+            BindNeighbor(in ctx, k, "_NeighborPosX", "_HasNeighborPosX", new Vector2Int(coord.x + 1, coord.y));
+            BindNeighbor(in ctx, k, "_NeighborNegX", "_HasNeighborNegX", new Vector2Int(coord.x - 1, coord.y));
+            BindNeighbor(in ctx, k, "_NeighborPosZ", "_HasNeighborPosZ", new Vector2Int(coord.x, coord.y + 1));
+            BindNeighbor(in ctx, k, "_NeighborNegZ", "_HasNeighborNegZ", new Vector2Int(coord.x, coord.y - 1));
+
             ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
+        }
+
+        /// <summary>
+        /// Binds a neighbour tile's working height RT (same <c>BRUSH_RT_RES</c>, aligned grid) to
+        /// the Smooth kernel when that tile is part of the current stroke; otherwise binds a
+        /// placeholder and clears the flag so the kernel never reads it. The neighbour RT is
+        /// guaranteed to exist before dispatch because <c>DoStamp</c> pre-creates every overlapped
+        /// tile's RT.
+        /// </summary>
+        private static void BindNeighbor(
+            in BrushToolContext ctx, int kernel, string texProp, string flagProp, Vector2Int neighborCoord)
+        {
+            if (ctx.Tool.rtCache.TryGet(neighborCoord, out var neighborRT) && neighborRT != null)
+            {
+                ctx.Compute.SetTexture(kernel, texProp, neighborRT);
+                ctx.Compute.SetInt(flagProp, 1);
+            }
+            else
+            {
+                // Placeholder: this tile's own working RT (same format/resolution). Never sampled
+                // (flag 0) — bound only to satisfy the kernel's texture-binding requirement.
+                ctx.Compute.SetTexture(kernel, texProp, ctx.HeightRT);
+                ctx.Compute.SetInt(flagProp, 0);
+            }
         }
     }
 
@@ -78,6 +114,16 @@ namespace WorldPainter.Editor
             BrushMaskBinder.BindToCompute(ctx.Compute, k);
             ctx.Compute.SetTexture(k, "_HeightRT", ctx.HeightRT);
             ctx.Compute.SetFloat("_RaiseSign", sign);
+
+            // Set Height target: normalize the world-Y target into THIS tile's [min,max] height
+            // range so the kernel can clamp in normalized space. Raise uses it as a ceiling,
+            // Lower as a floor (the kernel branches on _RaiseSign).
+            float range  = ctx.Tile.maxHeight - ctx.Tile.minHeight;
+            float target = range > 1e-4f
+                ? Mathf.Clamp01((WorldPainterState.Brush.setHeight - ctx.Tile.minHeight) / range)
+                : 0f;
+            ctx.Compute.SetFloat("_SetHeightTarget", target);
+
             ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
         }
     }
