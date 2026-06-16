@@ -274,6 +274,15 @@ namespace WorldPainter
             this.Evict(coord);
         }
 
+        /// <summary>
+        /// Drop the live collider for <paramref name="coord"/> so the next tick re-cooks it from
+        /// the tile's current height data. Call after a sculpt writeback: the streamer otherwise
+        /// only (re)builds a collider when a tile ENTERS the ring, so an in-ring tile keeps stale
+        /// collision geometry after an edit and physics raycasts land on the pre-sculpt surface.
+        /// No-op if the tile has no live collider (it will be cooked fresh on ring entry anyway).
+        /// </summary>
+        public void InvalidateCollider(Vector2Int coord) => this.Evict(coord);
+
         /// <summary>Number of live collider handles (test / inspector helper).</summary>
         public int LiveCount => this.live.Count;
 

@@ -114,6 +114,10 @@ namespace WorldPainter.Editor
 
             if (painter != null)
             {
+                // Drop stale physics colliders for tiles whose heights actually changed this
+                // stroke. The collider streamer only re-cooks on ring entry, so without this an
+                // in-ring tile keeps pre-sculpt collision geometry (raycasts land on the old surface).
+                var colliderStreamer = painter.GetComponent<TerrainColliderStreamer>();
                 foreach (var coord in this.strokeTouchedCoords)
                 {
                     var tile = this.FindTile(painter, coord);
@@ -122,6 +126,8 @@ namespace WorldPainter.Editor
                         this.rtCache.TryGet(coord, out var hRT))
                     {
                         this.writeback.ExecuteSync(tile, gpu, hRT);
+                        if (colliderStreamer != null)
+                            colliderStreamer.InvalidateCollider(coord);
                     }
                 }
             }
@@ -216,33 +222,61 @@ namespace WorldPainter.Editor
 
         private bool TryGetBrushWorldPoint(Ray ray, WorldPainter painter, out Vector3 worldPoint)
         {
-            // Primary: a real collider (play mode, scatter prop colliders, any pickable surface).
+            // CPU-authoritative terrain hit FIRST (SSOT with the rendered mesh). The GPU terrain
+            // renders from the full-res (257) height texture via VTF, but the streamed physics
+            // collider is a low-res (65) nearest-neighbour downsample that can sit metres off the
+            // visible surface on slopes — and it is stale right after a sculpt. Sampling the SAME
+            // height the mesh renders (TerrainHeightSampleCpu) makes the brush / object placement
+            // land exactly on the visible terrain. Physics.Raycast is the fallback for non-terrain
+            // pickables (scatter prop colliders) only when the ray is not over a terrain tile.
+            // Tiles live in the WorldMapAsset (SSOT, P2+); painter.Tiles is the legacy back-compat list.
+            if (painter.Map != null && TryMapSurfaceHit(ray, painter.Map, out worldPoint))
+                return true;
+            if (TryInlineTilesSurfaceHit(ray, painter, out worldPoint))
+                return true;
+
             if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity))
             {
                 worldPoint = hit.point; return true;
             }
 
-            // Edit-mode fallback: the GPU terrain is drawn via RenderMeshIndirect and has NO
-            // collider, so Physics.Raycast never hits it. Intersect the ray with the tile
-            // surface analytically. Tiles live in the WorldMapAsset (SSOT, P2+); the inline
-            // painter.Tiles list is empty under the map path and kept only for back-compat.
-            if (painter.Map != null && TryMapSurfaceHit(ray, painter.Map, out worldPoint))
-                return true;
+            worldPoint = Vector3.zero;
+            return false;
+        }
 
+        /// <summary>
+        /// CPU-authoritative ray↔terrain-surface intersection for the legacy inline
+        /// <c>painter.Tiles</c> list (empty under the WorldMapAsset SSOT path). Same two-pass
+        /// coarse-plane → CPU height sample → re-intersect as <see cref="TryMapSurfaceHit"/>,
+        /// guarding that the coarse XZ actually falls inside the candidate tile.
+        /// </summary>
+        private static bool TryInlineTilesSurfaceHit(Ray ray, WorldPainter painter, out Vector3 worldPoint)
+        {
+            worldPoint = Vector3.zero;
             foreach (var entry in painter.Tiles)
             {
-                if (entry.tileAsset == null) continue;
-                // Use minHeight for the plane: all-zero heightData means the surface sits at
-                // minHeight. Using midY (midpoint of [minH,maxH]) places the plane above the
-                // camera when the terrain is flat at Y=0 with maxHeight=512, causing Raycast
-                // to miss entirely.
-                var plane = new Plane(Vector3.up, new Vector3(0f, entry.tileAsset.minHeight, 0f));
-                if (plane.Raycast(ray, out float dist) && dist > 0f && dist < 1e6f)
+                var tile = entry.tileAsset;
+                if (tile == null) continue;
+                // Coarse plane at minHeight (flat zero-filled tiles sit exactly here; the second
+                // pass corrects Y on sculpted tiles). midY would float above the camera on a fresh
+                // flat tile and make Plane.Raycast miss — see TryMapSurfaceHit for the rationale.
+                var coarse = new Plane(Vector3.up, new Vector3(0f, tile.minHeight, 0f));
+                if (!coarse.Raycast(ray, out float d0) || d0 <= 0f || d0 >= 1e6f) continue;
+
+                Vector3 approx = ray.GetPoint(d0);
+                if (TerrainWorldGrid.WorldToTileCoord(approx.x, approx.z) != tile.tileCoord) continue;
+
+                if (TerrainHeightSampleCpu.TrySampleWorld(tile, approx.x, approx.z, out float surfaceY))
                 {
-                    worldPoint = ray.GetPoint(dist); return true;
+                    var surface = new Plane(Vector3.up, new Vector3(0f, surfaceY, 0f));
+                    if (surface.Raycast(ray, out float d1) && d1 > 0f && d1 < 1e6f)
+                    {
+                        worldPoint = ray.GetPoint(d1); return true;
+                    }
                 }
+
+                worldPoint = approx; return true; // coarse hit when sample failed
             }
-            worldPoint = Vector3.zero;
             return false;
         }
 

@@ -121,8 +121,14 @@ Shader "WorldPainter/TerrainPatch"
                     0.0,
                     node.worldOffset.z + vtxXZ.y * node.scale);
                 float3 camPos    = _WorldSpaceCameraPos;
-                float3 delta     = vtxWorldXZ - camPos;
-                float  sqrDist   = dot(delta, delta);
+                // CDLOD crack fix: the LOD quadtree selects nodes and builds morphStart/morphEnd
+                // from XZ-ONLY distance (CdlodQuadtree.SqrDistXZ ignores camera height). The morph
+                // blend MUST use the SAME metric — otherwise vtxWorldXZ.y=0 vs camPos.y folds the
+                // camera height into sqrDist, so a finer chunk's edge is not driven to morphBlend=1
+                // at the LOD transition and a Y T-junction (crack) opens between tiles/chunks once
+                // the terrain has height variation. Use horizontal distance only.
+                float2 deltaXZ   = vtxWorldXZ.xz - camPos.xz;
+                float  sqrDist   = dot(deltaXZ, deltaXZ);
                 float  morphBlend = CalcMorphBlend(sqrDist, node.morphStart, node.morphEnd);
 
                 float2 morphedXZ = MorphVertex(vtxXZ, morphBlend);
@@ -209,6 +215,10 @@ Shader "WorldPainter/TerrainPatch"
             #pragma fragment fragShadow
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            // Height decode + CDLOD morph helpers (SSOT). Provides _HeightTex / _MinHeight /
+            // _MaxHeight / _TileOriginWS / _TileSizeM / DecodeHeight / SampleHeightVTF /
+            // MorphVertex / CalcMorphBlend — do NOT re-declare these here.
+            #include "TerrainVtf.hlsl"
 
             struct RenderNode
             {
@@ -222,28 +232,31 @@ Shader "WorldPainter/TerrainPatch"
 
             StructuredBuffer<uint>       _VisibleNodeIndices;
             StructuredBuffer<RenderNode> _NodeBuffer;
-            float _MinHeight;
-            float _MaxHeight;
-            Texture2D<float> _HeightTex;
-            SAMPLER(sampler_HeightTex);
-            float2 _TileOriginWS;   // tile world-space min corner (B1 fix)
-            float  _TileSizeM;      // tile side length in metres (B1 fix + MINOR-2)
 
             struct Attributes { float3 positionOS : POSITION; float2 uv : TEXCOORD0; uint instanceID : SV_InstanceID; };
             struct Varyings   { float4 positionCS : SV_POSITION; };
-
-            float DecodeHeight(float raw) { return _MinHeight + raw * (_MaxHeight - _MinHeight); }
 
             Varyings vertShadow(Attributes IN)
             {
                 Varyings OUT;
                 uint nodeIdx = _VisibleNodeIndices[IN.instanceID];
                 RenderNode node = _NodeBuffer[nodeIdx];
-                float worldX = node.worldOffset.x + IN.uv.x * node.scale;
-                float worldZ = node.worldOffset.z + IN.uv.y * node.scale;
-                // Tile-local UV (B1 fix — subtract tile origin so non-(0,0) tiles are correct).
-                float raw    = _HeightTex.SampleLevel(sampler_HeightTex, (float2(worldX, worldZ) - _TileOriginWS) / _TileSizeM, 0).r;
-                float worldY = DecodeHeight(raw);
+
+                // Match the forward pass: CDLOD morph with the XZ-ONLY metric (same as
+                // CdlodQuadtree selection) so shadow geometry tracks the morphed lit surface at
+                // LOD seams. Without this the shadow used the finest grid while the lit surface
+                // morphed → shadow silhouette mismatch / acne along LOD boundaries.
+                float2 vtxXZ      = IN.uv;
+                float3 vtxWorldXZ = float3(node.worldOffset.x + vtxXZ.x * node.scale, 0.0,
+                                           node.worldOffset.z + vtxXZ.y * node.scale);
+                float2 deltaXZ    = vtxWorldXZ.xz - _WorldSpaceCameraPos.xz;
+                float  morphBlend = CalcMorphBlend(dot(deltaXZ, deltaXZ), node.morphStart, node.morphEnd);
+                float2 morphedXZ  = MorphVertex(vtxXZ, morphBlend);
+
+                float worldX = node.worldOffset.x + morphedXZ.x * node.scale;
+                float worldZ = node.worldOffset.z + morphedXZ.y * node.scale;
+                // Tile-local UV (subtract tile origin so non-(0,0) tiles are correct).
+                float worldY = SampleHeightVTF((float2(worldX, worldZ) - _TileOriginWS) / _TileSizeM);
                 float3 posWS = float3(worldX, worldY, worldZ);
                 OUT.positionCS = TransformWorldToHClip(posWS);
                 return OUT;
