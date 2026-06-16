@@ -6,6 +6,9 @@ using WorldPainter;
 
 namespace WorldPainter.Editor
 {
+    /// <summary>Which transform handle the Select tool currently shows for the picked instance.</summary>
+    internal enum PropTransformMode { Move, Rotate, Scale }
+
     /// <summary>
     /// Transform-edit mode for unified <see cref="PropLayer"/> layers.
     ///
@@ -19,7 +22,10 @@ namespace WorldPainter.Editor
     ///   - Gizmo drag: writes the updated TRS back to the layer's
     ///     <see cref="AuthoredInstancesData"/>.
     ///
-    /// Keyboard:
+    /// Keyboard (handled directly here — the Select tool runs through
+    /// <see cref="SceneView.duringSceneGui"/>, so Unity's global W/E/R tool hotkeys do NOT
+    /// reach it and <c>Tools.current</c> can never be relied on to pick the handle):
+    ///   - W / E / R: switch the active handle to Move / Rotate / Scale.
     ///   - T: switch back to the Place tool.
     ///   - Escape: deselect the current instance.
     ///
@@ -42,6 +48,15 @@ namespace WorldPainter.Editor
         /// -1 = none selected.
         /// </summary>
         public int SelectedIndex { get; private set; } = -1;
+
+        /// <summary>
+        /// Active transform handle for the selected instance. Owned here instead of read from
+        /// Unity's <c>Tools.current</c>: this tool dispatches via <see cref="SceneView.duringSceneGui"/>
+        /// while the user drives it from the WorldPainter inspector window, so the global W/E/R
+        /// hotkeys never update <c>Tools.current</c> — it stays frozen on whatever was last active
+        /// (the "only the rotation handle ever shows" bug). Set by the HUD buttons or W/E/R here.
+        /// </summary>
+        public PropTransformMode Mode { get; set; } = PropTransformMode.Move;
 
         // ── Deferred rebuild state ────────────────────────────────────────────
         // CommitRecord records a "pending Mark" instead of firing the scheduler immediately, so
@@ -87,6 +102,12 @@ namespace WorldPainter.Editor
 
             if (currentEvent.type == EventType.KeyDown)
             {
+                // W/E/R switch the active handle. Handled here because Unity's global tool hotkeys
+                // don't reach a duringSceneGui consumer driven from the inspector window.
+                if (currentEvent.keyCode == KeyCode.W) { this.Mode = PropTransformMode.Move;   currentEvent.Use(); HandleUtility.Repaint(); return; }
+                if (currentEvent.keyCode == KeyCode.E) { this.Mode = PropTransformMode.Rotate; currentEvent.Use(); HandleUtility.Repaint(); return; }
+                if (currentEvent.keyCode == KeyCode.R) { this.Mode = PropTransformMode.Scale;  currentEvent.Use(); HandleUtility.Repaint(); return; }
+
                 if (currentEvent.keyCode == KeyCode.T ||
                     currentEvent.character == TOGGLE_KEY)
                 {
@@ -105,6 +126,19 @@ namespace WorldPainter.Editor
                     currentEvent.Use();
                     HandleUtility.Repaint();
                     return;
+                }
+
+                // Delete / Backspace removes the selected instance — mirrors the HUD Remove button.
+                if (currentEvent.keyCode == KeyCode.Delete ||
+                    currentEvent.keyCode == KeyCode.Backspace)
+                {
+                    if (this.SelectedIndex >= 0)
+                    {
+                        this.RemoveSelected(layer);
+                        currentEvent.Use();
+                        HandleUtility.Repaint();
+                        return;
+                    }
                 }
             }
 
@@ -143,6 +177,35 @@ namespace WorldPainter.Editor
             // and the mouse has been released, flush it now. This is the single rebuild that
             // refreshes the scatter mesh after the user finishes dragging.
             FlushPendingRebuildIfReleased();
+        }
+
+        // ── Remove selected instance ──────────────────────────────────────────
+
+        /// <summary>
+        /// Removes the currently selected instance from <paramref name="layer"/> and rebuilds the
+        /// scatter mesh. No-op when nothing is selected. Called by the HUD Remove button and the
+        /// Delete / Backspace shortcut.
+        ///
+        /// <see cref="AuthoredInstancesData.RemoveAt"/> is swap-pop, so the removed slot now holds a
+        /// different record — the selection index is cleared rather than reused. The rebuild is
+        /// scheduled immediately (unlike a handle drag) because removal is a single discrete action,
+        /// not a per-frame storm.
+        /// </summary>
+        public void RemoveSelected(PropLayer layer)
+        {
+            var authored = layer.AuthoredInstances;
+            if (authored == null) return;
+
+            int idx = this.SelectedIndex;
+            if (idx < 0 || idx >= authored.WorkingList.Count) return;
+
+            Undo.RecordObject(authored, "Remove Prop Instance");
+            authored.RemoveAt(idx);
+            authored.PackBlob();
+            EditorUtility.SetDirty(authored);
+
+            this.SelectedIndex = -1;
+            WorldPainterRebuildScheduler.MarkPropDirty(layer);
         }
 
         // ── Click-pick ────────────────────────────────────────────────────────
@@ -288,15 +351,15 @@ namespace WorldPainter.Editor
 
             var rec = list[idx];
 
-            // Show ONE handle at a time, selected by the active Unity transform tool
-            // (W = Move, E = Rotate, R = Scale). Drawing Position/Rotation/Scale handles all at the
-            // same point made them overlap and steal each other's control IDs — the Scale handle's
-            // centre cube sat under the Position free-move dot and could never be grabbed (the
-            // "scale doesn't work" bug). Gating by Tools.current matches Unity's native multi-tool
-            // UX and makes every handle reliably grabbable.
-            switch (Tools.current)
+            // Show ONE handle at a time, selected by this tool's own Mode (set by the HUD buttons
+            // or W/E/R here). Drawing Position/Rotation/Scale handles all at the same point made
+            // them overlap and steal each other's control IDs — the Scale handle's centre cube sat
+            // under the Position free-move dot and could never be grabbed (the "scale doesn't work"
+            // bug). Mode is NOT read from Tools.current: the global tool hotkeys never reach this
+            // duringSceneGui consumer, so Tools.current freezes and only one handle would ever show.
+            switch (this.Mode)
             {
-                case Tool.Rotate:
+                case PropTransformMode.Rotate:
                 {
                     EditorGUI.BeginChangeCheck();
                     Quaternion newRot = Handles.RotationHandle(rec.rotation, rec.position);
@@ -309,7 +372,7 @@ namespace WorldPainter.Editor
                     break;
                 }
 
-                case Tool.Scale:
+                case PropTransformMode.Scale:
                 {
                     EditorGUI.BeginChangeCheck();
                     Vector3 oldScale = Vector3.one * rec.scale;
@@ -333,7 +396,7 @@ namespace WorldPainter.Editor
                     break;
                 }
 
-                default: // Tool.Move and any non-transform tool → position handle
+                default: // PropTransformMode.Move → position handle
                 {
                     EditorGUI.BeginChangeCheck();
                     Vector3 newPos = Handles.PositionHandle(rec.position, rec.rotation);

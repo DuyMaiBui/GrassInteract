@@ -67,6 +67,13 @@ namespace WorldPainter.Editor
 
         internal int undoGroupId = -1;
 
+        // ── HUD geometry (screen-space) ───────────────────────────────────────
+        // Last rect drawn by DrawHud. Used by the prop Select path to swallow clicks that land on
+        // the HUD so they don't fall through to the transform editor's click-pick (which would
+        // deselect the instance when the user is actually clicking a Move/Rotate/Scale/Remove button).
+
+        private Rect lastHudRect;
+
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
         /// <summary>Wires up event subscriptions + uploads the falloff LUT. Called by the inspector on mount.</summary>
@@ -211,8 +218,19 @@ namespace WorldPainter.Editor
                 PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
                 if (propLayer != null)
                 {
-                    WorldPainterPropTransformEdit.Instance.OnSceneGUI(propLayer, sceneView);
+                    // Draw the HUD FIRST: its buttons consume their own MouseDown, and the rect
+                    // guard below swallows clicks on the HUD's dead space — both must happen before
+                    // the transform editor runs, or its click-pick would deselect the instance the
+                    // moment the user clicks a Move/Rotate/Scale/Remove button (the reported bug).
                     this.DrawHud();
+
+                    if ((e.type == EventType.MouseDown || e.type == EventType.MouseUp) &&
+                        this.lastHudRect.Contains(e.mousePosition))
+                    {
+                        e.Use();
+                    }
+
+                    WorldPainterPropTransformEdit.Instance.OnSceneGUI(propLayer, sceneView);
                     return;
                 }
             }
@@ -328,10 +346,19 @@ namespace WorldPainter.Editor
                 WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Splat &&
                 WorldPainterState.ActivePaletteIndex < 0;
 
+            bool isSelectTool = WorldPainterState.ActiveBrushToolId == "instance.select";
+            bool hasSelection = isSelectTool && WorldPainterPropTransformEdit.Instance.SelectedIndex >= 0;
+
             Handles.BeginGUI();
             // Taller HUD when the prop transform toggle is shown OR a warning needs space.
+            // The Select tool adds a Move/Rotate/Scale button row, plus a Remove row once an
+            // instance is selected — each needs one more line.
             int baseHeight = (noLayerSelected || splatNoChannel) ? 72 : 64;
-            var area = new Rect(8, 8, 260, isPropActive ? baseHeight + 22 : baseHeight);
+            int propExtra  = isPropActive
+                ? (isSelectTool ? 22 + 24 + (hasSelection ? 22 : 0) : 22)
+                : 0;
+            var area = new Rect(8, 8, 260, baseHeight + propExtra);
+            this.lastHudRect = area;
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label("WorldPainter Brush", EditorStyles.boldLabel);
             GUILayout.Label($"Target: {effective}  ({layerLabel})", EditorStyles.miniLabel);
@@ -360,10 +387,52 @@ namespace WorldPainter.Editor
                     _                  => "Mode: Place (ghost preview)",
                 };
                 GUILayout.Label(modeLabel, EditorStyles.miniLabel);
+
+                // Select tool: explicit Move/Rotate/Scale buttons. The transform editor owns its
+                // own Mode (it can't rely on Unity's W/E/R hotkeys — they never reach a
+                // duringSceneGui consumer driven from the inspector window), so drive it here.
+                if (toolId == "instance.select")
+                {
+                    DrawTransformModeButtons();
+
+                    // Remove button — deletes the selected instance (mirrors Delete/Backspace).
+                    var propLayer = painter != null ? BrushToolTargets.ResolvePropLayer(painter) : null;
+                    if (propLayer != null && WorldPainterPropTransformEdit.Instance.SelectedIndex >= 0)
+                    {
+                        if (GUILayout.Button("Remove Instance (Del)", EditorStyles.miniButton))
+                        {
+                            WorldPainterPropTransformEdit.Instance.RemoveSelected(propLayer);
+                            HandleUtility.Repaint();
+                        }
+                    }
+                }
             }
 
             GUILayout.EndArea();
             Handles.EndGUI();
+        }
+
+        /// <summary>
+        /// Segmented Move/Rotate/Scale row that drives
+        /// <see cref="WorldPainterPropTransformEdit.Instance"/>'s <c>Mode</c>. Mirrors the W/E/R
+        /// shortcuts handled inside the transform editor's <c>OnSceneGUI</c>.
+        /// </summary>
+        private static void DrawTransformModeButtons()
+        {
+            var edit    = WorldPainterPropTransformEdit.Instance;
+            var current = edit.Mode;
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Toggle(current == PropTransformMode.Move,   "Move (W)",   EditorStyles.miniButtonLeft)   && current != PropTransformMode.Move)
+                edit.Mode = PropTransformMode.Move;
+            if (GUILayout.Toggle(current == PropTransformMode.Rotate, "Rotate (E)", EditorStyles.miniButtonMid)    && current != PropTransformMode.Rotate)
+                edit.Mode = PropTransformMode.Rotate;
+            if (GUILayout.Toggle(current == PropTransformMode.Scale,  "Scale (R)",  EditorStyles.miniButtonRight)  && current != PropTransformMode.Scale)
+                edit.Mode = PropTransformMode.Scale;
+            GUILayout.EndHorizontal();
+
+            if (edit.Mode != current)
+                HandleUtility.Repaint();
         }
     }
 }
