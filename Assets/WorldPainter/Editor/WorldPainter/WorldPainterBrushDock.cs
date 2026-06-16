@@ -116,9 +116,13 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Hides the brush size / falloff / spacing / flow controls when a Prop layer is the
-        /// active paint target — the prop tools (Place / Single / Select / Erase) operate at the
-        /// cursor rather than within a brush footprint, so the controls would only confuse.
+        /// Drives context-sensitive dock visibility off the active layer kind:
+        /// <list type="bullet">
+        /// <item>Brush settings hidden for Prop layers (prop tools act at the cursor, no footprint).</item>
+        /// <item>Set Height row shown only for the Height layer.</item>
+        /// <item>Terrain palette shown only in the terrain-base context (Height or Splat), hidden
+        /// on Grass/Prop layers.</item>
+        /// </list>
         /// </summary>
         private void RefreshBrushSettingsVisibility()
         {
@@ -126,19 +130,32 @@ namespace WorldPainter.Editor
             bool isProp = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
             this.brushSettingsContainer.style.display = isProp ? DisplayStyle.None : DisplayStyle.Flex;
 
-            // Set Height drives only the Height layer's Raise/Lower brushes — hide it elsewhere.
             // EffectiveLayerType ignores its painter argument, so a null ActivePainter is safe.
+            LayerType layerType = WorldPainterState.EffectiveLayerType(WorldPainterState.ActivePainter!);
+
+            // Set Height drives only the Height layer's Raise/Lower brushes — hide it elsewhere.
             if (this.setHeightRow != null)
+                this.setHeightRow.style.display =
+                    layerType == LayerType.Height ? DisplayStyle.Flex : DisplayStyle.None;
+
+            // Terrain palette belongs to the terrain base: show while sculpting the Height layer
+            // AND while painting a terrain texture (Splat) — picking a palette ink flips the kind
+            // to Splat, so gating on Height|Splat keeps the palette visible through that flow.
+            // Hidden on Grass/Prop surface layers (you're not texturing the terrain there).
+            if (this.paletteStripContainer != null)
             {
-                bool isHeight = WorldPainterState.EffectiveLayerType(WorldPainterState.ActivePainter!)
-                                == LayerType.Height;
-                this.setHeightRow.style.display = isHeight ? DisplayStyle.Flex : DisplayStyle.None;
+                bool terrainContext = layerType == LayerType.Height || layerType == LayerType.Splat;
+                this.paletteStripContainer.style.display =
+                    terrainContext ? DisplayStyle.Flex : DisplayStyle.None;
             }
         }
 
         // ── TerrainLayer palette strip (Phase 2c) ─────────────────────────────
 
         private VisualElement? paletteStripRoot;
+        // Outer palette container (title + strip) — visibility is gated to the terrain-base
+        // editing context (Height / Splat) by RefreshBrushSettingsVisibility.
+        private VisualElement? paletteStripContainer;
 
         /// <summary>
         /// Builds the palette strip container + wires it to repopulate whenever the
@@ -149,6 +166,7 @@ namespace WorldPainter.Editor
         private VisualElement BuildPaletteStrip()
         {
             var container = new VisualElement();
+            this.paletteStripContainer = container; // gated to Height/Splat in RefreshBrushSettingsVisibility
 
             var title = new Label("TERRAIN PALETTE");
             title.AddToClassList("wp-section-title");
