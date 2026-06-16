@@ -756,11 +756,15 @@ namespace WorldPainter
             {
                 if (mat == null) return;
                 mat.CopyPropertiesFromMaterial(this.materialBase);
-                // Restore the per-LOD _VisibleIndices binding (CopyPropertiesFromMaterial copies
-                // textures / floats / colors / keywords — not StructuredBuffer bindings — but if
-                // the materialBase happens to have any value at the same property ID, it could
-                // race with the per-LOD binding intent. Re-set defensively.)
+                // Restore the per-LOD StructuredBuffer bindings AFTER the bulk copy. CopyPropertiesFromMaterial
+                // resets the material's buffer bindings to the donor's (which has none), so any buffer bound
+                // BEFORE the sync is dropped. _VisibleIndices AND _Instances must both be re-bound here, or the
+                // vertex shader reads an unbound _Instances → garbage inst.posWS → every vertex lands off-screen
+                // → the prop draws nothing (the "props never render" bug; grass avoids it via the same rebind —
+                // its "FIX 4"). Previously only _VisibleIndices was restored, so _Instances stayed unbound.
                 if (visibleIdx != null) mat.SetBuffer(ID_VisibleIndices, visibleIdx);
+                if (this.instanceBuffer?.InstanceBuffer != null)
+                    mat.SetBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
             }
             this.ApplyEngineOwnedUniforms();
         }
