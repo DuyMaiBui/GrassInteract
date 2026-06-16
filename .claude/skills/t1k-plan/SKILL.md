@@ -5,7 +5,7 @@ keywords: [plan, architecture, phases, breakdown, design, roadmap, approach]
 argument-hint: "[task] OR archive|red-team|validate [--auto|--fast|--hard|--deep|--parallel|--two|--tdd|--team] [--team-devs N|--team-reviewers N|--team-researchers N|--team-debuggers N]"
 effort: high
 tools: [Read, Grep, Glob, Bash, Write, Edit, MultiEdit, Task, Agent, WebFetch, WebSearch, TodoWrite, AskUserQuestion]
-version: 2.18.0
+version: 2.20.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

@@ -4,7 +4,7 @@ description: "Answer technical questions with context-aware skill activation. Us
 keywords: [question, explain, how, why, technical, guidance, pattern]
 argument-hint: "[question]"
 effort: medium
-version: 2.18.0
+version: 2.20.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

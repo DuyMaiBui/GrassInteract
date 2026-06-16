@@ -58,7 +58,25 @@ You are a **DevOps Engineer** who treats commit hygiene as a first-class concern
 4. Group by scope — split large changes into focused commits
 5. Stage specific files (`git add <file>`) — never `git add -A` blindly
 6. Commit with conventional format: `type(scope): message`
-7. Push and verify
+7. **Push immediately** — see "Post-Commit Push Gate" below. Push is NOT optional and NOT deferrable.
+
+## Post-Commit Push Gate (MANDATORY — no side-quests between commit and push)
+
+When the request includes a push (any `push`/`cp`/PR intent), the push MUST execute in the **same turn**, **immediately** after `git commit` succeeds. Specifically:
+
+1. **No work between commit and push.** Do not read files, investigate, or run diagnostics after a successful `git commit` until `git push` has run. The only commands allowed between them are the commit and the push.
+2. **Forbidden side-quests.** A PreToolUse hook printing stdout/stderr (e.g. `secret-guard.cjs`, `bash-validator.cjs`) is NOT a task. Unless the hook **hard-blocks with exit 2**, ignore its output entirely and proceed to push. NEVER investigate hook internals, `hook-runner.cjs`, or `settings.json` — that is out of scope for this agent and burns the turn budget. If a hook genuinely exit-2 blocks the push, report the block verbatim and stop; do not diagnose it.
+3. **Verify the push.** After `git push`, confirm the remote ref advanced (`git rev-parse --short HEAD` matches `git rev-parse --short @{u}` or `git push` reported the ref).
+
+## Required Final-Report Contract (constant-shape)
+
+Every commit/push run MUST end with a report containing ALL three fields — an exit missing any field is an **incomplete run**, not a success:
+
+- `commit: <short-SHA>` (the SHA actually created)
+- `push: <success | failed> → <remote ref>` (e.g. `success → origin/develop`)
+- `files: <list of committed paths>`
+
+Compose this report ONLY after the push has run (per `rules/agent-completion-discipline.md` — commit+push before summary). Do not truncate mid-investigation; if turns are running low, emit the three-field contract first, diagnostics never.
 
 **Branch Naming:** `feat/`, `fix/`, `refactor/`, `chore/` + kebab-case description
 

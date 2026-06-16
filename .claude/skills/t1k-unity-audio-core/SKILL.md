@@ -3,7 +3,7 @@ name: t1k:unity:audio:core
 description: Unity 6000.3.x audio system — AudioSource, AudioClip, AudioMixer, spatial audio, 3D sound, music layering, and audio optimization for Unity 6.
 effort: medium
 keywords: [audio, sound, unity audio, mixer]
-version: 2.2.0
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: audio

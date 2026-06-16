@@ -4,7 +4,7 @@ description: "Show your contribution score, rank, and 3 next-action suggestions.
 keywords: [my score, my rank, my contributions, leaderboard, how am i doing]
 effort: low
 argument-hint: "[--user gh-login]"
-version: 2.15.0
+version: 2.15.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

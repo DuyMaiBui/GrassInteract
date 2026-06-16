@@ -20,7 +20,7 @@ triggers:
   - PanelSettings
 effort: medium
 keywords: [UI Toolkit, UI, UXML, unity]
-version: 2.4.0
+version: 2.5.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui

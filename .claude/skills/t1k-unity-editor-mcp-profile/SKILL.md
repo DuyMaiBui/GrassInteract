@@ -4,7 +4,7 @@ description: "Performance profiling via rendering_stats MCP — draw calls, batc
 effort: low
 argument-hint: "[context] [--snapshot|--compare|--report]"
 keywords: [profiling, performance, optimization]
-version: 2.2.0
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

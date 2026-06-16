@@ -4,7 +4,7 @@ description: "Create, update, validate, beautify, and publish GitHub wiki pages.
 keywords: [wiki, github wiki, wiki page, sidebar, create wiki, update wiki, publish wiki, beautify wiki, wiki sync, wiki validate, mermaid contrast, wiki sidebar, wiki home, diataxis, wiki frontmatter]
 argument-hint: "init|pull|status|list|add|update|validate|fix|beautify|publish|audit"
 effort: medium
-version: 2.18.0
+version: 2.20.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

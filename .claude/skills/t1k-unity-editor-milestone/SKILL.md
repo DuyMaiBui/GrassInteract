@@ -4,7 +4,7 @@ description: "Milestone gate checks — alpha/beta/RC/gold readiness assessment 
 effort: low
 argument-hint: "[alpha|beta|rc|gold] [--check|--report]"
 keywords: [milestone, project management, planning]
-version: 2.2.0
+version: 2.3.0
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

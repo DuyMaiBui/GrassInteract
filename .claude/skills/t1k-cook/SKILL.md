@@ -5,7 +5,7 @@ keywords: [implement, build, feature, add, create, develop, end-to-end]
 argument-hint: "[task|plan-path] [--interactive|--fast|--parallel|--auto|--no-test|--tdd]"
 effort: high
 tools: [Read, Glob, Grep, Bash, Write, Edit, MultiEdit, Task, Agent, WebFetch, WebSearch, TodoWrite, AskUserQuestion, Skill]
-version: 2.18.0
+version: 2.20.0
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
