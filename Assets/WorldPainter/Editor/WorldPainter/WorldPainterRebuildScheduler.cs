@@ -90,13 +90,15 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Schedules a coalesced repaint for <paramref name="painter"/>. When the painter is already
-        /// built — the common domain-reload / asset-import case, where <c>WorldPainter.OnEnable</c>
-        /// already rebuilt the GPU engines — the next <see cref="Flush"/> issues only
-        /// <see cref="SceneView.RepaintAll"/> (no GPU teardown); the resulting camera render submits
-        /// the existing terrain/scatter. When the painter is NOT built, Flush runs a full
-        /// <c>TryBuild()</c> + <c>RebuildScatterPreview()</c> to recover. Used by
-        /// <see cref="WorldPainterAutoRebuild"/> to fix the "black until manual rebuild" gap.
+        /// Schedules a coalesced full rebuild for <paramref name="painter"/> on the next
+        /// <see cref="Flush"/> — an unconditional <c>TryBuild()</c> + <c>RebuildScatterPreview()</c>
+        /// followed by <see cref="SceneView.RepaintAll"/>. Used by
+        /// <see cref="WorldPainterAutoRebuild"/> to fix the "black until manual Rebuild" gap after a
+        /// domain reload / asset import. A repaint-only path is deliberately NOT used: the engines
+        /// built by <c>WorldPainter.OnEnable</c> during domain-reload restoration can hold black
+        /// content (assets not yet GPU-ready) while reporting <c>IsBuilt==true</c>, so only a fresh
+        /// rebuild — matching the manual "Rebuild" context-menu — reliably recovers them. See the
+        /// <c>Kind.TerrainRepaint</c> branch in <see cref="Flush"/> for the full rationale.
         /// </summary>
         public static void MarkTerrainRepaint(WorldPainter painter)
         {
@@ -153,14 +155,18 @@ namespace WorldPainter.Editor
                             k.Painter.RebuildScatterPreview();
                             break;
                         case Kind.TerrainRepaint:
-                            // Domain-reload / asset-import driver: the build normally survived via
-                            // OnEnable.TryBuild, so we only need a camera render once (the
-                            // SceneView.RepaintAll below). Recover with a full rebuild if it didn't.
-                            if (!k.Painter.IsBuilt)
-                            {
-                                k.Painter.TryBuild();
-                                k.Painter.RebuildScatterPreview();
-                            }
+                            // Domain-reload / asset-import driver. A repaint-only path is NOT enough:
+                            // WorldPainter.OnEnable.TryBuild runs DURING domain-reload restoration,
+                            // before the terrain palette/height assets are GPU-ready, so it uploads
+                            // empty/black content yet still passes SelfTest (device-capability only)
+                            // and sets IsBuilt=true. Resubmitting those stale engines (a repaint)
+                            // keeps the terrain black — which is why only the manual "Rebuild"
+                            // (an unconditional TryBuild) recovered it. This driver is deferred via
+                            // EditorApplication.delayCall, so by now the assets ARE ready: do the
+                            // same full rebuild here, unconditionally, then RepaintAll below submits
+                            // the freshly-built (correct) content. Coalesced to one per editor frame.
+                            k.Painter.TryBuild();
+                            k.Painter.RebuildScatterPreview();
                             break;
                     }
                 }
