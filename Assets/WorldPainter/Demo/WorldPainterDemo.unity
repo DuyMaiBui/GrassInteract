@@ -119,6 +119,246 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &224413661
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 224413668}
+  - component: {fileID: 224413667}
+  - component: {fileID: 224413666}
+  - component: {fileID: 224413665}
+  - component: {fileID: 224413664}
+  - component: {fileID: 224413663}
+  - component: {fileID: 224413662}
+  m_Layer: 0
+  m_Name: Capsule
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &224413662
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee5086911a2f6f541972a9c5ba196557, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: WorldPainter::WorldPainter.GrassInteractor
+--- !u!114 &224413663
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7f56037e49dd9fe4bb52080feeaa6d98, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: WorldPainter::WorldPainter.GrassTrailInteractor
+  trailDuration: 1
+  minVertexDistance: 0.25
+  centerZonePercent: 0.4
+--- !u!114 &224413664
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 405f89c6e5a454848a220535f2920d10, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: WorldPainter::WorldPainter.GrassInteractorData
+  worldRadius: 2
+  strength: 1
+  maxBendDegrees: 90
+--- !u!136 &224413665
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.5
+  m_Height: 2
+  m_Direction: 1
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!23 &224413666
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &224413667
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!4 &224413668
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 224413661}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 144, y: 1.7, z: 9.6}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &602752204
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 602752206}
+  - component: {fileID: 602752205}
+  - component: {fileID: 602752207}
+  m_Layer: 0
+  m_Name: WorldPainter
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &602752205
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 602752204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 09745a11318463b4a9852278112e6b2d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: WorldPainter::WorldPainter.WorldPainter
+  bakeManifest: {fileID: 0}
+  streamingManager: {fileID: 0}
+  map: {fileID: 11400000, guid: d5b65fe274a623b44bad3bd9540b8a04, type: 2}
+  worldGrid:
+    tileSizeM: 256
+    heightRes: 257
+    splatRes: 512
+  tiles: []
+  cullCompute: {fileID: 7200000, guid: 0372c160c85ed5840b84dc4ff78748d9, type: 3}
+  patchMaterial: {fileID: 2100000, guid: 9a75d618311bac045b52b302dffdc652, type: 2}
+  lodRangesM:
+  - 183.27606
+  - 292.09622
+  - 397.09814
+  - 500
+  scatterCullCompute: {fileID: 7200000, guid: 8eebdf92a89a18b49a0375c9c59d93d4, type: 3}
+  scatterIndirectMat: {fileID: 0}
+  scatterForceTier: 0
+  scatterPrewarmSlabs: 0
+  scatterExtraCullMargin: 0
+--- !u!4 &602752206
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 602752204}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &602752207
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 602752204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1038e2317cd173439584fab445d0acf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: WorldPainter::WorldPainter.TerrainColliderStreamer
+  generateColliders: 1
+  colliderLodBand: 3
+  heightfieldRes: 65
+  debugShowColliders: 0
 --- !u!1 &748526203
 GameObject:
   m_ObjectHideFlags: 0
@@ -332,13 +572,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 759143997}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.49469337, y: -0, z: -0, w: 0.86906767}
-  m_LocalPosition: {x: 219, y: 330, z: -134}
+  m_LocalRotation: {x: 0.08779905, y: 0, z: 0, w: 0.9961382}
+  m_LocalPosition: {x: 143.8, y: 17.1, z: -20.3}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 59.299, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 10.074, y: 0, z: 0}
 --- !u!114 &759144001
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -383,91 +623,11 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
---- !u!1 &1771347437
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1771347439}
-  - component: {fileID: 1771347438}
-  - component: {fileID: 1771347440}
-  m_Layer: 0
-  m_Name: GameObject
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1771347438
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1771347437}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 09745a11318463b4a9852278112e6b2d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: WorldPainter::WorldPainter.WorldPainter
-  bakeManifest: {fileID: 0}
-  streamingManager: {fileID: 0}
-  map: {fileID: 11400000, guid: 3d9d18bd536b747af941fc570483eb9c, type: 2}
-  worldGrid:
-    tileSizeM: 256
-    heightRes: 257
-    splatRes: 512
-  tiles: []
-  cullCompute: {fileID: 7200000, guid: 0372c160c85ed5840b84dc4ff78748d9, type: 3}
-  patchMaterial: {fileID: 2100000, guid: 9a75d618311bac045b52b302dffdc652, type: 2}
-  lodRangesM:
-  - 32
-  - 64
-  - 128
-  - 256
-  scatterCullCompute: {fileID: 7200000, guid: 8eebdf92a89a18b49a0375c9c59d93d4, type: 3}
-  scatterIndirectMat: {fileID: 0}
-  scatterForceTier: 0
-  scatterPrewarmSlabs: 0
-  scatterExtraCullMargin: 0
---- !u!4 &1771347439
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1771347437}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1771347440
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1771347437}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f1038e2317cd173439584fab445d0acf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: WorldPainter::WorldPainter.TerrainColliderStreamer
-  generateColliders: 1
-  colliderLodBand: 3
-  heightfieldRes: 65
-  debugShowColliders: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
   - {fileID: 759144000}
   - {fileID: 748526206}
-  - {fileID: 1771347439}
+  - {fileID: 224413668}
+  - {fileID: 602752206}
