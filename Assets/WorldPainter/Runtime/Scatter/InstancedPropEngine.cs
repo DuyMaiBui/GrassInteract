@@ -474,6 +474,23 @@ namespace WorldPainter
                 Graphics.RenderMeshIndirect(this.MakeRenderParams(this.lodMat2, targetCamera), this.mesh2, this.argsLod2Buf, 1, 0);
         }
 
+        // ── Live transform patch (editor Select-tool handle drag) ─────────────
+
+        /// <summary>
+        /// Real-time single-instance transform update for the editor Select tool. Forwards to
+        /// <see cref="ChunkedInstanceBuffer.PatchInstance"/>, which overwrites one GPU slot in place
+        /// (no buffer realloc → no teardown flicker). Only posWS + yaw + uniform scale are encoded in the
+        /// instance record, so that is all that is patched; a moved instance keeps its baked chunk AABB
+        /// until the next full rebuild (self-heals on mouse-up). Returns false when not built or the index
+        /// is out of range — the caller then relies on the deferred full rebuild.
+        /// </summary>
+        public bool PatchInstanceTransform(int authoredIdx, Vector3 position, Quaternion rotation, float scale)
+        {
+            if (!this.isBuilt || this.instanceBuffer == null) return false;
+            float yawDeg = rotation.eulerAngles.y;
+            return this.instanceBuffer.PatchInstance(authoredIdx, position, yawDeg, scale);
+        }
+
         // ── IGrassEngine : WorldBounds ────────────────────────────────────────
 
         public Bounds WorldBounds => this.worldBounds;

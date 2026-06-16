@@ -86,6 +86,15 @@ namespace WorldPainter
         // Null before bake; reset on re-bake/dispose.
         private int[]? sortedToAuthored;
 
+        // authoredToSorted[authoredIdx] = sortedIdx. Inverse of sortedToAuthored, precomputed at
+        // Bake so a single-instance live patch (editor transform drag) maps an authored/WorkingList
+        // index to its GPU slot in O(1). Null before bake; reset on re-bake/dispose.
+        private int[]? authoredToSorted;
+
+        // Reused 1-element staging array for the single-slot GPU upload in PatchInstance — avoids a
+        // per-call managed allocation during a continuous handle drag.
+        private readonly InstanceData[] patchScratch = new InstanceData[1];
+
         // ── GPU buffers ───────────────────────────────────────────────────────
         private GraphicsBuffer? instanceBuf;
         private GraphicsBuffer? aabbBuf;
@@ -361,6 +370,13 @@ namespace WorldPainter
             this.chunkRanges     = rangeOut;
             this.sortedToAuthored = sortedToAuthMap;
 
+            // Invert the sort permutation for O(1) live single-instance patches. sortedToAuthMap is a
+            // bijection over [0,totalInst) (asserted above: every slot written exactly once), so the
+            // inverse is total and well-defined.
+            var authoredToSortedMap = new int[totalInst];
+            for (int i = 0; i < totalInst; ++i) authoredToSortedMap[sortedToAuthMap[i]] = i;
+            this.authoredToSorted = authoredToSortedMap;
+
             // ── Step 5: upload to GPU ─────────────────────────────────────────
             if (totalInst > 0)
             {
@@ -449,6 +465,58 @@ namespace WorldPainter
             this.chunkAabbs       = null;
             this.chunkRanges      = null;
             this.sortedToAuthored = null;
+            this.authoredToSorted = null;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Live single-instance patch (editor transform-drag real-time preview)
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Overwrites ONE instance's GPU record in place — no buffer realloc, so it is safe to call
+        /// every frame during an editor handle drag without the teardown flicker a full re-bake causes.
+        /// Re-encodes posWS + packed yaw/scale exactly as <see cref="Bake"/> does; the per-instance
+        /// <c>lodHash</c> (slot2) is PRESERVED — for non-oriented layers it is a transform-independent
+        /// decorrelation hash (so the patch is byte-exact), and for oriented layers its pitch/roll/normal
+        /// component self-heals on the next full re-bake.
+        ///
+        /// A moved instance keeps its baked per-chunk AABB; if it is dragged outside that (mesh-extent
+        /// inflated) box the GPU chunk-cull may transiently reject it until the next re-bake. This is the
+        /// accepted trade-off for a flicker-free live preview — the caller pairs this with a full rebuild
+        /// on mouse-up which restores exact AABBs.
+        /// </summary>
+        /// <param name="authoredIdx">Authored / WorkingList record index (== Select-tool SelectedIndex).</param>
+        /// <param name="posWS">New world-space base position.</param>
+        /// <param name="yawDeg">New yaw in degrees (rotation about up — the only rotation the VS renders).</param>
+        /// <param name="scale">New uniform scale.</param>
+        /// <returns>True if the slot was patched; false when no bake exists yet or the index is out of
+        /// range (the caller should fall back to a full rebuild).</returns>
+        public bool PatchInstance(int authoredIdx, Vector3 posWS, float yawDeg, float scale)
+        {
+            if (this.instances == null || this.instanceBuf == null || this.authoredToSorted == null)
+                return false;
+            if (authoredIdx < 0 || authoredIdx >= this.authoredToSorted.Length)
+                return false;
+
+            int sortedIdx = this.authoredToSorted[authoredIdx];
+            if (sortedIdx < 0 || sortedIdx >= this.instances.Length)
+                return false;
+
+            float maxScale = this.ScaleMax > 0f ? this.ScaleMax : 1f;
+            uint yawQ   = (uint)Mathf.RoundToInt(Mathf.Clamp(yawDeg, 0f, 360f)    * YAW_ENCODE_SCALE);
+            uint scaleQ = (uint)Mathf.RoundToInt(Mathf.Clamp(scale,  0f, maxScale) * (65535f / maxScale));
+            uint packed = ((yawQ & 0xFFFFu) << 16) | (scaleQ & 0xFFFFu);
+
+            InstanceData rec   = this.instances[sortedIdx];
+            rec.posWS          = posWS;
+            rec.packedYawScale = packed;
+            // rec.lodHash preserved — see summary.
+            this.instances[sortedIdx] = rec;
+
+            this.patchScratch[0] = rec;
+            // SetData(managedArray, managedStartIndex, graphicsBufferStartIndex, count): single-slot write.
+            this.instanceBuf.SetData(this.patchScratch, 0, sortedIdx, 1);
+            return true;
         }
 
         // ─────────────────────────────────────────────────────────────────────

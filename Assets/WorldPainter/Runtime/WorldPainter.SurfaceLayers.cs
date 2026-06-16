@@ -125,6 +125,23 @@ namespace WorldPainter
             this.TryBuildPropLayerEngine(layerIndex, layer, this.transform.position);
         }
 
+        /// <summary>
+        /// Returns the live <see cref="InstancedPropEngine"/> built for <paramref name="layer"/>, or
+        /// null when the layer has no engine (not built / hidden / no mesh assigned). Used by the editor
+        /// Select tool to patch a single instance's transform in place during a handle drag (real-time,
+        /// flicker-free) instead of a full <see cref="RebuildPropLayer"/>.
+        /// </summary>
+        internal InstancedPropEngine? TryGetPropEngine(PropLayer layer)
+        {
+            if (layer == null) return null;
+            for (int i = 0; i < this.surfacePropAdapters.Count; ++i)
+            {
+                if (this.surfacePropAdapters[i].SourceLayer == layer)
+                    return this.surfacePropEngines[i] as InstancedPropEngine;
+            }
+            return null;
+        }
+
         /// <summary>Builds one engine per tile for <paramref name="grass"/>.</summary>
         private void BuildGrassLayerEngines(int layerIndex, GrassLayer grass, Vector3 painterOrigin,
             bool gpuCapable, string probeReason)

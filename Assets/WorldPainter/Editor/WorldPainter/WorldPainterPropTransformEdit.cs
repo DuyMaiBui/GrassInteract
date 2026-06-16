@@ -84,6 +84,8 @@ namespace WorldPainter.Editor
         public void Reset()
         {
             this.SelectedIndex = -1;
+            cachedPatchLayer  = null;
+            cachedPatchEngine = null;
         }
 
         /// <summary>
@@ -429,6 +431,13 @@ namespace WorldPainter.Editor
             authored.PackBlob();
             EditorUtility.SetDirty(authored);
 
+            // Real-time preview: patch the single GPU instance slot in place so the rendered mesh tracks
+            // the handle every frame. This overwrites one 20-byte record in the existing instance buffer
+            // (no realloc), so it avoids the GPU-buffer-teardown flicker that forced full rebuilds to be
+            // deferred to mouse-up. The deferred full rebuild below STILL runs on release to restore the
+            // exact per-chunk AABB + collider pool. No-op when no live engine exists yet (mesh not built).
+            TryLivePatch(layer, idx, rec);
+
             // Defer engine rebuild until the handle is released — see "Deferred rebuild state"
             // comment at the top of the class. Marking dirty here every EndChangeCheck (30-60×/s
             // during a drag) caused the black-square flicker: each rebuild Disposed argsLodN
@@ -449,8 +458,58 @@ namespace WorldPainter.Editor
             if (GUIUtility.hotControl != 0 && Event.current.type != EventType.MouseUp) return;
 
             WorldPainterRebuildScheduler.MarkPropDirty(pendingLayer);
+            // The scheduled rebuild replaces the engine instance, so drop the cached engine — the next
+            // drag re-resolves and binds to the freshly-built engine.
+            cachedPatchEngine = null;
             pendingRebuild = false;
             pendingLayer   = null;
+        }
+
+        // ── Live in-place patch resolver ──────────────────────────────────────
+        // Cache the resolved engine for the active layer so a continuous drag doesn't run
+        // FindObjectsByType every EndChangeCheck (30-60×/s). Invalidated on Reset() (layer/painter
+        // change) and after the deferred rebuild fires (which replaces the engine instance).
+
+        private static PropLayer?           cachedPatchLayer;
+        private static InstancedPropEngine? cachedPatchEngine;
+
+        /// <summary>
+        /// Patches <paramref name="rec"/>'s transform into the live prop engine's GPU buffer in place,
+        /// for real-time handle-drag preview. No-op when no engine exists yet — the deferred rebuild on
+        /// mouse-up then provides the update. See <see cref="ChunkedInstanceBuffer.PatchInstance"/>.
+        /// </summary>
+        private static void TryLivePatch(PropLayer layer, int authoredIdx, InstanceRecord rec)
+        {
+            InstancedPropEngine? engine = ResolvePropEngine(layer);
+            engine?.PatchInstanceTransform(authoredIdx, rec.position, rec.rotation, rec.scale);
+        }
+
+        /// <summary>
+        /// Finds the live <see cref="InstancedPropEngine"/> for <paramref name="layer"/> across the scene's
+        /// WorldPainters, caching the result for the duration of a drag. Mirrors the painter-resolution
+        /// pattern in <see cref="WorldPainterRebuildScheduler.MarkPropDirty"/>.
+        /// </summary>
+        private static InstancedPropEngine? ResolvePropEngine(PropLayer layer)
+        {
+            if (ReferenceEquals(cachedPatchLayer, layer) && cachedPatchEngine != null)
+                return cachedPatchEngine;
+
+            var painters = Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            for (int i = 0; i < painters.Length; ++i)
+            {
+                WorldPainter p = painters[i];
+                if (p == null || p.Map == null) continue;
+                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
+
+                InstancedPropEngine? engine = p.TryGetPropEngine(layer);
+                if (engine != null)
+                {
+                    cachedPatchLayer  = layer;
+                    cachedPatchEngine = engine;
+                    return engine;
+                }
+            }
+            return null;
         }
     }
 }

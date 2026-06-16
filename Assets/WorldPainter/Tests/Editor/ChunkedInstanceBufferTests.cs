@@ -167,5 +167,98 @@ namespace WorldPainter.Tests
 
             Assert.IsNull(buf.SortedToAuthored, "SortedToAuthored must be null after Dispose");
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 4: PatchInstance writes the new pos + encoded yaw/scale into the
+        // GPU slot the authored index maps to (verified via the CPU Instances copy).
+        // This is the live editor transform-drag preview path.
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Test]
+        public void PatchInstance_UpdatesMappedSlot_PosYawScale()
+        {
+            var positions = new[]
+            {
+                new Vector3( 3f, 0f,  3f),  // authored index 0
+                new Vector3(11f, 0f,  3f),  // authored index 1
+                new Vector3( 5f, 0f,  7f),  // authored index 2
+                new Vector3(14f, 0f,  6f),  // authored index 3
+            };
+
+            GrassScatterResult scatter = MakeSyntheticScatter(positions);
+            var meshBounds = new Bounds(Vector3.zero, Vector3.one);
+
+            var buf = new ChunkedInstanceBuffer();
+            try
+            {
+                // scaleRangeMax = 2 so a 1.5 scale is inside the encode range.
+                buf.Bake(scatter, Vector3.zero, new Vector2(32f, 32f), 2f, meshBounds,
+                    oriented: false, chunkSize: 8);
+
+                const int   authoredIdx = 2;
+                var         newPos      = new Vector3(20f, 4f, 9f);
+                const float newYaw      = 90f;
+                const float newScale    = 1.5f;
+
+                bool ok = buf.PatchInstance(authoredIdx, newPos, newYaw, newScale);
+                Assert.IsTrue(ok, "PatchInstance should succeed for an in-range index after Bake");
+
+                // Find the sorted slot the authored index landed in.
+                int[]?          map       = buf.SortedToAuthored;
+                InstanceData[]? instances = buf.Instances;
+                Assert.IsNotNull(map);
+                Assert.IsNotNull(instances);
+
+                int sortedIdx = -1;
+                for (int k = 0; k < map!.Length; ++k)
+                    if (map[k] == authoredIdx) { sortedIdx = k; break; }
+                Assert.GreaterOrEqual(sortedIdx, 0, "authored index must map to a sorted slot");
+
+                InstanceData rec = instances![sortedIdx];
+                Assert.AreEqual(newPos.x, rec.posWS.x, 1e-4f, "patched posWS.x");
+                Assert.AreEqual(newPos.y, rec.posWS.y, 1e-4f, "patched posWS.y");
+                Assert.AreEqual(newPos.z, rec.posWS.z, 1e-4f, "patched posWS.z");
+
+                // Decode packedYawScale exactly as the vertex shader does.
+                float decodedYaw   = ((rec.packedYawScale >> 16) & 0xFFFFu) / 65535f * 360f;
+                float decodedScale = (rec.packedYawScale        & 0xFFFFu) / 65535f * buf.ScaleMax;
+                Assert.AreEqual(newYaw,   decodedYaw,   0.02f, "patched yaw decodes back");
+                Assert.AreEqual(newScale, decodedScale, 0.001f, "patched scale decodes back");
+
+                // Patching one slot must not disturb a sibling's position.
+                int otherAuthored = authoredIdx == 0 ? 1 : 0;
+                int otherSorted   = -1;
+                for (int k = 0; k < map.Length; ++k)
+                    if (map[k] == otherAuthored) { otherSorted = k; break; }
+                Assert.AreEqual(positions[otherAuthored].x, instances[otherSorted].posWS.x, 1e-4f,
+                    "non-patched sibling posWS.x must be unchanged");
+            }
+            finally
+            {
+                buf.Dispose();
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Test 5: PatchInstance rejects out-of-range indices and post-dispose calls
+        // (so the caller falls back to a full rebuild instead of corrupting memory).
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Test]
+        public void PatchInstance_ReturnsFalse_OutOfRangeOrAfterDispose()
+        {
+            var positions = new[] { new Vector3(1f, 0f, 1f), new Vector3(9f, 0f, 1f) };
+            GrassScatterResult scatter = MakeSyntheticScatter(positions);
+            var meshBounds = new Bounds(Vector3.zero, Vector3.one);
+
+            var buf = new ChunkedInstanceBuffer();
+            buf.Bake(scatter, Vector3.zero, new Vector2(32f, 32f), 1f, meshBounds);
+
+            Assert.IsFalse(buf.PatchInstance(-1,  Vector3.zero, 0f, 1f), "negative index rejected");
+            Assert.IsFalse(buf.PatchInstance(99,  Vector3.zero, 0f, 1f), "out-of-range index rejected");
+
+            buf.Dispose();
+            Assert.IsFalse(buf.PatchInstance(0, Vector3.zero, 0f, 1f), "patch after Dispose rejected");
+        }
     }
 }
