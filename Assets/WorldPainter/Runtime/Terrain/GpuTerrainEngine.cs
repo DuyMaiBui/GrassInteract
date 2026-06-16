@@ -219,6 +219,12 @@ namespace WorldPainter
             {
                 name = "TerrainPatch_Instance"
             };
+            // new Material(Material) does NOT reliably copy material-LOCAL shader keywords
+            // across Unity versions, so the clone would silently drop toggles enabled on the
+            // source asset (e.g. _TERRAIN_STOCHASTIC anti-tiling) and render the OFF variant.
+            // Propagate the enabled keyword set explicitly so material-level toggles actually
+            // reach the rendered clone. Source material stays the SSOT for these toggles.
+            this.patchMaterial.shaderKeywords = this.sourceMaterial.shaderKeywords;
             this.patchMaterial.SetFloat(ID_MinHeight, tile.minHeight);
             this.patchMaterial.SetFloat(ID_MaxHeight, tile.maxHeight);
             if (gpuRes.HeightTexture != null)

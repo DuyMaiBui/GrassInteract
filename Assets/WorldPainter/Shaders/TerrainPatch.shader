@@ -20,6 +20,10 @@ Shader "WorldPainter/TerrainPatch"
 
         // Fallback base color used when no LayerAlbedoArray is bound.
         _BaseColor ("Base Color (Fallback)", Color) = (0.4, 0.55, 0.3, 1)
+
+        // Anti-tiling: per-cell rotated stochastic albedo sampling (2-tap).
+        // Toggles the _TERRAIN_STOCHASTIC keyword on the forward pass.
+        [Toggle(_TERRAIN_STOCHASTIC)] _StochasticTiling ("Stochastic Tiling (anti-repeat)", Float) = 0
     }
 
     SubShader
@@ -55,6 +59,10 @@ Shader "WorldPainter/TerrainPatch"
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
             #pragma multi_compile _ LIGHTMAP_ON
             #pragma multi_compile_fog
+
+            // Anti-tiling stochastic albedo path (paired with [Toggle] _StochasticTiling).
+            // multi_compile (not shader_feature) so the variant survives runtime/quality-tier toggling.
+            #pragma multi_compile _ _TERRAIN_STOCHASTIC
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
