@@ -352,11 +352,17 @@ namespace WorldPainter
             this.receiveShadows = render.ReceiveShadows;
             this.ApplyShadowKeywords(render);
 
-            // ── Static globals (set once at build, not every frame) ─────────
-            // _Blades buffer doesn't change between frames; _Interactors buffer ref is also stable
-            // (same GraphicsBuffer object every frame — only count changes, updated in Step).
+            // ── Static buffers (set once at build, not every frame) ─────────
+            // _Blades is PER-TILE data: each per-tile grass engine bakes its OWN ChunkedBladeBuffer,
+            // so it MUST be bound PER-MATERIAL — NOT SetGlobalBuffer. RenderMeshIndirect draws are
+            // deferred to the render loop; with multiple per-tile engines a shared global _Blades is
+            // overwritten by the LAST engine's Submit, so every tile's draw samples the last tile's
+            // blades and only the last tile renders (multi-tile no-render bug). Binding on this
+            // engine's own LOD clones keeps each tile's blade data independent — mirrors
+            // _VisibleIndices / _ScaleMax2, which are per-material for exactly this reason.
             if (this.bladeBuffer.BladeBuffer != null)
-                Shader.SetGlobalBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
+                this.SetLodBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
+            // _Interactors is genuinely shared across all tiles/layers — stays global.
             Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
             // _ScaleMax2 is a PER-LAYER scale-decode bound read only by the render VS (NOT the cull compute).
             // Set it PER-MATERIAL so a sibling scatter layer can't clobber ours via the shared global.
@@ -463,10 +469,12 @@ namespace WorldPainter
             // Phase 2: upload trail segments each frame (count global set inside Upload).
             this.trailBuffer?.Upload(GrassTrailInteractor.Active);
 
-            // FIX 4: rebind static buffers every Submit — guards against domain-reload / any other
-            // system resetting global shader state between frames.
+            // FIX 4: rebind buffers every Submit — guards against domain-reload / any other system
+            // resetting shader state between frames. _Blades is PER-MATERIAL (per-tile data — see
+            // Build; a global would let the last per-tile engine's Submit clobber every other tile,
+            // leaving only the last tile rendered). _Interactors stays global (shared across tiles).
             if (this.bladeBuffer?.BladeBuffer != null)
-                Shader.SetGlobalBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
+                this.SetLodBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
             if (this.interactorBuffer?.Buffer != null)
                 Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
@@ -506,6 +514,18 @@ namespace WorldPainter
             if (this.lodMat0 != null) this.lodMat0.SetVector(id, v);
             if (this.lodMat1 != null) this.lodMat1.SetVector(id, v);
             if (this.lodMat2 != null) this.lodMat2.SetVector(id, v);
+        }
+
+        /// <summary>
+        /// Binds a <see cref="GraphicsBuffer"/> on all three LOD material clones (per-material,
+        /// never global). Used for the per-tile <c>_Blades</c> buffer so concurrent per-tile grass
+        /// engines don't clobber each other through a shared global on deferred indirect draws.
+        /// </summary>
+        private void SetLodBuffer(int id, GraphicsBuffer buf)
+        {
+            if (this.lodMat0 != null) this.lodMat0.SetBuffer(id, buf);
+            if (this.lodMat1 != null) this.lodMat1.SetBuffer(id, buf);
+            if (this.lodMat2 != null) this.lodMat2.SetBuffer(id, buf);
         }
 
         /// <summary>

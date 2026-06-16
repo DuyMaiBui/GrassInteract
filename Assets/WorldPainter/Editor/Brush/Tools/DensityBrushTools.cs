@@ -41,7 +41,19 @@ namespace WorldPainter.Editor
             {
                 var tileDensityTex = BrushToolTargets.ResolveGrassDensityForTile(
                     ctx.Painter, ctx.Tile.tileCoord);
-                if (tileDensityTex == null) return; // no texture for this tile — skip
+                if (tileDensityTex == null)
+                {
+                    // Auto-create this tile's density texture so grass EXPANDS onto any tile the
+                    // artist paints — not just tiles whose density entry was eagerly populated at
+                    // layer/tile creation time. Without this, painting a tile that lacks an entry
+                    // no-ops and grass only ever appears on the originally-seeded tile(s).
+                    var grass = BrushToolTargets.ResolveActiveGrassLayer(ctx.Painter);
+                    var map   = ctx.Painter.Map;
+                    if (grass == null || map == null) return;
+                    tileDensityTex = WorldMapAssetLifecycle.EnsureGrassDensityForTile(
+                        map, grass, ctx.Tile.tileCoord);
+                    if (tileDensityTex == null) return; // map not a saved asset — skip
+                }
 
                 var dRT = ctx.Tool.GetOrCreateDensityRT(tileDensityTex, ctx.Tile.tileCoord);
                 if (dRT == null) return;

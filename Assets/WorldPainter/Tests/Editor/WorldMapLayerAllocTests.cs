@@ -256,6 +256,45 @@ namespace WorldPainter.Tests
             Assert.IsTrue(hasC2, "Third tile coord must appear in densityTiles.");
         }
 
+        // ── G7 On-demand density expansion (paint-any-tile) ───────────────────
+
+        [Test]
+        public void EnsureGrassDensityForTile_MissingEntry_CreatesAndIsIdempotent()
+        {
+            var map = this.LoadMap();
+
+            var c0 = new Vector2Int(0, 0);
+            var c1 = new Vector2Int(1, 0);
+            WorldMapAssetLifecycle.AddTile(map, c0);
+            WorldMapAssetLifecycle.AddTile(map, c1);
+            GrassLayer grass = WorldMapAssetLifecycle.AddGrassLayerWithBlades(map, "ExpandPaintGrass");
+
+            // Simulate an incomplete (layer × tile) density matrix: keep only c0's entry, so c1
+            // has NO density texture — the exact state where painting c1 used to silently no-op.
+            var c0Only = grass.EditorTileDensities.Where(e => e.coord == c0).ToArray();
+            Assert.AreEqual(1, c0Only.Length, "Pre-condition: c0 must have a density entry.");
+            grass.EditorSetTileDensities(c0Only);
+            Assert.IsNull(grass.GetTileDensity(c1), "Pre-condition: c1 must have NO density entry.");
+
+            // First call must create the missing entry.
+            Texture2D? created = WorldMapAssetLifecycle.EnsureGrassDensityForTile(map, grass, c1);
+            Assert.IsNotNull(created, "EnsureGrassDensityForTile must create a texture for the missing tile.");
+            Assert.AreSame(created, grass.GetTileDensity(c1),
+                "The created texture must be registered in densityTiles for c1.");
+            Assert.AreEqual(2, grass.EditorTileDensities.Length,
+                "densityTiles must grow to 2 after expanding onto c1.");
+
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            Assert.AreEqual(mapPath, AssetDatabase.GetAssetPath(created!),
+                "The created density texture must be a sub-asset of the map.");
+
+            // Second call must be idempotent — same texture, no growth.
+            Texture2D? again = WorldMapAssetLifecycle.EnsureGrassDensityForTile(map, grass, c1);
+            Assert.AreSame(created, again, "A second call for the same coord must return the same texture.");
+            Assert.AreEqual(2, grass.EditorTileDensities.Length,
+                "A second call must NOT add a duplicate densityTiles entry.");
+        }
+
         [Test]
         public void RemoveSurfaceLayer_Grass_LeavesNoOrphanDensityTextures()
         {

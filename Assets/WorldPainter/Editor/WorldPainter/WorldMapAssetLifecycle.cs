@@ -173,6 +173,50 @@ namespace WorldPainter.Editor
 
         }
 
+        /// <summary>
+        /// Returns the density <see cref="Texture2D"/> for <paramref name="grass"/> at
+        /// <paramref name="coord"/>, creating and registering one on demand when the layer has no
+        /// entry for that tile yet. Idempotent: a second call for the same coord returns the
+        /// existing texture without allocating.
+        ///
+        /// This is the on-demand counterpart to the eager per-tile creation in <see cref="AddTile"/>
+        /// and AddGrassLayerWithBlades. It lets the density brush "expand" grass onto ANY tile the
+        /// artist paints — including a tile whose (layer × tile) density entry was never populated
+        /// (e.g. a tile imported or created through a path that didn't cross-sync the layer). Without
+        /// it, painting such a tile no-ops and grass only ever renders on the originally-seeded tiles.
+        /// </summary>
+        /// <param name="map">The container map (must be a saved asset).</param>
+        /// <param name="grass">The grass layer to expand.</param>
+        /// <param name="coord">Tile coordinate to ensure a density texture for.</param>
+        /// <returns>The density texture for the coord, or null when the map is not a saved asset.</returns>
+        public static Texture2D? EnsureGrassDensityForTile(
+            WorldMapAsset map, GrassLayer grass, Vector2Int coord)
+        {
+            if (map == null || grass == null) return null;
+
+            var existing = grass.GetTileDensity(coord);
+            if (existing != null) return existing;
+
+            string mapPath = AssetDatabase.GetAssetPath(map);
+            if (string.IsNullOrEmpty(mapPath)) return null; // map must be a saved asset
+
+            Texture2D tex = CreateDensityMap(
+                $"{grass.name}@{TileSubAssetName(coord)}",
+                seedFull: false);
+            AssetDatabase.AddObjectToAsset(tex, mapPath);
+
+            var prevTiles = grass.EditorTileDensities ?? System.Array.Empty<TileDensityTexture>();
+            var newTiles  = new TileDensityTexture[prevTiles.Length + 1];
+            prevTiles.CopyTo(newTiles, 0);
+            newTiles[prevTiles.Length] = new TileDensityTexture { coord = coord, tex = tex };
+            grass.EditorSetTileDensities(newTiles);
+
+            EditorUtility.SetDirty(grass);
+            EditorUtility.SetDirty(map);
+            AssetDatabase.SaveAssets();
+            return tex;
+        }
+
         // ── Phase 1: terrain-layer palette + per-tile alphamap lifecycle ──────────
 
         /// <summary>Default resolution for newly-created per-tile alphamap textures.</summary>
