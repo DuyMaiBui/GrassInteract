@@ -389,21 +389,32 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            var resolved = BrushToolRegistry.ResolveActiveTool(
-                kind, WorldPainterState.ActiveBrushToolId);
-
             for (int i = 0; i < tools.Count; i++)
             {
                 var tool = tools[i];
                 var btn = new Button(() =>
                 {
-                    WorldPainterState.SetActiveBrushTool(tool.Id);
-                    // Paint Mode = "I am painting/erasing with a continuous brush stroke."
-                    // Click-only prop tools (Place / Single / Select) are NOT brush strokes,
-                    // so picking them turns Paint Mode OFF; picking a continuous-stroke tool
-                    // (paint, erase, sculpt, etc.) turns it ON. The SculptTool gate lets
-                    // click-only tools dispatch regardless of this flag.
-                    WorldPainterState.PaintModeActive = !WorldPainterState.IsClickOnlyTool(tool.Id);
+                    // Toggle behaviour: clicking the already-engaged tool turns the brush OFF
+                    // (no stroke, no click-only place/select). Clearing the active tool id to
+                    // empty + PaintModeActive=false makes the SculptTool dispatch gate return for
+                    // BOTH continuous-stroke and click-only tools (IsClickOnlyTool("") == false).
+                    bool clickOnly = WorldPainterState.IsClickOnlyTool(tool.Id);
+                    bool engaged   = WorldPainterState.ActiveBrushToolId == tool.Id &&
+                                     (clickOnly || WorldPainterState.PaintModeActive);
+                    if (engaged)
+                    {
+                        WorldPainterState.PaintModeActive = false;
+                        WorldPainterState.SetActiveBrushTool(string.Empty);
+                    }
+                    else
+                    {
+                        // Paint Mode = "I am painting/erasing with a continuous brush stroke."
+                        // Click-only prop tools (Place / Single / Select) are NOT brush strokes,
+                        // so picking them leaves Paint Mode OFF; picking a continuous-stroke tool
+                        // (paint, erase, sculpt, etc.) turns it ON.
+                        WorldPainterState.PaintModeActive = !clickOnly;
+                        WorldPainterState.SetActiveBrushTool(tool.Id);
+                    }
                 });
                 btn.AddToClassList("wp-mode-btn");
                 btn.style.flexGrow = 1;
@@ -423,7 +434,11 @@ namespace WorldPainter.Editor
                 }
                 btn.Add(new Label(tool.Label));
 
-                if (resolved != null && resolved.Id == tool.Id)
+                // Highlight only the ENGAGED tool. When the brush is toggled off (active id empty
+                // / paint mode off) nothing is highlighted, mirroring the disabled brush state.
+                bool toolEngaged = WorldPainterState.ActiveBrushToolId == tool.Id &&
+                                   (WorldPainterState.IsClickOnlyTool(tool.Id) || WorldPainterState.PaintModeActive);
+                if (toolEngaged)
                     btn.AddToClassList("wp-mode-btn--active");
 
                 this.toolPaletteRoot.Add(btn);

@@ -317,15 +317,23 @@ namespace WorldPainter
             this.windSnapshotBendStrength = layer.Deform.BendStrength;
             this.windSnapshotFlatten      = layer.Deform.Flatten;
 
+            // _Instances is PER-LAYER data (one InstancedPropEngine per PropLayer). Bind PER-MATERIAL,
+            // NOT SetGlobalBuffer: with 2+ prop layers the deferred RenderMeshIndirect draws would all
+            // sample the LAST layer's _Instances global (last-Submit-wins), leaving only the last prop
+            // layer rendered — the same bug class fixed for grass _Blades. Per-material binds are captured
+            // per-draw and stay independent across layers.
             if (this.instanceBuffer.InstanceBuffer != null)
-                Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
+                this.SetLodBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
             // _ScaleMax2 is a PER-LAYER scale-decode bound consumed only by the render VS (NOT the cull
             // compute). Set it PER-MATERIAL so a second scatter layer's ScaleMax can't clobber ours via the
             // shared global. (Root-cause class: per-layer render uniforms must never go through SetGlobal.)
             this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
 
+            // _InstanceTilt is PER-LAYER (per-engine) tilt data — bind PER-MATERIAL for the same
+            // multi-prop-layer reason as _Instances above (a global would be clobbered by the last
+            // layer's Submit). Matches the per-material dummy-tilt bind below.
             if (this.tiltSim?.TiltBuffer != null)
-                Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
+                this.SetLodBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
 
             // Metal requires every StructuredBuffer declared by the shader to be bound, even when
             // a runtime branch (_InteractorsEnabled / _TiltEnabled) skips reading it. When this layer
@@ -395,8 +403,10 @@ namespace WorldPainter
                 Application.isPlaying)
                 this.colliderDriver.Tick(this.visibleLod0Buf, this.visibleLod1Buf, this.visibleLod2Buf);
 
+            // PER-MATERIAL (see Build) — never SetGlobal: with 2+ prop layers a shared global _Instances
+            // is clobbered by the last layer's Submit on the deferred draw, so only the last renders.
             if (this.instanceBuffer.InstanceBuffer != null)
-                Shader.SetGlobalBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
+                this.SetLodBuffer(ID_Instances, this.instanceBuffer.InstanceBuffer);
 
             // Live material-state sync — Inspector edits to the layer material (BaseMap, colors,
             // _Cutoff, keyword toggles) propagate to the LOD clones each frame WITHOUT requiring
@@ -408,8 +418,9 @@ namespace WorldPainter
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
             this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
 
+            // PER-MATERIAL (see Build) — never SetGlobal: a sibling prop layer would clobber our tilt.
             if (this.tiltSim?.TiltBuffer != null)
-                Shader.SetGlobalBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
+                this.SetLodBuffer(ID_InstanceTilt, this.tiltSim.TiltBuffer);
 
             if (this.affectedByWind)
             {

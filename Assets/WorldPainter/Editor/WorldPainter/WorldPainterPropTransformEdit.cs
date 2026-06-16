@@ -127,7 +127,7 @@ namespace WorldPainter.Editor
                 currentEvent.button == 0 &&
                 !currentEvent.alt)
             {
-                int picked = PickInstance(authored, currentEvent.mousePosition);
+                int picked = PickInstance(layer, authored, currentEvent.mousePosition);
                 if (picked >= 0)
                 {
                     this.SelectedIndex = picked;
@@ -148,23 +148,46 @@ namespace WorldPainter.Editor
         // ── Click-pick ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Picks the nearest instance to <paramref name="mousePos"/> using SCREEN-SPACE pixel
-        /// distance. The legacy implementation used world-space perpendicular distance, which
-        /// shrank to almost nothing on-screen when the camera was far away — making selection
-        /// impossible in typical Scene-view viewing distances.
+        /// Picks an instance under <paramref name="mousePos"/>. Primary test: cast the cursor ray
+        /// against each instance's LOD0 mesh bounds (transformed by its TRS) so clicking ANYWHERE
+        /// on the visible mesh selects it — not just near the pivot point. Fallback: nearest pivot
+        /// within a screen-space pixel radius (for thin/flat meshes the ray misses, or before a
+        /// LOD0 mesh is assigned). The legacy pivot-only test forced the user to click exactly on
+        /// the instance origin, which is usually buried inside or below the mesh.
         /// </summary>
-        private static int PickInstance(AuthoredInstancesData authored, Vector2 mousePos)
+        private static int PickInstance(PropLayer layer, AuthoredInstancesData authored, Vector2 mousePos)
         {
-            var list      = authored.WorkingList;
-            int best      = -1;
-            float bestPx  = PICK_RADIUS_PX;
-            var camera    = SceneView.currentDrawingSceneView?.camera ?? Camera.current;
-            if (camera == null) return -1;
+            var list   = authored.WorkingList;
+            var camera = SceneView.currentDrawingSceneView?.camera ?? Camera.current;
+            if (camera == null || list.Count == 0) return -1;
 
+            // ── Primary: ray vs each instance's LOD0 mesh OBB ──────────────────
+            Mesh? mesh = ResolveLod0Mesh(layer);
+            if (mesh != null)
+            {
+                Ray     ray     = HandleUtility.GUIPointToWorldRay(mousePos);
+                Bounds  local   = mesh.bounds;
+                int     bestHit = -1;
+                float   bestT   = float.MaxValue;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var rec = list[i];
+                    Matrix4x4 trs = Matrix4x4.TRS(rec.position, rec.rotation, Vector3.one * rec.scale);
+                    if (RayHitsLocalBounds(trs, local, ray, out float t) && t < bestT)
+                    {
+                        bestT   = t;
+                        bestHit = i;
+                    }
+                }
+                if (bestHit >= 0) return bestHit;
+            }
+
+            // ── Fallback: nearest pivot within PICK_RADIUS_PX screen pixels ────
+            int   best   = -1;
+            float bestPx = PICK_RADIUS_PX;
             for (int i = 0; i < list.Count; i++)
             {
-                Vector3 worldPos = list[i].position;
-                Vector3 sp       = HandleUtility.WorldToGUIPoint(worldPos);
+                Vector3 sp = HandleUtility.WorldToGUIPoint(list[i].position);
                 float dx = sp.x - mousePos.x;
                 float dy = sp.y - mousePos.y;
                 float px = Mathf.Sqrt(dx * dx + dy * dy);
@@ -174,8 +197,53 @@ namespace WorldPainter.Editor
                     best   = i;
                 }
             }
-
             return best;
+        }
+
+        /// <summary>Resolves the layer's LOD0 mesh, or null when none is assigned.</summary>
+        private static Mesh? ResolveLod0Mesh(PropLayer layer)
+        {
+            var lods = layer.Render.Lods;
+            return (lods != null && lods.Length > 0) ? lods[0].mesh : null;
+        }
+
+        /// <summary>
+        /// Ray vs an axis-aligned box expressed in an object's LOCAL space (the box is
+        /// <paramref name="localBounds"/>, the object is placed by <paramref name="trs"/>).
+        /// Transforms the world ray into local space and runs the slab test. Returns the nearest
+        /// non-negative hit distance (in the transformed ray's parameter space) via <paramref name="tHit"/>.
+        /// </summary>
+        private static bool RayHitsLocalBounds(Matrix4x4 trs, Bounds localBounds, Ray worldRay, out float tHit)
+        {
+            tHit = 0f;
+            Matrix4x4 inv = trs.inverse;
+            Vector3 o = inv.MultiplyPoint3x4(worldRay.origin);
+            Vector3 d = inv.MultiplyVector(worldRay.direction);
+
+            Vector3 min = localBounds.min;
+            Vector3 max = localBounds.max;
+            float tmin = float.NegativeInfinity;
+            float tmax = float.PositiveInfinity;
+            for (int a = 0; a < 3; a++)
+            {
+                float oa = o[a], da = d[a];
+                if (Mathf.Abs(da) < 1e-8f)
+                {
+                    if (oa < min[a] || oa > max[a]) return false; // parallel to slab & outside
+                }
+                else
+                {
+                    float t1 = (min[a] - oa) / da;
+                    float t2 = (max[a] - oa) / da;
+                    if (t1 > t2) { (t1, t2) = (t2, t1); }
+                    tmin = Mathf.Max(tmin, t1);
+                    tmax = Mathf.Min(tmax, t2);
+                    if (tmin > tmax) return false;
+                }
+            }
+            if (tmax < 0f) return false;          // box entirely behind the ray
+            tHit = tmin >= 0f ? tmin : tmax;       // origin outside vs inside the box
+            return true;
         }
 
         // ── Selection gizmo dots ──────────────────────────────────────────────
@@ -220,40 +288,63 @@ namespace WorldPainter.Editor
 
             var rec = list[idx];
 
-            // ── Position handle ────────────────────────────────────────────────
-            EditorGUI.BeginChangeCheck();
-            Vector3 newPos = Handles.PositionHandle(rec.position, rec.rotation);
-            if (EditorGUI.EndChangeCheck())
+            // Show ONE handle at a time, selected by the active Unity transform tool
+            // (W = Move, E = Rotate, R = Scale). Drawing Position/Rotation/Scale handles all at the
+            // same point made them overlap and steal each other's control IDs — the Scale handle's
+            // centre cube sat under the Position free-move dot and could never be grabbed (the
+            // "scale doesn't work" bug). Gating by Tools.current matches Unity's native multi-tool
+            // UX and makes every handle reliably grabbable.
+            switch (Tools.current)
             {
-                Undo.RecordObject(authored, "Move Prop Instance");
-                rec.position = newPos;
-                CommitRecord(layer, authored, idx, rec);
-                return; // one operation per frame is enough
-            }
+                case Tool.Rotate:
+                {
+                    EditorGUI.BeginChangeCheck();
+                    Quaternion newRot = Handles.RotationHandle(rec.rotation, rec.position);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObject(authored, "Rotate Prop Instance");
+                        rec.rotation = newRot;
+                        CommitRecord(layer, authored, idx, rec);
+                    }
+                    break;
+                }
 
-            // ── Rotation handle ────────────────────────────────────────────────
-            EditorGUI.BeginChangeCheck();
-            Quaternion newRot = Handles.RotationHandle(rec.rotation, rec.position);
-            if (EditorGUI.EndChangeCheck())
-            {
-                Undo.RecordObject(authored, "Rotate Prop Instance");
-                rec.rotation = newRot;
-                CommitRecord(layer, authored, idx, rec);
-                return;
-            }
+                case Tool.Scale:
+                {
+                    EditorGUI.BeginChangeCheck();
+                    Vector3 oldScale = Vector3.one * rec.scale;
+                    Vector3 newScale = Handles.ScaleHandle(
+                        oldScale, rec.position, rec.rotation,
+                        HandleUtility.GetHandleSize(rec.position));
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObject(authored, "Scale Prop Instance");
+                        // Uniform scale: take whichever axis the user dragged. The centre cube
+                        // changes all three equally; an individual axis box changes only that one.
+                        // Reading only newScale.x silently ignored Y/Z-axis drags — the other half
+                        // of the "scale doesn't work" bug.
+                        float newUniform = rec.scale;
+                        if      (Mathf.Abs(newScale.x - oldScale.x) > 1e-6f) newUniform = newScale.x;
+                        else if (Mathf.Abs(newScale.y - oldScale.y) > 1e-6f) newUniform = newScale.y;
+                        else if (Mathf.Abs(newScale.z - oldScale.z) > 1e-6f) newUniform = newScale.z;
+                        rec.scale = Mathf.Max(0.0001f, newUniform);
+                        CommitRecord(layer, authored, idx, rec);
+                    }
+                    break;
+                }
 
-            // ── Scale handle ───────────────────────────────────────────────────
-            EditorGUI.BeginChangeCheck();
-            Vector3 newScaleVec = Handles.ScaleHandle(
-                Vector3.one * rec.scale,
-                rec.position,
-                rec.rotation,
-                HandleUtility.GetHandleSize(rec.position));
-            if (EditorGUI.EndChangeCheck())
-            {
-                Undo.RecordObject(authored, "Scale Prop Instance");
-                rec.scale = Mathf.Max(0.0001f, newScaleVec.x);
-                CommitRecord(layer, authored, idx, rec);
+                default: // Tool.Move and any non-transform tool → position handle
+                {
+                    EditorGUI.BeginChangeCheck();
+                    Vector3 newPos = Handles.PositionHandle(rec.position, rec.rotation);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObject(authored, "Move Prop Instance");
+                        rec.position = newPos;
+                        CommitRecord(layer, authored, idx, rec);
+                    }
+                    break;
+                }
             }
         }
 

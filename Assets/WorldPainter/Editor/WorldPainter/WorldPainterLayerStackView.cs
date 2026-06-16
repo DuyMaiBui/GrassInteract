@@ -250,22 +250,29 @@ namespace WorldPainter.Editor
         /// </summary>
         private Texture2D? ResolveLod0Thumb(WorldPainterLayer layer, int size)
         {
-            Mesh?     mesh = null;
-            Material? mat  = null;
+            Mesh? mesh = null;
 
             if (layer is GrassLayer grass)
             {
                 var lods = grass.Render.Lods;
-                if (lods != null && lods.Length > 0) { mesh = lods[0].mesh; mat = grass.Render.Material; }
+                if (lods != null && lods.Length > 0) mesh = lods[0].mesh;
             }
             else if (layer is PropLayer prop)
             {
                 var lods = prop.Render.Lods;
-                if (lods != null && lods.Length > 0) { mesh = lods[0].mesh; mat = prop.Render.Material; }
+                if (lods != null && lods.Length > 0) mesh = lods[0].mesh;
             }
 
             if (mesh == null) return null;
-            return this.previewCache.GetOrRender(layer.GetInstanceID(), mesh, mat, size);
+
+            // Pass a NULL material so the preview cache renders the LOD0 mesh with its stock URP/Lit
+            // fallback. The layer's OWN material uses the procedural-instancing shaders
+            // (WorldPainter/ScatterInstanced / InstancedGrass) which read _Instances / _VisibleIndices
+            // StructuredBuffers that only exist while the GPU engine is running. PreviewRenderUtility
+            // binds none of them, so drawing the LOD0 mesh with the layer material renders NOTHING —
+            // a blank thumbnail even though a LOD0 mesh IS assigned. Same fix as the inspector 3-D
+            // preview (PropLayerEditor.DrawPreview).
+            return this.previewCache.GetOrRender(layer.GetInstanceID(), mesh, null, size);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
