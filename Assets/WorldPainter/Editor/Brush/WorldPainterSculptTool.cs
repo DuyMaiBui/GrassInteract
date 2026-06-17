@@ -104,6 +104,12 @@ namespace WorldPainter.Editor
             WorldPainterState.ActiveLayerChanged += this.OnActiveLayerChangedForTransform;
 
             EditorApplication.update += this.OnEditorUpdate;
+
+            // Destroy the overlay material/mesh before a domain reload too: Unity does NOT reliably
+            // call the inspector's OnDisable (→ our Disable) ahead of an assembly recompile, so
+            // without this the lazily-created resources would only be reclaimed by HideAndDontSave
+            // auto-destroy, leaving stale references. Mirrors TerrainBrushPreview's reload cleanup.
+            AssemblyReloadEvents.beforeAssemblyReload += this.DisposeDensityOverlay;
         }
 
         /// <summary>Unsubscribes events + tears down any in-flight stroke. Called by the inspector on disable.</summary>
@@ -113,6 +119,7 @@ namespace WorldPainter.Editor
             Undo.undoRedoPerformed -= this.OnUndoRedoPerformed;
             WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChangedForTransform;
             EditorApplication.update -= this.OnEditorUpdate;
+            AssemblyReloadEvents.beforeAssemblyReload -= this.DisposeDensityOverlay;
 
             if (this.stroke.InStroke)
                 this.TeardownActiveStroke(WorldPainterState.ActivePainter);
@@ -120,6 +127,7 @@ namespace WorldPainter.Editor
                 this.rtCache.ReleaseAll();
 
             this.falloffLut.Dispose();
+            this.DisposeDensityOverlay();
         }
 
         private void OnEditorUpdate()
@@ -319,6 +327,13 @@ namespace WorldPainter.Editor
                     return;
                 }
             }
+
+            // Density heatmap overlay: during a grass stroke the blade scatter is deferred to
+            // mouse-up (perf — PreviewActiveScatter no longer rebuilds mid-drag), so draw the
+            // painted-density footprint per touched tile as the live indicator. Repaint-only —
+            // Graphics.DrawMeshNow requires it.
+            if (e.type == EventType.Repaint && this.stroke.InStroke)
+                this.DrawDensityOverlay(painter);
 
             switch (e.GetTypeForControl(controlId))
             {

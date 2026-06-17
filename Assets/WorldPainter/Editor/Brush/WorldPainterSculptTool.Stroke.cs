@@ -153,11 +153,16 @@ namespace WorldPainter.Editor
         }
 
         /// <summary>
-        /// Flicker-free live scatter preview for the active GRASS layer during a stroke. Flushes the
-        /// touched-tile density RTs synchronously (so <c>GetTileDensity</c> reads the just-painted
-        /// values), then rebuilds the layer via the DEFERRED-dispose path — the old engine is kept
-        /// alive one extra frame so its pending RenderMeshIndirect draw never reads a freed argsLodN
-        /// buffer (the black-square flicker the old per-frame rebuild caused).
+        /// Live density-paint feedback for the active GRASS layer during a stroke. Flushes the
+        /// touched-tile density RTs synchronously (so the committed density texture stays in step
+        /// with what was painted), then repaints the Scene view so the density heatmap overlay
+        /// (<see cref="DrawDensityOverlay"/>) reflects the just-painted footprint.
+        ///
+        /// NOTE: the grass-blade scatter is deliberately NOT rebuilt here. Re-scattering every
+        /// painted tile each ~15 Hz drain (<see cref="DrainAndPreview"/>) is the cost that made
+        /// large-area grass painting lag — it scales with total painted area, not brush size. The
+        /// single blade rebuild now happens once on mouse-up (<see cref="HandleMouseUp"/>); during
+        /// the drag the heatmap overlay stands in for the blades as the painted-area indicator.
         ///
         /// Props are not previewed here — prop placement is click-based, not a density drag.
         /// </summary>
@@ -168,7 +173,6 @@ namespace WorldPainter.Editor
             if (layer == null) return;
 
             this.FlushAllDensityRTs();
-            painter.RebuildGrassLayerDeferred(layer);
             UnityEditor.SceneView.RepaintAll();
         }
 
