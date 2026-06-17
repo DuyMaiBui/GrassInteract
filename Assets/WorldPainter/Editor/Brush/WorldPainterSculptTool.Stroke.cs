@@ -53,29 +53,51 @@ namespace WorldPainter.Editor
                 }
             }
 
-            // Initial stamp at mouse-down position.
+            // Fresh stamp buffer + drain clock for this stroke.
+            this.stampBuffer.Clear();
+            this.lastDrainTime = EditorApplication.timeSinceStartup;
+
+            // Initial stamp at mouse-down position — dispatched immediately for instant feedback.
             this.DoStamp(painter, worldPos);
             this.CommitLastStrokedState();
+
+            // Live scatter preview at the click point (grass): flush density + flicker-free deferred
+            // rebuild so the first dab shows under the cursor without waiting for mouse-up.
+            this.PreviewActiveScatter(painter);
         }
 
         private void HandleMouseDrag(WorldPainter painter, Vector3 worldPos)
         {
             var brush = WorldPainterState.Brush;
 
-            // Spacing-stamping: stamps every spacingM metres along path.
+            // Spacing-stamping: enqueue (cheap, no GPU) every spacingM metres along the path. The
+            // throttled drain dispatches the batch + one scatter rebuild — decoupling mouse-event
+            // frequency from GPU work is what removes the drag stutter.
             this.stroke.Advance(
                 worldPos,
                 brush.spacing,
                 brush.flow,
-                (stampPos, flow) => this.DoStamp(painter, stampPos));
+                (stampPos, flow) => this.stampBuffer.Enqueue(stampPos));
 
-            this.CommitLastStrokedState();
+            // Opportunistic drain: if the cadence interval already elapsed, flush this tick instead
+            // of waiting for the next editor update.
+            this.MaybeDrain(painter);
         }
 
         private void HandleMouseUp(WorldPainter painter)
         {
-            // Capture the stroke's layer kind before teardown clears active-layer state.
+            // Drain any stamps buffered but not yet dispatched by the last drain tick, so the full
+            // stroke is committed (DoStamp populates strokeTouchedCoords, which TeardownActiveStroke
+            // reads) before teardown flushes the density RTs. LastStrokedTileSet is committed by
+            // TeardownActiveStroke's CommitLastStrokedState below (unchanged from the pre-buffer path).
+            while (this.stampBuffer.TryDequeue(out Vector3 pending))
+                this.DoStamp(painter, pending);
+
+            // Capture the stroke's layer kind + active grass layer before teardown clears state.
             LayerType strokeKind = WorldPainterState.EffectiveLayerType(painter);
+            GrassLayer? grassLayer = strokeKind == LayerType.Grass
+                ? BrushToolTargets.ResolveActiveGrassLayer(painter)
+                : null;
 
             this.TeardownActiveStroke(painter);
             this.CommitLastStrokedState();
@@ -87,14 +109,67 @@ namespace WorldPainter.Editor
                 this.undoGroupId = -1;
             }
 
-            // Live edit-mode preview: a scatter stroke (grass density or prop instances) changed
-            // the committed layer data — rebuild the scatter engines so the Scene view shows it.
-            // TeardownActiveStroke has already flushed the density writeback synchronously above.
-            if (strokeKind == LayerType.Grass || strokeKind == LayerType.Props)
+            // Live edit-mode preview: a scatter stroke changed the committed layer data — rebuild so
+            // the Scene view shows it. TeardownActiveStroke already flushed density writeback above.
+            if (strokeKind == LayerType.Grass && grassLayer != null)
+            {
+                // DEFERRED rebuild (not the immediate RebuildScatterPreview): engines retired by the
+                // last in-drag drain keep their frame margin and dispose via the tick countdown,
+                // instead of being force-freed here while their indirect draw is still pending
+                // (end-of-stroke flicker). Grass-only — a density stroke leaves props untouched.
+                painter.RebuildGrassLayerDeferred(grassLayer);
+                UnityEditor.SceneView.RepaintAll();
+            }
+            else if (strokeKind == LayerType.Props)
             {
                 painter.RebuildScatterPreview();
                 UnityEditor.SceneView.RepaintAll();
             }
+        }
+
+        // ── Buffered drain (smooth-paint pipeline) ────────────────────────────
+
+        /// <summary>
+        /// Drains the stamp buffer + refreshes the live scatter preview when the ~15 Hz cadence
+        /// interval has elapsed. Called from the editor update loop (covers a paused-but-held drag)
+        /// and opportunistically at the end of <see cref="HandleMouseDrag"/>.
+        /// </summary>
+        private void MaybeDrain(WorldPainter painter)
+        {
+            if (this.stampBuffer.Count == 0) return;
+            double now = EditorApplication.timeSinceStartup;
+            if (now - this.lastDrainTime < DRAIN_INTERVAL_SEC) return;
+            this.lastDrainTime = now;
+            this.DrainAndPreview(painter);
+        }
+
+        /// <summary>Pops ALL buffered stamps, dispatches them, then refreshes the live scatter preview.</summary>
+        private void DrainAndPreview(WorldPainter painter)
+        {
+            while (this.stampBuffer.TryDequeue(out Vector3 pos))
+                this.DoStamp(painter, pos);
+            this.CommitLastStrokedState();
+            this.PreviewActiveScatter(painter);
+        }
+
+        /// <summary>
+        /// Flicker-free live scatter preview for the active GRASS layer during a stroke. Flushes the
+        /// touched-tile density RTs synchronously (so <c>GetTileDensity</c> reads the just-painted
+        /// values), then rebuilds the layer via the DEFERRED-dispose path — the old engine is kept
+        /// alive one extra frame so its pending RenderMeshIndirect draw never reads a freed argsLodN
+        /// buffer (the black-square flicker the old per-frame rebuild caused).
+        ///
+        /// Props are not previewed here — prop placement is click-based, not a density drag.
+        /// </summary>
+        private void PreviewActiveScatter(WorldPainter painter)
+        {
+            if (WorldPainterState.EffectiveLayerType(painter) != LayerType.Grass) return;
+            GrassLayer? layer = BrushToolTargets.ResolveActiveGrassLayer(painter);
+            if (layer == null) return;
+
+            this.FlushAllDensityRTs();
+            painter.RebuildGrassLayerDeferred(layer);
+            UnityEditor.SceneView.RepaintAll();
         }
 
         // ── Teardown ──────────────────────────────────────────────────────────
@@ -227,125 +302,12 @@ namespace WorldPainter.Editor
 
         /// <summary>
         /// Resolves the brush contact point in PAINTING space (= WorldPainter root local space).
-        /// <para>
-        /// The analytical terrain raycasts (TryMapSurfaceHit / TryInlineTilesSurfaceHit) operate
-        /// entirely in painting space, so the incoming world-space camera ray is converted to
-        /// painting space before those casts. The Physics.Raycast fallback (for scatter-prop
-        /// colliders) still fires the original world-space ray and converts the result back to
-        /// painting space via InverseTransformPoint. For an identity root the transform is a
-        /// passthrough — zero behaviour change.
-        /// </para>
+        /// Thin wrapper over the SSOT <see cref="WorldPainterTerrainRaycast.TryPick"/> (shared with
+        /// the click-to-select terrain picker) — see that helper for the two-pass analytic-surface
+        /// rationale.
         /// </summary>
         private bool TryGetBrushWorldPoint(Ray worldRay, WorldPainter painter, out Vector3 paintingPoint)
-        {
-            // CPU-authoritative terrain hit FIRST (SSOT with the rendered mesh). The GPU terrain
-            // renders from the full-res (257) height texture via VTF, but the streamed physics
-            // collider is a low-res (65) nearest-neighbour downsample that can sit metres off the
-            // visible surface on slopes — and it is stale right after a sculpt. Sampling the SAME
-            // height the mesh renders (TerrainHeightSampleCpu) makes the brush / object placement
-            // land exactly on the visible terrain. Physics.Raycast is the fallback for non-terrain
-            // pickables (scatter prop colliders) only when the ray is not over a terrain tile.
-            // Tiles live in the WorldMapAsset (SSOT, P2+); painter.Tiles is the legacy back-compat list.
-
-            // Convert the world-space scene camera ray to painting space so the analytical terrain
-            // methods receive coordinates consistent with TerrainWorldGrid / tile heightmaps.
-            Transform root = painter.transform;
-            var paintingRay = new Ray(
-                root.InverseTransformPoint(worldRay.origin),
-                root.InverseTransformDirection(worldRay.direction));
-
-            if (painter.Map != null && TryMapSurfaceHit(paintingRay, painter.Map, out paintingPoint))
-                return true;
-            if (TryInlineTilesSurfaceHit(paintingRay, painter, out paintingPoint))
-                return true;
-
-            // Physics.Raycast operates in world space — use the original world-space ray and
-            // convert the hit point back to painting space.
-            if (Physics.Raycast(worldRay, out RaycastHit hit, Mathf.Infinity))
-            {
-                paintingPoint = root.InverseTransformPoint(hit.point); return true;
-            }
-
-            paintingPoint = Vector3.zero;
-            return false;
-        }
-
-        /// <summary>
-        /// CPU-authoritative ray↔terrain-surface intersection for the legacy inline
-        /// <c>painter.Tiles</c> list (empty under the WorldMapAsset SSOT path). Same two-pass
-        /// coarse-plane → CPU height sample → re-intersect as <see cref="TryMapSurfaceHit"/>,
-        /// guarding that the coarse XZ actually falls inside the candidate tile.
-        /// </summary>
-        private static bool TryInlineTilesSurfaceHit(Ray ray, WorldPainter painter, out Vector3 worldPoint)
-        {
-            worldPoint = Vector3.zero;
-            foreach (var entry in painter.Tiles)
-            {
-                var tile = entry.tileAsset;
-                if (tile == null) continue;
-                // Coarse plane at minHeight (flat zero-filled tiles sit exactly here; the second
-                // pass corrects Y on sculpted tiles). midY would float above the camera on a fresh
-                // flat tile and make Plane.Raycast miss — see TryMapSurfaceHit for the rationale.
-                var coarse = new Plane(Vector3.up, new Vector3(0f, tile.minHeight, 0f));
-                if (!coarse.Raycast(ray, out float d0) || d0 <= 0f || d0 >= 1e6f) continue;
-
-                Vector3 approx = ray.GetPoint(d0);
-                if (TerrainWorldGrid.WorldToTileCoord(approx.x, approx.z) != tile.tileCoord) continue;
-
-                if (TerrainHeightSampleCpu.TrySampleWorld(tile, approx.x, approx.z, out float surfaceY))
-                {
-                    var surface = new Plane(Vector3.up, new Vector3(0f, surfaceY, 0f));
-                    if (surface.Raycast(ray, out float d1) && d1 > 0f && d1 < 1e6f)
-                    {
-                        worldPoint = ray.GetPoint(d1); return true;
-                    }
-                }
-
-                worldPoint = approx; return true; // coarse hit when sample failed
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// Analytic ray↔terrain-surface intersection for edit mode (no collider on the GPU
-        /// terrain). Two-pass: intersect a coarse surface plane to get an approximate XZ,
-        /// sample the real surface height there, then re-intersect at that height so the brush
-        /// sits on the terrain (exact for flat tiles, close for gentle slopes).
-        ///
-        /// Uses <c>minHeight</c> for the coarse plane, NOT <c>midY=(min+max)/2</c>. The mid-
-        /// point would be above the scene camera for a newly-created flat tile (minHeight=0,
-        /// maxHeight=512 ⇒ midY=256), causing <c>Plane.Raycast</c> to miss and returning no
-        /// hit, which makes every frame report <c>hasHit=false</c> — disabling both the preview
-        /// ring and all sculpt dispatch.
-        /// </summary>
-        private static bool TryMapSurfaceHit(Ray ray, WorldMapAsset map, out Vector3 worldPoint)
-        {
-            worldPoint = Vector3.zero;
-            foreach (var tile in map.EnumerateTiles())
-            {
-                if (tile == null) continue;
-                // Coarse plane at minHeight — the surface for a flat zero-filled tile is exactly
-                // here. For sculpted tiles with varying height the second pass corrects the Y.
-                var coarse = new Plane(Vector3.up, new Vector3(0f, tile.minHeight, 0f));
-                if (!coarse.Raycast(ray, out float d0) || d0 <= 0f || d0 >= 1e6f) continue;
-
-                Vector3    approx = ray.GetPoint(d0);
-                Vector2Int coord  = TerrainWorldGrid.WorldToTileCoord(approx.x, approx.z);
-                var surfaceTile   = map.GetTile(coord);
-                if (surfaceTile != null &&
-                    TerrainHeightSampleCpu.TrySampleWorld(surfaceTile, approx.x, approx.z, out float surfaceY))
-                {
-                    var surface = new Plane(Vector3.up, new Vector3(0f, surfaceY, 0f));
-                    if (surface.Raycast(ray, out float d1) && d1 > 0f && d1 < 1e6f)
-                    {
-                        worldPoint = ray.GetPoint(d1); return true;
-                    }
-                }
-
-                worldPoint = approx; return true; // coarse hit when off-tile / sample failed
-            }
-            return false;
-        }
+            => WorldPainterTerrainRaycast.TryPick(worldRay, painter, out paintingPoint);
 
         private void CommitLastStrokedState()
         {
