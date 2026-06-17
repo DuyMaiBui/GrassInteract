@@ -62,12 +62,6 @@ namespace WorldPainter.Editor
         {
             var brush = WorldPainterState.Brush;
 
-            // Single-placement instance tool places exactly one instance per click — ignore drag.
-            LayerType dragKind = WorldPainterState.EffectiveLayerType(painter);
-            IBrushTool? dragTool = BrushToolRegistry.ResolveActiveTool(
-                dragKind, WorldPainterState.ActiveBrushToolId);
-            if (dragTool is InstanceSingleTool) return;
-
             // Spacing-stamping: stamps every spacingM metres along path.
             this.stroke.Advance(
                 worldPos,

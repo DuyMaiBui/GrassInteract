@@ -43,7 +43,6 @@ namespace WorldPainter.Editor
         {
             new InstancePlaceTool(),
             new InstanceEraseTool(),
-            new InstanceSingleTool(),
             new InstanceSelectTool(),
         };
 

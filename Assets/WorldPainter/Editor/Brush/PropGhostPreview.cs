@@ -28,9 +28,12 @@ namespace WorldPainter.Editor
 
         // ── Pushed state (set each event by the sculpt tool) ──────────────────
         private static PropLayer?  ghostLayer;
-        private static Vector3     ghostCursor;
+        private static Vector3     ghostCursor;        // PAINTING space (root-local) — same space the emitter stores.
+        private static Transform?  ghostRoot;          // Painting → world. Null = identity root.
         private static bool        ghostValid;
         private static bool        ghostVisible;
+        private static float       ghostYawDeg;
+        private static float       ghostScaleMul = 1f;
         private static double      lastSet = -1000d;
         private const  double      FRESH_SECONDS = 0.25;
 
@@ -60,14 +63,22 @@ namespace WorldPainter.Editor
         // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Sculpt-tool back-compat shim — kept so the existing call site
-        /// <c>PropGhostPreview.Draw(layer, worldPos, valid)</c> keeps working.
+        /// Push the ghost state for this event. <paramref name="cursorPainting"/> is in PAINTING
+        /// space (root-local) — the SAME space <see cref="WorldPainterPropStampEmitter.EmitExactlyOneAt"/>
+        /// receives and stores — so the anchor/align/yaw math runs identically in both paths. The
+        /// pivot is then mapped to world for rendering via <paramref name="root"/> (= the WorldPainter
+        /// transform), exactly as the runtime shader maps the stored painting pivot to world. Pass a
+        /// null root for an identity painter (world == painting).
         /// </summary>
-        public static void Draw(PropLayer layer, Vector3 cursorWorld, bool valid)
+        public static void Draw(PropLayer layer, Vector3 cursorPainting, bool valid, Transform? root,
+            float yawDeg = 0f, float scaleMul = 1f)
         {
             ghostLayer    = layer;
-            ghostCursor   = cursorWorld;
+            ghostCursor   = cursorPainting;
+            ghostRoot     = root;
             ghostValid    = valid;
+            ghostYawDeg   = yawDeg;
+            ghostScaleMul = scaleMul;
             ghostVisible  = true;
             lastSet       = EditorApplication.timeSinceStartup;
         }
@@ -80,30 +91,41 @@ namespace WorldPainter.Editor
             if (EditorApplication.timeSinceStartup - lastSet > FRESH_SECONDS) return;
             if (Event.current.type != EventType.Repaint) return;
 
+            // Painting → world. Both the pivot (rendered below) and the fallback handle map through
+            // this so the ghost tracks the rendered prop under a non-identity WorldPainter root.
+            Matrix4x4 rootMatrix = ghostRoot != null ? ghostRoot.localToWorldMatrix : Matrix4x4.identity;
+
             ScatterLod[] lods = ghostLayer.Render.Lods;
             if (lods.Length == 0 || lods[0].mesh == null)
             {
                 // No LOD0 — fall back to a wire disc handle so the user sees SOMETHING and the
                 // Setup-panel warning will direct them to assign a mesh.
-                DrawFallbackHandle(ghostCursor, ghostValid);
+                DrawFallbackHandle(rootMatrix.MultiplyPoint3x4(ghostCursor), ghostValid);
                 return;
             }
             Mesh mesh = lods[0].mesh!;
 
             // Mirror EmitExactlyOneAt EXACTLY — every line must match so the ghost is byte-identical
-            // to the placed instance.
+            // to the placed instance. All math below is in PAINTING space (like the emitter); only
+            // the final matrix is mapped to world via rootMatrix.
             Vector2 scaleRange = ghostLayer.OverrideScaleRange
                 ? ghostLayer.ScaleRangeOverride
                 : new Vector2(1f, 1f);
             float scale = (scaleRange.x + scaleRange.y) * 0.5f;
             if (scale <= 0f) scale = 1f;
 
+            // ── BYTE-IDENTICAL apply block — keep in lockstep with ─────────────
+            //    WorldPainterPropStampEmitter.EmitExactlyOneAt. The sticky E/R-adjust yaw/scale and
+            //    the align-to-normal compose order (alignRot * yawRot) MUST match there exactly, or
+            //    the placed instance drifts from this ghost.
+            scale *= ghostScaleMul;
+
             // Honour PropAlignToNormal so the ghost matches the placed instance on slopes. When the
             // anchor is non-zero, identity-vs-aligned rotation pivots the entire mesh around the
             // anchor, which the user perceives as a horizontal position offset between ghost and
             // landed mesh (~25 cm on a 30° slope with anchor=(0,0.5,0)). Sampling the same surface
             // sampler the emitter uses keeps both paths byte-identical.
-            Quaternion rot = Quaternion.identity;
+            Quaternion alignRot = Quaternion.identity;
             if (ghostLayer.PropAlignToNormal)
             {
                 var sampler = WorldPainterState.ActivePainter?.ScatterSampler;
@@ -111,14 +133,17 @@ namespace WorldPainter.Editor
                     sampler.TrySample(ghostCursor.x, ghostCursor.z, out var hit) &&
                     hit.Normal.sqrMagnitude > 0.01f)
                 {
-                    rot = Quaternion.FromToRotation(Vector3.up, hit.Normal);
+                    alignRot = Quaternion.FromToRotation(Vector3.up, hit.Normal);
                 }
             }
+            Quaternion rot = alignRot * Quaternion.Euler(0f, ghostYawDeg, 0f);
 
             Vector3 anchor = ghostLayer.AnchorOffsetLocal;
             Vector3 pivot  = ghostCursor - rot * (anchor * scale);
 
-            Matrix4x4 matrix = Matrix4x4.TRS(pivot, rot, Vector3.one * scale);
+            // pivot/rot/scale are painting-space; map to world for rendering exactly as the runtime
+            // shader maps the stored painting pivot to world (rootMatrix * paintingTRS).
+            Matrix4x4 matrix = rootMatrix * Matrix4x4.TRS(pivot, rot, Vector3.one * scale);
             Color tint = ghostValid ? COLOR_OK : COLOR_BAD;
             Material mat = ResolveDrawMaterial(ghostLayer.Render.Material, tint);
 

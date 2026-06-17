@@ -75,6 +75,12 @@ namespace WorldPainter
         // ── Packing constants ─────────────────────────────────────────────────
         private const float YAW_ENCODE_SCALE = 65535f / 360f;
 
+        // Scale-encode ceiling = max(layer range, observed instance scale) × this margin. The margin
+        // gives the editor Select-tool scale handle room to GROW an instance past its current size
+        // before the decode divisor (_ScaleMax2) has to be raised. Without headroom a default layer
+        // (scaleRange (1,1) ⇒ ceiling 1) clamps every scale-up to 1 and the handle looks dead.
+        private const float SCALE_HEADROOM = 1.5f;
+
         // ── CPU-side baked arrays ─────────────────────────────────────────────
         private InstanceData[]? instances;
         private ChunkAabb[]?    chunkAabbs;
@@ -203,7 +209,24 @@ namespace WorldPainter
             this.TotalChunks    = totalChunks;
             this.TotalInstances = totalInst;
 
-            float maxScale = scaleRangeMax > 0f ? scaleRangeMax : 1f;
+            // Derive the scale-encode ceiling from the LARGER of the layer's configured range and the
+            // actual baked instance scales (a Select-tool edit can push an instance past the layer
+            // range), then add headroom so the next Select scale-up has room before the divisor must
+            // be raised. Re-derived on every (re)bake, so the deferred mouse-up rebuild restores a
+            // ceiling that preserves any enlarged instance instead of clamping it back down.
+            float observedMax = 0f;
+            for (int b = 0; b < scatter.BaseSlabs.Length; ++b)
+            {
+                Matrix4x4[] mat = scatter.BaseSlabs[b];
+                int cnt = scatter.SlabCounts[b];
+                for (int k = 0; k < cnt; ++k)
+                {
+                    float s = mat[k].lossyScale.x;
+                    if (s > observedMax) observedMax = s;
+                }
+            }
+            float rangeMax = scaleRangeMax > 0f ? scaleRangeMax : 1f;
+            float maxScale = Mathf.Max(rangeMax, observedMax) * SCALE_HEADROOM;
             this.ScaleMax = maxScale;
             float encodeScaleScale = 65535f / maxScale;
 
@@ -395,60 +418,6 @@ namespace WorldPainter
                     GraphicsBuffer.Target.Structured, totalChunks, RANGE_STRIDE);
                 this.rangeBuf.SetData(rangeOut);
             }
-
-            Debug.Log($"[ChunkedInstanceBuffer] Baked: TotalInstances={totalInst}, " +
-                      $"Grid={gridX}×{gridZ} ({totalChunks} chunks), CellSize={cellSize}m, " +
-                      $"ScaleMax={maxScale:F3}, MeshExtent={meshExtent:F3}m");
-
-            // ── DIAGNOSTIC (remove with matching prints) ──────────────────────
-            // Inspect the highest authored-index instance's encoded GPU record. Compare:
-            //   • posWS   should match the most-recent EmitExactlyOneAt.pivot
-            //   • decoded yawDeg + scale should match the stored rec.rotation.eulerAngles.y / scale
-            //   • The sortedToAuthMap permutation reveals which sorted slot it landed in
-            if (totalInst > 0)
-            {
-                int authoredIdx = totalInst - 1;
-                int sortedIdx   = -1;
-                for (int i = 0; i < totalInst; i++)
-                {
-                    if (sortedToAuthMap[i] == authoredIdx) { sortedIdx = i; break; }
-                }
-                var rec = instOut[sortedIdx];
-                float decodedYaw   = (float)((rec.packedYawScale >> 16) & 0xFFFFu) / 65535f * 360f;
-                float decodedScale = (float)( rec.packedYawScale        & 0xFFFFu) / 65535f * maxScale;
-
-                // Find which chunk owns this sortedIdx and inspect its range + AABB. If the
-                // chunk's AABB doesn't contain rec.posWS, frustum cull may reject the new
-                // instance entirely (and the "wrong-position cube" you see is some OLD instance).
-                int owningChunk = -1;
-                for (int c = 0; c < totalChunks; c++)
-                {
-                    var r = rangeOut[c];
-                    if (sortedIdx >= (int)r.start && sortedIdx < (int)(r.start + r.count))
-                    { owningChunk = c; break; }
-                }
-                string chunkInfo = owningChunk >= 0
-                    ? $"chunk={owningChunk} range=[{rangeOut[owningChunk].start},+{rangeOut[owningChunk].count}) " +
-                      $"aabb.min={aabbOut[owningChunk].min:F2} aabb.max={aabbOut[owningChunk].max:F2}"
-                    : "chunk=NOT_FOUND";
-
-                Debug.Log(
-                    $"[ChunkedInstanceBuffer] Latest record (authoredIdx={authoredIdx} sortedIdx={sortedIdx}): " +
-                    $"posWS={rec.posWS:F4} decodedYaw={decodedYaw:F2}° decodedScale={decodedScale:F4} " +
-                    $"oriented={oriented} | {chunkInfo}");
-
-                // ── DIAGNOSTIC: visualize the stored posWS in the scene view ────
-                // Persistent 30-second debug rays at the LATEST instance's posWS so the user
-                // can compare "where the data says the cube is" against "where the cube is
-                // actually rendered." If the rays and the cube don't coincide, the shader is
-                // rendering at a different world position than inst.posWS.
-                //   - RED ray pointing UP from posWS (5 m tall)
-                //   - GREEN ray pointing NORTH (+Z) for orientation (1 m)
-                //   - BLUE ray pointing EAST (+X) for orientation (1 m)
-                Debug.DrawRay(rec.posWS, Vector3.up    * 5f, Color.red,   30f, false);
-                Debug.DrawRay(rec.posWS, Vector3.forward * 1f, Color.green, 30f, false);
-                Debug.DrawRay(rec.posWS, Vector3.right   * 1f, Color.blue,  30f, false);
-            }
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -502,6 +471,20 @@ namespace WorldPainter
             if (sortedIdx < 0 || sortedIdx >= this.instances.Length)
                 return false;
 
+            // The decode divisor (_ScaleMax2) is GLOBAL to this layer, so growing one instance past
+            // the current ceiling forces a re-encode of EVERY slot against the raised divisor. That
+            // is a data re-upload (one whole-buffer SetData), NOT a GraphicsBuffer realloc — so it
+            // does NOT trigger the argsLodN teardown flicker the deferred full rebuild guards against.
+            // The common in-range drag skips this and keeps the O(1) single-slot path below.
+            bool reuploadAll = false;
+            if (scale > this.ScaleMax)
+            {
+                float oldMax = this.ScaleMax > 0f ? this.ScaleMax : 1f;
+                this.ReencodeAllScales(oldMax, scale * SCALE_HEADROOM);
+                this.ScaleMax = scale * SCALE_HEADROOM;
+                reuploadAll   = true;
+            }
+
             float maxScale = this.ScaleMax > 0f ? this.ScaleMax : 1f;
             uint yawQ   = (uint)Mathf.RoundToInt(Mathf.Clamp(yawDeg, 0f, 360f)    * YAW_ENCODE_SCALE);
             uint scaleQ = (uint)Mathf.RoundToInt(Mathf.Clamp(scale,  0f, maxScale) * (65535f / maxScale));
@@ -513,10 +496,42 @@ namespace WorldPainter
             // rec.lodHash preserved — see summary.
             this.instances[sortedIdx] = rec;
 
-            this.patchScratch[0] = rec;
-            // SetData(managedArray, managedStartIndex, graphicsBufferStartIndex, count): single-slot write.
-            this.instanceBuf.SetData(this.patchScratch, 0, sortedIdx, 1);
+            if (reuploadAll)
+            {
+                // Re-encode touched every slot's scale field — upload the whole buffer once.
+                this.instanceBuf.SetData(this.instances);
+            }
+            else
+            {
+                this.patchScratch[0] = rec;
+                // SetData(managedArray, managedStartIndex, graphicsBufferStartIndex, count): single-slot write.
+                this.instanceBuf.SetData(this.patchScratch, 0, sortedIdx, 1);
+            }
             return true;
+        }
+
+        /// <summary>
+        /// Re-quantizes every slot's packed scale field from the <paramref name="oldMax"/> decode
+        /// ceiling to <paramref name="newMax"/>, preserving the yaw bits. Called when a live
+        /// Select-tool scale drag pushes one instance past the current ceiling — the decode divisor
+        /// is per-layer, so all slots must be re-encoded against the new ceiling before the buffer is
+        /// re-uploaded. Caller is responsible for the subsequent <c>SetData</c> and for refreshing
+        /// the <c>_ScaleMax2</c> uniform via <see cref="ScaleMax"/>.
+        /// </summary>
+        private void ReencodeAllScales(float oldMax, float newMax)
+        {
+            if (this.instances == null || newMax <= 0f) return;
+            float decode = oldMax / 65535f;
+            float encode = 65535f / newMax;
+            for (int i = 0; i < this.instances.Length; ++i)
+            {
+                InstanceData rec = this.instances[i];
+                uint  yawBits = rec.packedYawScale & 0xFFFF0000u;
+                float s       = (rec.packedYawScale & 0xFFFFu) * decode;
+                uint  scaleQ  = (uint)Mathf.RoundToInt(Mathf.Clamp(s, 0f, newMax) * encode);
+                rec.packedYawScale = yawBits | (scaleQ & 0xFFFFu);
+                this.instances[i]  = rec;
+            }
         }
 
         // ─────────────────────────────────────────────────────────────────────

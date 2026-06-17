@@ -20,7 +20,6 @@ Per tool id (the part after the dot), with a `_d` suffix variant for pro/dark sk
 | `splat.erase`     | `erase.png`  | `erase_d.png` |
 | `instance.place`  | `place.png`  | `place_d.png` |
 | `instance.erase`  | `erase.png`  | `erase_d.png` |
-| `instance.single` | `single.png` | `single_d.png`|
 
 If only one variant is authored, both skins fall back to it.
 

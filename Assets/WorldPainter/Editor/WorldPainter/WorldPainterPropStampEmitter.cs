@@ -89,7 +89,9 @@ namespace WorldPainter.Editor
         public void EmitExactlyOneAt(
             PropLayer                propLayer,
             Vector3                  exactPos,
-            HeightmapSurfaceSampler? surfaceSampler)
+            HeightmapSurfaceSampler? surfaceSampler,
+            float                    yawDeg   = 0f,
+            float                    scaleMul = 1f)
         {
             var authored = propLayer.AuthoredInstances;
             if (authored == null) return;
@@ -103,15 +105,21 @@ namespace WorldPainter.Editor
             float scale = (scaleRange.x + scaleRange.y) * 0.5f;
             if (scale <= 0f) scale = 1f;
 
-            // Deterministic rotation — only AlignToNormal can change it. NO random yaw.
+            // ── BYTE-IDENTICAL apply block — keep in lockstep with PropGhostPreview.OnSceneGui. ──
+            //    The sticky E/R-adjust scale multiplier + yaw and the align-to-normal compose order
+            //    (alignRot * yawRot) MUST match the ghost exactly, or the placed instance drifts.
+            scale *= scaleMul;
+
+            // Deterministic rotation — AlignToNormal + the sticky ghost yaw. NO random yaw.
             // Random yaw caused ghost ≠ placement mismatch (each click rolled a new yaw).
-            Quaternion rot = Quaternion.identity;
+            Quaternion alignRot = Quaternion.identity;
             if (propLayer.PropAlignToNormal && surfaceSampler != null &&
                 surfaceSampler.TrySample(exactPos.x, exactPos.z, out var hit) &&
                 hit.Normal.sqrMagnitude > 0.01f)
             {
-                rot = Quaternion.FromToRotation(Vector3.up, hit.Normal);
+                alignRot = Quaternion.FromToRotation(Vector3.up, hit.Normal);
             }
+            Quaternion rot = alignRot * Quaternion.Euler(0f, yawDeg, 0f);
 
             // Canonical place-from-anchor formula (mirror of commit 35e2def line 252).
             Vector3 anchor = propLayer.AnchorOffsetLocal;

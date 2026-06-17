@@ -87,9 +87,6 @@ namespace WorldPainter
 
         // ── Per-LOD indirect draw args ────────────────────────────────────────
         private GraphicsBuffer? argsLod0Buf;
-
-        // ── DIAGNOSTIC throttle (remove with matching prints) ─────────────
-        private float lastSubmitDiagLogTime = -1f;
         private GraphicsBuffer? argsLod1Buf;
         private GraphicsBuffer? argsLod2Buf;
 
@@ -191,25 +188,6 @@ namespace WorldPainter
             this.worldBounds = scatter.WorldBounds;
 
             Bounds meshBounds = ComputeMeshBounds(layer.Render.LodMeshes);
-
-            // ── DIAGNOSTIC (remove with matching prints) ──────────────────────
-            // The shader does posWS = inst.posWS + baseRot·(localPos · scale). `localPos` is the
-            // RAW mesh vertex coordinate. If meshBounds.center ≠ Vector3.zero, the mesh was
-            // authored with its origin OFFSET from its visual center — so the rendered mesh
-            // appears at world (inst.posWS + meshBounds.center) instead of inst.posWS. This is
-            // the classic "the placement gizmo is right but the mesh renders 70 m away" bug.
-            Mesh[] lodMeshesDiag = layer.Render.LodMeshes;
-            string lodDiag = $"LODs={lodMeshesDiag.Length}";
-            for (int li = 0; li < lodMeshesDiag.Length; ++li)
-            {
-                Mesh? lm = lodMeshesDiag[li];
-                lodDiag += lm != null
-                    ? $" | LOD{li}={lm.name} c={lm.bounds.center:F4} e={lm.bounds.extents:F4}"
-                    : $" | LOD{li}=<null>";
-            }
-            UnityEngine.Debug.Log(
-                $"[InstancedPropEngine] meshBounds.center={meshBounds.center:F4} " +
-                $"extents={meshBounds.extents:F4} {lodDiag}");
 
             Vector2 effectiveBounds = sampler is TerrainSurfaceSampler tss
                 ? tss.TerrainSizeXZ
@@ -471,25 +449,6 @@ namespace WorldPainter
                 Shader.SetGlobalInteger(ID_InteractorCount, this.interactorBuffer.Count);
             }
 
-            // ── DIAGNOSTIC (remove with matching prints) ──────────────────────
-            // Throttle: log once per second so we don't drown the console. Captures the EXACT
-            // uniforms the shader sees right before issuing the indirect draw.
-            if (UnityEngine.Time.realtimeSinceStartup - lastSubmitDiagLogTime > 1f)
-            {
-                lastSubmitDiagLogTime = UnityEngine.Time.realtimeSinceStartup;
-                float omSeen = this.lodMat0 != null ? this.lodMat0.GetFloat(ID_OrientMode)        : -1f;
-                float weSeen = this.lodMat0 != null ? this.lodMat0.GetFloat(ID_WindEnabled)       : -1f;
-                float ieSeen = this.lodMat0 != null ? this.lodMat0.GetFloat(ID_InteractorsEnabled): -1f;
-                float teSeen = this.lodMat0 != null ? this.lodMat0.GetFloat(ID_TiltEnabled)       : -1f;
-                Vector4 aoSeen = this.lodMat0 != null ? this.lodMat0.GetVector(ID_AnchorOffset)         : Vector4.zero;
-                Vector4 roSeen = this.lodMat0 != null ? this.lodMat0.GetVector(ID_RotationOffsetEuler)  : Vector4.zero;
-                float smSeen = this.lodMat0 != null ? this.lodMat0.GetFloat(ID_ScaleMax2)         : -1f;
-                UnityEngine.Debug.Log(
-                    $"[InstancedPropEngine.Submit] _OrientMode={omSeen:F2} _ScaleMax2={smSeen:F4} " +
-                    $"_AnchorOffset={aoSeen} _RotationOffsetEuler={roSeen} " +
-                    $"_Wind={weSeen} _Interactors={ieSeen} _Tilt={teSeen}");
-            }
-
             if (this.mesh0 != null && this.lodMat0 != null && this.argsLod0Buf != null)
                 Graphics.RenderMeshIndirect(this.MakeRenderParams(this.lodMat0, targetCamera), this.mesh0, this.argsLod0Buf, 1, 0);
             if (this.mesh1 != null && this.lodMat1 != null && this.argsLod1Buf != null)
@@ -512,7 +471,14 @@ namespace WorldPainter
         {
             if (!this.isBuilt || this.instanceBuffer == null) return false;
             float yawDeg = rotation.eulerAngles.y;
-            return this.instanceBuffer.PatchInstance(authoredIdx, position, yawDeg, scale);
+            float scaleMaxBefore = this.instanceBuffer.ScaleMax;
+            bool ok = this.instanceBuffer.PatchInstance(authoredIdx, position, yawDeg, scale);
+            // A scale drag past the ceiling raises the buffer's per-layer decode divisor. Re-push
+            // _ScaleMax2 in lockstep so the live preview decodes against the new divisor THIS frame
+            // (Submit() would otherwise only re-apply it next frame, leaving a 1-frame size pop).
+            if (ok && this.instanceBuffer.ScaleMax != scaleMaxBefore)
+                this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
+            return ok;
         }
 
         // ── IGrassEngine : WorldBounds ────────────────────────────────────────

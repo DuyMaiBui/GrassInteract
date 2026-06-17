@@ -240,6 +240,74 @@ namespace WorldPainter.Tests
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // Test 4b: a Select-tool scale drag PAST the current ceiling raises ScaleMax
+        // (re-encoding all slots) so the enlarged instance decodes back at its new size,
+        // while a sibling's scale survives the re-encode. This is the "scale handle is
+        // dead on a default (1,1) layer" fix — the handle must grow past the baked ceiling.
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Test]
+        public void PatchInstance_AboveCeiling_RaisesScaleMax_AndPreservesSiblings()
+        {
+            var positions = new[]
+            {
+                new Vector3( 2f, 0f,  2f),  // authored index 0 (sibling, stays scale 1)
+                new Vector3(10f, 0f,  2f),  // authored index 1 (gets enlarged)
+            };
+
+            GrassScatterResult scatter = MakeSyntheticScatter(positions); // all scale 1
+            var meshBounds = new Bounds(Vector3.zero, Vector3.one);
+
+            var buf = new ChunkedInstanceBuffer();
+            try
+            {
+                // Default-style layer: scaleRangeMax = 1. With SCALE_HEADROOM the baked ceiling is 1.5,
+                // so a 3.0 scale drag is ABOVE the ceiling and must raise ScaleMax.
+                buf.Bake(scatter, Vector3.zero, new Vector2(32f, 32f), 1f, meshBounds,
+                    oriented: false, chunkSize: 8);
+
+                float ceilingBefore = buf.ScaleMax;
+                Assert.Less(ceilingBefore, 3f, "precondition: 3.0 must exceed the baked ceiling");
+
+                const int   bigIdx   = 1;
+                const float bigScale = 3.0f;
+                bool ok = buf.PatchInstance(bigIdx, positions[bigIdx], 0f, bigScale);
+                Assert.IsTrue(ok, "PatchInstance should succeed for an in-range index");
+
+                Assert.Greater(buf.ScaleMax, ceilingBefore,
+                    "scaling past the ceiling must RAISE ScaleMax so the decode divisor has room");
+                Assert.GreaterOrEqual(buf.ScaleMax, bigScale,
+                    "the raised ceiling must be >= the enlarged scale");
+
+                int[]?          map       = buf.SortedToAuthored;
+                InstanceData[]? instances = buf.Instances;
+                Assert.IsNotNull(map);
+                Assert.IsNotNull(instances);
+
+                // Enlarged instance decodes back to ~3.0 against the raised ScaleMax.
+                int bigSorted = SortedSlotOf(map!, bigIdx);
+                float bigDecoded = (instances![bigSorted].packedYawScale & 0xFFFFu) / 65535f * buf.ScaleMax;
+                Assert.AreEqual(bigScale, bigDecoded, 0.01f, "enlarged instance decodes at its new size");
+
+                // Sibling (authored 0) was scale 1 — the global re-encode must preserve it.
+                int sibSorted = SortedSlotOf(map, 0);
+                float sibDecoded = (instances[sibSorted].packedYawScale & 0xFFFFu) / 65535f * buf.ScaleMax;
+                Assert.AreEqual(1f, sibDecoded, 0.01f, "sibling scale survives the re-encode to the new ceiling");
+            }
+            finally
+            {
+                buf.Dispose();
+            }
+        }
+
+        private static int SortedSlotOf(int[] sortedToAuthored, int authoredIdx)
+        {
+            for (int k = 0; k < sortedToAuthored.Length; ++k)
+                if (sortedToAuthored[k] == authoredIdx) return k;
+            return -1;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Test 5: PatchInstance rejects out-of-range indices and post-dispose calls
         // (so the caller falls back to a full rebuild instead of corrupting memory).
         // ─────────────────────────────────────────────────────────────────────

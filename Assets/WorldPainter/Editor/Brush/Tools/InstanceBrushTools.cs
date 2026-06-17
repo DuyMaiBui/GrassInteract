@@ -5,9 +5,9 @@ using WorldPainter;
 namespace WorldPainter.Editor
 {
     /// <summary>
-    /// Instance (prop) scatter brush tools: Place (scatter N per stamp along the stroke),
-    /// Erase (delete instances under the brush), Single (place exactly one at the cursor).
-    /// These drive the CPU <see cref="WorldPainterPropStampEmitter"/> — no GPU kernel.
+    /// Instance (prop) scatter brush tools: Place (place exactly one at the cursor),
+    /// Erase (delete instances under the brush). These drive the CPU
+    /// <see cref="WorldPainterPropStampEmitter"/> — no GPU kernel.
     ///
     /// Routing: when a unified <see cref="PropLayer"/> is active
     /// (<see cref="BrushToolTargets.ResolvePropLayer"/> returns non-null) the emitter overloads
@@ -36,9 +36,10 @@ namespace WorldPainter.Editor
                 return;
             }
 
-            // Single instance at the exact cursor (matches the LOD 0 ghost preview).
-            // Spacing-stamping along drag still produces one instance per stamp interval.
-            ctx.Tool.propEmitter.EmitExactlyOneAt(propLayer, ctx.WorldPos, ctx.Sampler);
+            // Single instance at the exact cursor (matches the LOD 0 ghost preview). The sticky
+            // E/R-adjust yaw/scale are passed through so the placed instance equals the ghost.
+            ctx.Tool.propEmitter.EmitExactlyOneAt(propLayer, ctx.WorldPos, ctx.Sampler,
+                PropPlaceGhostController.GhostYawDeg, PropPlaceGhostController.GhostScaleMul);
         }
     }
 
@@ -57,24 +58,6 @@ namespace WorldPainter.Editor
             ctx.Tool.propEmitter.Emit(
                 propLayer, ctx.WorldPos, WorldPainterState.Brush.size * 0.5f,
                 deleteMode: true, surfaceSampler: ctx.Sampler);
-        }
-    }
-
-    internal sealed class InstanceSingleTool : IBrushTool
-    {
-        public string Id => "instance.single";
-        public string Label => "Single";
-        public LayerType LayerType => LayerType.Props;
-
-        public void Apply(in BrushToolContext ctx)
-        {
-            var propLayer = BrushToolTargets.ResolvePropLayer(ctx.Painter);
-            if (propLayer == null) return;
-
-            InstanceUndo.PushOnce(propLayer);
-            // EmitExactlyOneAt preserves the raycast Y instead of resampling the heightmap,
-            // so the instance lands exactly where the LOD 0 ghost was drawn.
-            ctx.Tool.propEmitter.EmitExactlyOneAt(propLayer, ctx.WorldPos, ctx.Sampler);
         }
     }
 

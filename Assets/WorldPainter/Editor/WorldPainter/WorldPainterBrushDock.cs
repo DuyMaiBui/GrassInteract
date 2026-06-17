@@ -30,8 +30,12 @@ namespace WorldPainter.Editor
         private VisualElement? setHeightRow;
 
         // Brush-mask gallery (thumbnails from the project's Brushes folder) + the drag/drop field.
-        private const string BRUSH_FOLDER = "Assets/WorldPainter/Editor/Resources/Brushes";
+        internal const string BRUSH_FOLDER = "Assets/WorldPainter/Editor/Resources/Brushes";
         private VisualElement? brushGalleryRoot;
+        // Brush-mask (heightmap-stamp texture) section — gallery + import field. Visibility is gated
+        // to the Height layer by RefreshBrushSettingsVisibility (the mask shapes height sculpting; it
+        // has no meaning on Splat/Grass), mirroring the terrain-palette's contextual gating.
+        private VisualElement? brushMaskSection;
         private ObjectField?   brushMaskField;
 
         // ── Preset slot labels ────────────────────────────────────────────────
@@ -82,16 +86,19 @@ namespace WorldPainter.Editor
             // Set Height (Raise/Lower target). Only meaningful for the Height layer — its row is
             // shown/hidden by RefreshBrushSettingsVisibility. Raise rises toward it (ceiling),
             // Lower drops toward it (floor).
-            this.setHeightRow = this.BuildSlider("Set Height (m)", -20f, 20f,
+            this.setHeightRow = this.BuildSlider("Set Height (m)", -100f, 100f,
                 () => brush.setHeight, v => brush.setHeight = v);
             this.brushSettingsContainer.Add(this.setHeightRow);
 
             this.brushSettingsContainer.Add(this.BuildCurveField(brush));
 
             // Brush mask: a clickable thumbnail gallery from the project's Brushes folder plus a
-            // drag/drop field for importing custom masks (no longer drag/drop-only).
-            this.brushSettingsContainer.Add(this.BuildBrushGallery());
-            this.brushSettingsContainer.Add(this.BuildBrushMaskField());
+            // drag/drop field for importing custom masks (no longer drag/drop-only). Wrapped in one
+            // section so its visibility can be gated to the Height layer (see RefreshBrushSettingsVisibility).
+            this.brushMaskSection = new VisualElement();
+            this.brushMaskSection.Add(this.BuildBrushGallery());
+            this.brushMaskSection.Add(this.BuildBrushMaskField());
+            this.brushSettingsContainer.Add(this.brushMaskSection);
             dock.Add(this.brushSettingsContainer);
 
             // P6: preset slots bar
@@ -136,6 +143,12 @@ namespace WorldPainter.Editor
             // Set Height drives only the Height layer's Raise/Lower brushes — hide it elsewhere.
             if (this.setHeightRow != null)
                 this.setHeightRow.style.display =
+                    layerType == LayerType.Height ? DisplayStyle.Flex : DisplayStyle.None;
+
+            // Brush-mask (heightmap-stamp) section belongs to height sculpting only — show it just
+            // for the Height layer, the way the terrain palette is gated to its own context.
+            if (this.brushMaskSection != null)
+                this.brushMaskSection.style.display =
                     layerType == LayerType.Height ? DisplayStyle.Flex : DisplayStyle.None;
 
             // Terrain palette belongs to the terrain base: show while sculpting the Height layer
@@ -578,7 +591,8 @@ namespace WorldPainter.Editor
 
             var slider = new Slider(label, min, max)
             {
-                value = getter(),
+                value          = getter(),
+                showInputField = true, // show + allow typing the numeric value next to the track
             };
             slider.AddToClassList("wp-brush-slider");
             slider.RegisterValueChangedCallback(e => setter(e.newValue));
@@ -678,7 +692,9 @@ namespace WorldPainter.Editor
 
         private void SelectBrushMask(Texture2D? tex)
         {
-            if (tex != null) EnsureBrushMaskReadable(tex);
+            // No reimport here: brush-folder textures are configured uncompressed/linear/readable
+            // at import time by WorldPainterBrushTextureImporter, so picking a brush is pure UI —
+            // it never mutates the AssetDatabase and never triggers a terrain rebuild.
             WorldPainterState.Brush.maskTexture = tex;
             this.brushMaskField?.SetValueWithoutNotify(tex); // keep the drag/drop field in sync
             WorldPainterState.RaiseBrushFalloffDirty();       // refresh preview + re-highlight gallery
@@ -689,8 +705,9 @@ namespace WorldPainter.Editor
         /// <summary>
         /// ObjectField to import/select an optional grayscale brush-mask texture. When set, the
         /// brush footprint is shaped by the texture (multiplied with the falloff) instead of a
-        /// plain circle. The picked texture is forced uncompressed + linear + readable so the
-        /// stamp kernel's Load() sampling works on all platforms.
+        /// plain circle. Textures dropped into the Brushes folder are configured uncompressed +
+        /// linear + readable at import time (<see cref="WorldPainterBrushTextureImporter"/>) so the
+        /// stamp kernel's Load() sampling works on all platforms — no reimport happens on selection.
         /// </summary>
         private VisualElement BuildBrushMaskField()
         {
@@ -708,33 +725,13 @@ namespace WorldPainter.Editor
             this.brushMaskField = field;
             field.RegisterValueChangedCallback(evt =>
             {
-                var tex = evt.newValue as Texture2D;
-                if (tex != null) EnsureBrushMaskReadable(tex);
-                WorldPainterState.Brush.maskTexture = tex;
+                // No reimport on assignment — see SelectBrushMask + WorldPainterBrushTextureImporter.
+                WorldPainterState.Brush.maskTexture = evt.newValue as Texture2D;
                 WorldPainterState.RaiseBrushFalloffDirty(); // nudge preview refresh
             });
 
             row.Add(field);
             return row;
-        }
-
-        /// <summary>
-        /// Forces an imported brush-mask texture to uncompressed + linear + CPU-readable so the
-        /// compute kernel's point Load() works (block-compressed textures are not reliably
-        /// Load-able across platforms).
-        /// </summary>
-        private static void EnsureBrushMaskReadable(Texture2D tex)
-        {
-            string path = AssetDatabase.GetAssetPath(tex);
-            if (string.IsNullOrEmpty(path)) return;
-            if (AssetImporter.GetAtPath(path) is not TextureImporter importer) return;
-
-            bool dirty = false;
-            if (importer.textureCompression != TextureImporterCompression.Uncompressed)
-            { importer.textureCompression = TextureImporterCompression.Uncompressed; dirty = true; }
-            if (!importer.isReadable) { importer.isReadable  = true;  dirty = true; }
-            if (importer.sRGBTexture) { importer.sRGBTexture = false; dirty = true; }
-            if (dirty) importer.SaveAndReimport();
         }
 
         private VisualElement BuildCurveField(BrushSettings brush)

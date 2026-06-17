@@ -190,7 +190,7 @@ namespace WorldPainter.Editor
         public void OnSceneGui(SceneView sceneView)
         {
             // Paint Mode gates continuous-stroke tools (paint, erase, sculpt). Click-only prop
-            // tools (Place / Single / Select) dispatch regardless — "Paint Mode" is for brush
+            // tools (Place / Select) dispatch regardless — "Paint Mode" is for brush
             // strokes, not single-click placement or transform-handle interaction.
             string gatingToolId = WorldPainterState.ActiveBrushToolId;
             if (!WorldPainterState.PaintModeActive && !WorldPainterState.IsClickOnlyTool(gatingToolId))
@@ -206,12 +206,31 @@ namespace WorldPainter.Editor
             if (e.type == EventType.Layout)
                 HandleUtility.AddDefaultControl(controlId);
 
+            // Esc exits Paint Mode (global, any layer) — stops the active brush session and drops any
+            // prop-ghost adjust latch. Only fires while Paint Mode is on, so it doesn't swallow Esc
+            // for the click-only prop tools (which keep their own Esc = reset-ghost behaviour).
+            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape &&
+                WorldPainterState.PaintModeActive)
+            {
+                WorldPainterState.PaintModeActive = false;
+                PropPlaceGhostController.ClearHeld();
+                e.Use();
+                HandleUtility.Repaint();
+                return;
+            }
+
             // ── Prop Select tool — delegate scene input to the transform editor ────
 
             bool isPropActive    = WorldPainterState.ActiveLayerKind == WorldPainterState.PaintLayerKind.Prop;
             string activeToolId  = WorldPainterState.ActiveBrushToolId;
             bool isSelectTool    = activeToolId == "instance.select";
-            bool isPlacementTool = activeToolId == "instance.place" || activeToolId == "instance.single";
+            bool isPlacementTool = activeToolId == "instance.place";
+
+            // Drop any latched E/R adjust state the moment we're not on the Place tool — a KeyUp that
+            // landed in another window can't reach HandlePlaceGhostAdjust, so without this a switched-
+            // away tool would leave the channel stuck ON and swallow the next placement click.
+            if (!isPlacementTool)
+                PropPlaceGhostController.ClearHeld();
 
             if (isPropActive && isSelectTool)
             {
@@ -255,27 +274,33 @@ namespace WorldPainter.Editor
                 if (!suppressBrushRing)
                 {
                     var previewColor = new Color(0.3f, 0.7f, 1.0f); // WorldPainter blue
+                    // The brush mask texture shapes height sculpting only — show its decal solely on
+                    // the Height layer (the shared mask setting persists across layers, so gate the
+                    // scene preview to match the Height-only BRUSH MASK dock section). Splat/Grass
+                    // keep the plain ring.
+                    bool isHeightLayer = WorldPainterState.EffectiveLayerType(painter) == LayerType.Height;
+                    Texture2D? maskTex = isHeightLayer ? brush.maskTexture : null;
                     // Pass the root's localToWorldMatrix so the preview ring is drawn under the
                     // root TRS (painting space → world space). Identity root = Handles.matrix stays
                     // Matrix4x4.identity, which is the default — no visual change.
                     TerrainBrushPreview.Set(paintingPoint, brush.size, previewColor, brush.shape,
-                        s_heightFn, brush.maskTexture, painter.transform.localToWorldMatrix);
+                        s_heightFn, maskTex, painter.transform.localToWorldMatrix);
                 }
                 HandleUtility.Repaint();
+            }
 
-                // Prop placement ghost — show the LOD 0 mesh translucent at the cursor so the
-                // artist sees what they're about to place. Falls back to a wire disc when LOD 0
-                // isn't assigned yet (the Setup panel will prompt them to add one).
-                // PropGhostPreview renders via Graphics.DrawMeshNow / Handles in world space,
-                // so convert the painting-space point back to world before passing it.
-                if (isPropActive && isPlacementTool)
+            // ── Prop Place tool — ghost preview + hold-E/R handle adjust ──────────
+            // The ghost follows the cursor; holding E (rotate) or R (scale) freezes it in place and
+            // shows a transform handle the artist drags freely. While frozen, placement is suppressed
+            // and HandlePlacePropGhost returns true so the placement switch below is skipped.
+            if (isPropActive && isPlacementTool)
+            {
+                PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
+                if (propLayer != null &&
+                    this.HandlePlacePropGhost(painter, propLayer, e, hasHit, paintingPoint))
                 {
-                    PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
-                    if (propLayer != null)
-                    {
-                        Vector3 ghostWorldPoint = painter.transform.TransformPoint(paintingPoint);
-                        PropGhostPreview.Draw(propLayer, ghostWorldPoint, valid: true);
-                    }
+                    this.DrawHud();
+                    return;
                 }
             }
 
@@ -299,6 +324,123 @@ namespace WorldPainter.Editor
             }
 
             this.DrawHud();
+        }
+
+        // ── Place-mode ghost preview + hold-E/R handle adjust ────────────────────
+
+        /// <summary>
+        /// Drives the Place-tool ghost. The ghost follows the cursor; holding <c>E</c> (rotate) or
+        /// <c>R</c> (scale) freezes it at its current spot and shows a transform handle the artist
+        /// drags freely to dial in the sticky yaw/scale. <c>Esc</c> resets those. Returns <c>true</c>
+        /// while frozen so the caller skips the placement switch — NO instance is placed mid-adjust.
+        /// </summary>
+        private bool HandlePlacePropGhost(WorldPainter painter, PropLayer propLayer,
+            Event e, bool hasHit, Vector3 paintingPoint)
+        {
+            // Mouse left the Scene view (alt-tab, context menu, another EditorWindow) — a held E/R
+            // KeyUp may never return, so clear the latch + freeze defensively.
+            if (e.type == EventType.MouseLeaveWindow)
+            {
+                PropPlaceGhostController.ClearHeld();
+                return false;
+            }
+
+            // Keyboard: latch E/R and capture the frozen anchor on first hold; Esc resets yaw/scale.
+            if (e.type == EventType.KeyDown)
+            {
+                if (e.keyCode == KeyCode.E)
+                {
+                    PropPlaceGhostController.SetRotateHeld(true);
+                    PropPlaceGhostController.CaptureFrozen(hasHit ? paintingPoint : PropPlaceGhostController.LastGhostPainting);
+                    e.Use(); HandleUtility.Repaint();
+                }
+                else if (e.keyCode == KeyCode.R)
+                {
+                    PropPlaceGhostController.SetScaleHeld(true);
+                    PropPlaceGhostController.CaptureFrozen(hasHit ? paintingPoint : PropPlaceGhostController.LastGhostPainting);
+                    e.Use(); HandleUtility.Repaint();
+                }
+                else if (e.keyCode == KeyCode.Escape)
+                {
+                    PropPlaceGhostController.Reset(); e.Use(); HandleUtility.Repaint();
+                }
+            }
+            else if (e.type == EventType.KeyUp)
+            {
+                if (e.keyCode == KeyCode.E)
+                {
+                    PropPlaceGhostController.SetRotateHeld(false);
+                    if (!PropPlaceGhostController.IsAdjusting) PropPlaceGhostController.ClearFrozen();
+                    e.Use(); HandleUtility.Repaint();
+                }
+                else if (e.keyCode == KeyCode.R)
+                {
+                    PropPlaceGhostController.SetScaleHeld(false);
+                    if (!PropPlaceGhostController.IsAdjusting) PropPlaceGhostController.ClearFrozen();
+                    e.Use(); HandleUtility.Repaint();
+                }
+            }
+
+            bool frozen = PropPlaceGhostController.IsAdjusting && PropPlaceGhostController.HasFrozen;
+
+            // Remember where the live ghost sits so the next freeze pins to it.
+            if (!frozen && hasHit)
+                PropPlaceGhostController.RecordGhostPoint(paintingPoint);
+
+            Vector3 ghostPainting = frozen ? PropPlaceGhostController.FrozenPainting : paintingPoint;
+
+            // Draw the ghost: always while frozen, otherwise only when the cursor is over the surface.
+            // Painting-space point + root transform → ghost == placed instance under any root.
+            if (frozen || hasHit)
+            {
+                PropGhostPreview.Draw(propLayer, ghostPainting, valid: true, painter.transform,
+                    PropPlaceGhostController.GhostYawDeg, PropPlaceGhostController.GhostScaleMul);
+                HandleUtility.Repaint();
+            }
+
+            if (frozen)
+            {
+                this.DrawPlaceGhostHandles(painter, ghostPainting);
+                return true; // stable ghost + handle manipulation; suppress placement
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Draws the rotation (E) / scale (R) handle on the frozen ghost and writes the dragged value
+        /// back to <see cref="PropPlaceGhostController"/>. Props render yaw-only + uniform scale, so the
+        /// rotate gizmo is a single yaw disc about up and the scale gizmo is uniform.
+        /// </summary>
+        private void DrawPlaceGhostHandles(WorldPainter painter, Vector3 ghostPainting)
+        {
+            // Handle sits at the ghost's world anchor (where the prop lands).
+            Vector3 worldPos = painter.transform.TransformPoint(ghostPainting);
+            float   size     = HandleUtility.GetHandleSize(worldPos);
+
+            if (PropPlaceGhostController.RotateHeld)
+            {
+                EditorGUI.BeginChangeCheck();
+                Quaternion cur    = Quaternion.Euler(0f, PropPlaceGhostController.GhostYawDeg, 0f);
+                Quaternion newRot = Handles.Disc(cur, worldPos, Vector3.up, size, false, 0f);
+                if (EditorGUI.EndChangeCheck())
+                    PropPlaceGhostController.SetYaw(newRot.eulerAngles.y);
+            }
+
+            if (PropPlaceGhostController.ScaleHeld)
+            {
+                EditorGUI.BeginChangeCheck();
+                Vector3 old = Vector3.one * PropPlaceGhostController.GhostScaleMul;
+                Vector3 ns  = Handles.ScaleHandle(old, worldPos, Quaternion.identity, size);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    // Uniform scale: take whichever axis the user dragged (centre cube moves all three).
+                    float mul = PropPlaceGhostController.GhostScaleMul;
+                    if      (Mathf.Abs(ns.x - old.x) > 1e-6f) mul = ns.x;
+                    else if (Mathf.Abs(ns.y - old.y) > 1e-6f) mul = ns.y;
+                    else if (Mathf.Abs(ns.z - old.z) > 1e-6f) mul = ns.z;
+                    PropPlaceGhostController.SetScaleMul(mul);
+                }
+            }
         }
 
         // ── Brush-disc terrain conform (restored from deleted TerrainSculptTool) ──
@@ -395,10 +537,19 @@ namespace WorldPainter.Editor
                 {
                     "instance.select" => "Mode: Select (transform)",
                     "instance.erase"  => "Mode: Erase",
-                    "instance.single" => "Mode: Single placement",
                     _                  => "Mode: Place (ghost preview)",
                 };
                 GUILayout.Label(modeLabel, EditorStyles.miniLabel);
+
+                // Place tool: live sticky ghost yaw/scale + the E/R-hold hint.
+                if (toolId == "instance.place")
+                {
+                    GUILayout.Label(
+                        $"Yaw: {PropPlaceGhostController.GhostYawDeg:F0}°  Scale: ×{PropPlaceGhostController.GhostScaleMul:F2}",
+                        EditorStyles.miniLabel);
+                    GUILayout.Label("Hold E = rotate handle · R = scale handle · Esc = reset",
+                        EditorStyles.miniLabel);
+                }
 
                 // Select tool: explicit Move/Rotate/Scale buttons. The transform editor owns its
                 // own Mode (it can't rely on Unity's W/E/R hotkeys — they never reach a
