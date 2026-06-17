@@ -946,16 +946,27 @@ namespace WorldPainter
             }
         }
 
-        private RenderParams MakeRenderParams(Material mat, Camera? drawCamera) =>
-            new RenderParams(mat)
+        private RenderParams MakeRenderParams(Material mat, Camera? drawCamera)
+        {
+            // worldBounds is what URP/RenderGraph frustum-culls the indirect draw against in WORLD
+            // space. this.worldBounds is in PAINTING space; under a non-identity root the props render
+            // at LocalToWorld·bounds, so the painting-space bounds would cull the whole batch at the
+            // wrong location as the camera orbits. Map to world (identity → byte-identical no-op).
+            // Mirrors GpuTerrainEngine.MakeRenderParams.
+            Bounds drawBounds = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.PaintingBoundsToWorld(this.worldBounds)
+                : this.worldBounds;
+
+            return new RenderParams(mat)
             {
-                worldBounds       = this.worldBounds,
+                worldBounds       = drawBounds,
                 // Phase 3: ShadowCastingMode driven from config (no hardcoded On); receive from config (no hardcoded true).
                 shadowCastingMode = this.shadowCastingMode, // honors layer.Render.ShadowCastingMode
                 receiveShadows    = this.receiveShadows,    // honors layer.Render.ReceiveShadows (default false)
                 camera            = drawCamera,
                 layer             = 0,
             };
+        }
 
         private void InitLodArgs()
         {
