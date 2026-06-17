@@ -488,7 +488,7 @@ Shader "WorldPainter/IndirectGrass"
                 float3 nWS, tWS;
                 GRASS_BladeWorldTBN(b, nWS, tWS);
                 o.normalWS  = WP_PaintingToWorldNormal(nWS);
-                o.tangentWS = tWS;
+                o.tangentWS = WP_PaintingToWorldDir(tWS);
                 return o;
             }
 

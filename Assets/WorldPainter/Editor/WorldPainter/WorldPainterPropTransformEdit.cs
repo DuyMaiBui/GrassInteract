@@ -98,6 +98,11 @@ namespace WorldPainter.Editor
             var authored = layer.AuthoredInstances;
             if (authored == null) return;
 
+            // Root transform (painting → world) so the Select gizmos + click-pick stay aligned
+            // with the rendered props under a non-identity WorldPainter root. Null → treat as
+            // identity (handles operate directly in world, unchanged from pre-feature behaviour).
+            Transform? root = ResolveRootTransform(layer);
+
             var currentEvent = Event.current;
 
             // ── Keyboard shortcuts ────────────────────────────────────────────
@@ -151,11 +156,11 @@ namespace WorldPainter.Editor
             // and the user can't drag them — which is exactly the bug the user reported.
 
             if (this.SelectedIndex >= 0)
-                this.DrawTransformGizmo(layer, authored, this.SelectedIndex);
+                this.DrawTransformGizmo(layer, authored, this.SelectedIndex, root);
 
             // ── Per-instance selection gizmos (dots) ──────────────────────────
 
-            DrawInstanceGizmos(authored, this.SelectedIndex);
+            DrawInstanceGizmos(authored, this.SelectedIndex, root);
 
             // ── Click-pick — only if no handle consumed the event yet ─────────
 
@@ -163,7 +168,7 @@ namespace WorldPainter.Editor
                 currentEvent.button == 0 &&
                 !currentEvent.alt)
             {
-                int picked = PickInstance(layer, authored, currentEvent.mousePosition);
+                int picked = PickInstance(layer, authored, currentEvent.mousePosition, root);
                 if (picked >= 0)
                 {
                     this.SelectedIndex = picked;
@@ -220,11 +225,15 @@ namespace WorldPainter.Editor
         /// LOD0 mesh is assigned). The legacy pivot-only test forced the user to click exactly on
         /// the instance origin, which is usually buried inside or below the mesh.
         /// </summary>
-        private static int PickInstance(PropLayer layer, AuthoredInstancesData authored, Vector2 mousePos)
+        private static int PickInstance(PropLayer layer, AuthoredInstancesData authored, Vector2 mousePos, Transform? root)
         {
             var list   = authored.WorkingList;
             var camera = SceneView.currentDrawingSceneView?.camera ?? Camera.current;
             if (camera == null || list.Count == 0) return -1;
+
+            // Painting → world. Instance records are painting-space; the scene ray + GUI points are
+            // world. Prepend the root matrix so picking hits the RENDERED prop under a non-identity root.
+            Matrix4x4 rootM = root != null ? root.localToWorldMatrix : Matrix4x4.identity;
 
             // ── Primary: ray vs each instance's LOD0 mesh OBB ──────────────────
             Mesh? mesh = ResolveLod0Mesh(layer);
@@ -237,7 +246,7 @@ namespace WorldPainter.Editor
                 for (int i = 0; i < list.Count; i++)
                 {
                     var rec = list[i];
-                    Matrix4x4 trs = Matrix4x4.TRS(rec.position, rec.rotation, Vector3.one * rec.scale);
+                    Matrix4x4 trs = rootM * Matrix4x4.TRS(rec.position, rec.rotation, Vector3.one * rec.scale);
                     if (RayHitsLocalBounds(trs, local, ray, out float t) && t < bestT)
                     {
                         bestT   = t;
@@ -252,7 +261,7 @@ namespace WorldPainter.Editor
             float bestPx = PICK_RADIUS_PX;
             for (int i = 0; i < list.Count; i++)
             {
-                Vector3 sp = HandleUtility.WorldToGUIPoint(list[i].position);
+                Vector3 sp = HandleUtility.WorldToGUIPoint(rootM.MultiplyPoint3x4(list[i].position));
                 float dx = sp.x - mousePos.x;
                 float dy = sp.y - mousePos.y;
                 float px = Mathf.Sqrt(dx * dx + dy * dy);
@@ -313,10 +322,13 @@ namespace WorldPainter.Editor
 
         // ── Selection gizmo dots ──────────────────────────────────────────────
 
-        private static void DrawInstanceGizmos(AuthoredInstancesData authored, int selectedIdx)
+        private static void DrawInstanceGizmos(AuthoredInstancesData authored, int selectedIdx, Transform? root)
         {
             var list = authored.WorkingList;
             if (list.Count == 0) return;
+
+            // Painting → world so the dots sit on the rendered props under a non-identity root.
+            Matrix4x4 rootM = root != null ? root.localToWorldMatrix : Matrix4x4.identity;
 
             for (int i = 0; i < list.Count; i++)
             {
@@ -324,8 +336,9 @@ namespace WorldPainter.Editor
                 Handles.color = isSel
                     ? Color.yellow
                     : new Color(0.3f, 0.8f, 1f, 0.6f);
-                float size = HandleUtility.GetHandleSize(list[i].position) * (isSel ? 0.12f : 0.06f);
-                Handles.SphereHandleCap(0, list[i].position, Quaternion.identity, size, EventType.Repaint);
+                Vector3 worldPos = rootM.MultiplyPoint3x4(list[i].position);
+                float size = HandleUtility.GetHandleSize(worldPos) * (isSel ? 0.12f : 0.06f);
+                Handles.SphereHandleCap(0, worldPos, Quaternion.identity, size, EventType.Repaint);
             }
 
             Handles.color = Color.white;
@@ -346,12 +359,20 @@ namespace WorldPainter.Editor
         private void DrawTransformGizmo(
             PropLayer             layer,
             AuthoredInstancesData authored,
-            int                   idx)
+            int                   idx,
+            Transform?            root)
         {
             var list = authored.WorkingList;
             if (idx < 0 || idx >= list.Count) return;
 
             var rec = list[idx];
+
+            // Records are PAINTING space; handles operate in world. Draw the handle at the prop's
+            // WORLD pose, then map the edited result back to painting on write-back. Identity/null
+            // root → world == painting (passthrough), unchanged from pre-feature behaviour.
+            Quaternion rootRot  = root != null ? root.rotation : Quaternion.identity;
+            Vector3    worldPos = root != null ? root.TransformPoint(rec.position) : rec.position;
+            Quaternion worldRot = rootRot * rec.rotation;
 
             // Show ONE handle at a time, selected by this tool's own Mode (set by the HUD buttons
             // or W/E/R here). Drawing Position/Rotation/Scale handles all at the same point made
@@ -364,11 +385,12 @@ namespace WorldPainter.Editor
                 case PropTransformMode.Rotate:
                 {
                     EditorGUI.BeginChangeCheck();
-                    Quaternion newRot = Handles.RotationHandle(rec.rotation, rec.position);
+                    Quaternion newWorldRot = Handles.RotationHandle(worldRot, worldPos);
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(authored, "Rotate Prop Instance");
-                        rec.rotation = newRot;
+                        // Map the world rotation back to painting space (strip the root rotation).
+                        rec.rotation = Quaternion.Inverse(rootRot) * newWorldRot;
                         CommitRecord(layer, authored, idx, rec);
                     }
                     break;
@@ -378,9 +400,10 @@ namespace WorldPainter.Editor
                 {
                     EditorGUI.BeginChangeCheck();
                     Vector3 oldScale = Vector3.one * rec.scale;
+                    // Scale magnitude is root-independent; draw the handle at the world pose.
                     Vector3 newScale = Handles.ScaleHandle(
-                        oldScale, rec.position, rec.rotation,
-                        HandleUtility.GetHandleSize(rec.position));
+                        oldScale, worldPos, worldRot,
+                        HandleUtility.GetHandleSize(worldPos));
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(authored, "Scale Prop Instance");
@@ -401,11 +424,12 @@ namespace WorldPainter.Editor
                 default: // PropTransformMode.Move → position handle
                 {
                     EditorGUI.BeginChangeCheck();
-                    Vector3 newPos = Handles.PositionHandle(rec.position, rec.rotation);
+                    Vector3 newWorldPos = Handles.PositionHandle(worldPos, worldRot);
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(authored, "Move Prop Instance");
-                        rec.position = newPos;
+                        // Map the world position back to painting space.
+                        rec.position = root != null ? root.InverseTransformPoint(newWorldPos) : newWorldPos;
                         CommitRecord(layer, authored, idx, rec);
                     }
                     break;
@@ -489,6 +513,24 @@ namespace WorldPainter.Editor
         /// WorldPainters, caching the result for the duration of a drag. Mirrors the painter-resolution
         /// pattern in <see cref="WorldPainterRebuildScheduler.MarkPropDirty"/>.
         /// </summary>
+        /// <summary>
+        /// Resolves the WorldPainter root Transform owning <paramref name="layer"/> (= painting space),
+        /// so the Select gizmos + click-pick map painting coords to the rendered world position under
+        /// a non-identity root. Returns null when no owning painter is found (→ treated as identity).
+        /// </summary>
+        private static Transform? ResolveRootTransform(PropLayer layer)
+        {
+            var painters = Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            for (int i = 0; i < painters.Length; ++i)
+            {
+                WorldPainter p = painters[i];
+                if (p == null || p.Map == null) continue;
+                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
+                return p.transform;
+            }
+            return null;
+        }
+
         private static InstancedPropEngine? ResolvePropEngine(PropLayer layer)
         {
             if (ReferenceEquals(cachedPatchLayer, layer) && cachedPatchEngine != null)

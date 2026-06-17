@@ -453,7 +453,7 @@ Shader "WorldPainter/ScatterInstanced"
                 o.normalWS   = WP_PaintingToWorldNormal(normalWS);
                 o.uv         = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 o.positionWS = posWSWorld;
-                o.tangentWS  = tangentWS;
+                o.tangentWS  = WP_PaintingToWorldDir(tangentWS);
                 return o;
             }
 

@@ -54,4 +54,16 @@ float3 WP_PaintingToWorldNormal(float3 nP)
 #endif
 }
 
+// Painting-space tangent/direction → world space. A tangent transforms by the
+// localToWorld 3x3 (NOT the inverse-transpose, which is for normals) so the TBN
+// basis stays consistent with WP_PaintingToWorldNormal under rotation. Normalised.
+float3 WP_PaintingToWorldDir(float3 dirP)
+{
+#ifdef _WP_ROOT_TRANSFORM
+    return normalize(mul((float3x3)_WPLocalToWorld, dirP));
+#else
+    return dirP;
+#endif
+}
+
 #endif // WORLDPAINTER_ROOT_TRANSFORM_INCLUDED
