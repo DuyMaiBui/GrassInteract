@@ -172,9 +172,13 @@ namespace WorldPainter
             PhysicsMaterial? materialOverride)
         {
             Transform t = mc.transform;
-            t.position   = pos;
-            t.rotation   = rot;
-            t.localScale = new Vector3(scale, scale, scale);
+            // Positions and rotations are authored in painting space (= the WorldPainter root's
+            // local space). The pool's parent chain goes up through the root, so localPosition /
+            // localRotation places the collider at the correct painting-space coordinate and the
+            // transform hierarchy applies the root TRS automatically.
+            t.localPosition = pos;
+            t.localRotation = rot;
+            t.localScale    = new Vector3(scale, scale, scale);
 
             Mesh? mesh = meshOverride ?? this.defaultMesh;
             if (mc.sharedMesh != mesh)

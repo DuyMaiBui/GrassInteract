@@ -178,6 +178,10 @@ namespace WorldPainter
         // 0 = behaviour derived purely from blade height + bend headroom. Set via constructor by the field.
         private readonly float extraCullMargin;
 
+        // Root-transform binder (painting↔world). Null or identity → cull runs in painting space
+        // (which equals world space at identity). Bound by WorldPainter after Build.
+        private WorldRootBinder? rootSpace;
+
         // ── Construction ──────────────────────────────────────────────────────
 
         /// <summary>
@@ -374,6 +378,16 @@ namespace WorldPainter
             this.isBuilt = true;
         }
 
+        // ── Root-space binding ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Bind the WorldPainter root-transform binder so frustum culling and the global _CamPosWS
+        /// run in PAINTING space (matching the painting-space blade positions). Identity root → no
+        /// transform (cull stays in world space, which equals painting space at identity).
+        /// Call after <see cref="Build"/> from WorldPainter.Scatter after construction.
+        /// </summary>
+        internal void BindRootSpace(WorldRootBinder binder) => this.rootSpace = binder;
+
         // ── IGrassEngine : Step ───────────────────────────────────────────────
 
         /// <inheritdoc/>
@@ -409,13 +423,22 @@ namespace WorldPainter
             // ── 2. Build frustum planes from the render camera ──────────────
             // Non-alloc overload writes into planeScratch — zero per-frame heap alloc.
             GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
-            for (int i = 0; i < 6; ++i)
+            // When the root is non-identity, blade AABBs are in painting space, so the frustum
+            // planes must also be in painting space for the cull to be metric-correct.
+            if (this.rootSpace != null && !this.rootSpace.IsIdentity)
             {
-                this.frustumPlanes[i] = new Vector4(
-                    this.planeScratch[i].normal.x,
-                    this.planeScratch[i].normal.y,
-                    this.planeScratch[i].normal.z,
-                    this.planeScratch[i].distance);
+                this.rootSpace.WorldPlanesToPainting(this.planeScratch, this.frustumPlanes);
+            }
+            else
+            {
+                for (int i = 0; i < 6; ++i)
+                {
+                    this.frustumPlanes[i] = new Vector4(
+                        this.planeScratch[i].normal.x,
+                        this.planeScratch[i].normal.y,
+                        this.planeScratch[i].normal.z,
+                        this.planeScratch[i].distance);
+                }
             }
 
             // ── 3. Record + execute the two-pass cull CommandBuffer ─────────
@@ -451,8 +474,13 @@ namespace WorldPainter
             this.SetLodFloat (ID_WindRippleWeight, this.windRippleWeight);
             this.SetLodFloat (ID_BendStrength,     this.bendStrength);
             this.SetLodFloat (ID_Flatten,          this.flatten);
-            // _CamPosWS is the camera position — genuinely scene-wide, not per-layer — so it stays global.
-            Shader.SetGlobalVector(ID_CamPosWS, new Vector4(camPos.x, camPos.y, camPos.z, 0f));
+            // _CamPosWS feeds the blade billboard yaw and interactor distance checks — all in painting
+            // space. When the root is non-identity, convert the world-space camera to painting space so
+            // the grass shader math (which runs in painting space) remains correct.
+            Vector3 camPosPainting = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.WorldToPainting(camPos)
+                : camPos;
+            Shader.SetGlobalVector(ID_CamPosWS, new Vector4(camPosPainting.x, camPosPainting.y, camPosPainting.z, 0f));
 
             // Re-bridge the per-layer material style every frame so Inspector edits propagate
             // live to the LOD clones (Texture / Color SetXxx are cheap dictionary lookups; the
@@ -463,11 +491,13 @@ namespace WorldPainter
 
             // FIX 3: upload interactors here (Submit) so it is always fresh for the draw.
             // SSOT: upload in exactly one place — not in Step.
-            this.interactorBuffer?.Upload(GrassInteractor.Active);
+            // Pass rootSpace so interactor world positions are converted to painting space before
+            // staging (the grass shader bend loop runs in painting space).
+            this.interactorBuffer?.Upload(GrassInteractor.Active, this.rootSpace);
             Shader.SetGlobalInteger(ID_InteractorCount, this.interactorBuffer?.Count ?? 0);
 
             // Phase 2: upload trail segments each frame (count global set inside Upload).
-            this.trailBuffer?.Upload(GrassTrailInteractor.Active);
+            this.trailBuffer?.Upload(GrassTrailInteractor.Active, this.rootSpace);
 
             // FIX 4: rebind buffers every Submit — guards against domain-reload / any other system
             // resetting shader state between frames. _Blades is PER-MATERIAL (per-tile data — see

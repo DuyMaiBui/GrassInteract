@@ -66,6 +66,10 @@ namespace WorldPainter
         private readonly ComputeShader computeShader;
         private readonly Material      materialBase; // source; cloned per-LOD
 
+        // Root-transform binder (painting↔world). Null or identity → cull runs in world space
+        // (which equals painting space at identity). Bound by WorldPainter after Build.
+        private WorldRootBinder? rootSpace;
+
         // ── Kernel indices ────────────────────────────────────────────────────
         private readonly int kernelCull;
         private readonly int kernelArgs;
@@ -167,6 +171,15 @@ namespace WorldPainter
             this.kernelArgs  = computeShader.FindKernel("WriteArgsB");
             this.kernelBlade = computeShader.FindKernel("BladeCull");
         }
+
+        // ── Root-space binding ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Bind the WorldPainter root-transform binder so frustum culling and camera-distance LOD
+        /// run in PAINTING space (matching the painting-space instance positions/AABBs). Identity
+        /// root → no transform (byte-identical to the pre-feature path).
+        /// </summary>
+        internal void BindRootSpace(WorldRootBinder binder) => this.rootSpace = binder;
 
         // ── IGrassEngine : Build ──────────────────────────────────────────────
 
@@ -374,13 +387,22 @@ namespace WorldPainter
             if (cullCam == null) return;
 
             GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
-            for (int i = 0; i < 6; ++i)
+            // Instance AABBs/positions are in PAINTING space, so the frustum planes must be
+            // transformed into painting space when the root is non-identity.
+            if (this.rootSpace != null && !this.rootSpace.IsIdentity)
             {
-                this.frustumPlanes[i] = new Vector4(
-                    this.planeScratch[i].normal.x,
-                    this.planeScratch[i].normal.y,
-                    this.planeScratch[i].normal.z,
-                    this.planeScratch[i].distance);
+                this.rootSpace.WorldPlanesToPainting(this.planeScratch, this.frustumPlanes);
+            }
+            else
+            {
+                for (int i = 0; i < 6; ++i)
+                {
+                    this.frustumPlanes[i] = new Vector4(
+                        this.planeScratch[i].normal.x,
+                        this.planeScratch[i].normal.y,
+                        this.planeScratch[i].normal.z,
+                        this.planeScratch[i].distance);
+                }
             }
 
             this.cullCmd.Clear();
@@ -442,7 +464,9 @@ namespace WorldPainter
             {
                 // Interactor buffer + count are genuinely scene-wide (one registry of active interactors),
                 // so they stay global — every layer reads the same live interactor set.
-                this.interactorBuffer.Upload(GrassInteractor.Active);
+                // Binder is always set by BindRootSpace (called from TryBuildPropLayerEngine after Build),
+                // so this.rootSpace is non-null by the time Submit runs.
+                this.interactorBuffer.Upload(GrassInteractor.Active, this.rootSpace!);
                 Shader.SetGlobalBuffer(ID_Interactors,      this.interactorBuffer.Buffer);
                 Shader.SetGlobalInteger(ID_InteractorCount, this.interactorBuffer.Count);
             }
@@ -557,6 +581,12 @@ namespace WorldPainter
 
             this.colliderRoot = new GameObject("ScatterColliderPool");
             Transform rootT   = this.colliderRoot.transform;
+
+            // Parent the collider-root under the WorldPainter root so all pooled collider hosts
+            // follow the root TRS live. Positions are authored in painting space (= local space).
+            // When rootSpace is null the GO remains a scene root — identity, correct behaviour.
+            if (this.rootSpace != null)
+                rootT.SetParent(this.rootSpace.Root, worldPositionStays: false);
 
             this.colliderPool = this.colliderRoot.AddComponent<InstanceColliderPool>();
             this.colliderPool.Init(instLayer.PoolCap, layerDefaultMesh, instLayer.DefaultColliderConvex,
@@ -681,7 +711,11 @@ namespace WorldPainter
             cmd.SetComputeBufferParam(this.computeShader, this.kernelCull, "chunkAabbs",    aabbBuffer);
             cmd.SetComputeIntParam   (this.computeShader,                  "chunkCount",    chunkCount);
             cmd.SetComputeVectorArrayParam(this.computeShader, "frustumPlanes", frustumPlanes);
+            // Camera position must be in PAINTING space so LOD distance comparisons are metric-correct
+            // against the painting-space instance positions. Identity root → no transform.
             Vector3 camPos = cam.transform.position;
+            if (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                camPos = this.rootSpace.WorldToPainting(camPos);
             cmd.SetComputeVectorParam(this.computeShader, "camPosWS",
                 new Vector4(camPos.x, camPos.y, camPos.z, 0f));
             cmd.SetComputeFloatParam (this.computeShader, "maxCullSqrDistance", maxSqrDistance);

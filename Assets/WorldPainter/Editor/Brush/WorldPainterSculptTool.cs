@@ -237,8 +237,11 @@ namespace WorldPainter.Editor
 
             // ── Normal brush-stroke path ──────────────────────────────────────────
 
-            Ray  ray    = HandleUtility.GUIPointToWorldRay(e.mousePosition);
-            bool hasHit = this.TryGetBrushWorldPoint(ray, painter, out Vector3 worldPoint);
+            // TryGetBrushWorldPoint returns a point in PAINTING space (= root local space).
+            // All tile-coord / resolver / compute-dispatch calls downstream expect painting coords.
+            // For an identity root, InverseTransformPoint is a passthrough — no behaviour change.
+            Ray  worldRay    = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+            bool hasHit = this.TryGetBrushWorldPoint(worldRay, painter, out Vector3 paintingPoint);
 
             if (hasHit)
             {
@@ -252,31 +255,39 @@ namespace WorldPainter.Editor
                 if (!suppressBrushRing)
                 {
                     var previewColor = new Color(0.3f, 0.7f, 1.0f); // WorldPainter blue
-                    TerrainBrushPreview.Set(worldPoint, brush.size, previewColor, brush.shape,
-                        s_heightFn, brush.maskTexture);
+                    // Pass the root's localToWorldMatrix so the preview ring is drawn under the
+                    // root TRS (painting space → world space). Identity root = Handles.matrix stays
+                    // Matrix4x4.identity, which is the default — no visual change.
+                    TerrainBrushPreview.Set(paintingPoint, brush.size, previewColor, brush.shape,
+                        s_heightFn, brush.maskTexture, painter.transform.localToWorldMatrix);
                 }
                 HandleUtility.Repaint();
 
                 // Prop placement ghost — show the LOD 0 mesh translucent at the cursor so the
                 // artist sees what they're about to place. Falls back to a wire disc when LOD 0
                 // isn't assigned yet (the Setup panel will prompt them to add one).
+                // PropGhostPreview renders via Graphics.DrawMeshNow / Handles in world space,
+                // so convert the painting-space point back to world before passing it.
                 if (isPropActive && isPlacementTool)
                 {
                     PropLayer? propLayer = BrushToolTargets.ResolvePropLayer(painter);
                     if (propLayer != null)
-                        PropGhostPreview.Draw(propLayer, worldPoint, valid: true);
+                    {
+                        Vector3 ghostWorldPoint = painter.transform.TransformPoint(paintingPoint);
+                        PropGhostPreview.Draw(propLayer, ghostWorldPoint, valid: true);
+                    }
                 }
             }
 
             switch (e.GetTypeForControl(controlId))
             {
                 case EventType.MouseDown when e.button == 0 && !e.alt && hasHit:
-                    this.HandleMouseDown(painter, worldPoint, controlId);
+                    this.HandleMouseDown(painter, paintingPoint, controlId);
                     e.Use();
                     break;
 
                 case EventType.MouseDrag when e.button == 0 && this.stroke.InStroke:
-                    if (hasHit) this.HandleMouseDrag(painter, worldPoint);
+                    if (hasHit) this.HandleMouseDrag(painter, paintingPoint);
                     e.Use();
                     break;
 

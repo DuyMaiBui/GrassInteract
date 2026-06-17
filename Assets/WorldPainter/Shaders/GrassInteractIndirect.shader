@@ -111,9 +111,11 @@ Shader "WorldPainter/IndirectGrass"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile _ _SHADOWS_SOFT
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseColor;
@@ -476,14 +478,16 @@ Shader "WorldPainter/IndirectGrass"
                     float3 posWS = ReconstructBladeVertexWS(b, posOS.xyz, saturate(uv.y), false);
                 #endif
 
-                o.positionCS = TransformWorldToHClip(posWS);
+                // P2-Root: map painting-space posWS/normalWS to world before clip.
+                float3 posWSWorld = WP_PaintingToWorldPos(posWS);
+                o.positionCS = TransformWorldToHClip(posWSWorld);
                 o.uv         = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 o.heightT    = saturate(uv.y);
-                o.positionWS = posWS;
+                o.positionWS = posWSWorld;
 
                 float3 nWS, tWS;
                 GRASS_BladeWorldTBN(b, nWS, tWS);
-                o.normalWS  = nWS;
+                o.normalWS  = WP_PaintingToWorldNormal(nWS);
                 o.tangentWS = tWS;
                 return o;
             }
@@ -632,9 +636,11 @@ Shader "WorldPainter/IndirectGrass"
             #pragma multi_compile_local _ _WIND_PERLIN
             // Phase 3: alpha-clip shadow caster. OFF = solid-quad caster (Phase 2 behavior unchanged).
             #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             struct BladeInstance { float3 posWS; uint packedYawScale; uint hash; };
             struct GrassInteractorGpu { float3 posWS; float radius; float strength; float _p0; float _p1; float _p2; };
@@ -810,7 +816,10 @@ Shader "WorldPainter/IndirectGrass"
                 // Phase 3: apply per-layer shadow bias offsets (0 = no-op; default is unchanged caster).
                 posWS += ld * _ShadowDepthBias;
                 posWS += nWS * _ShadowNormalBias;
-                float4 clip=TransformWorldToHClip(ApplyShadowBias(posWS,nWS,ld));
+                // P2-Root: map painting-space posWS/nWS to world before shadow clip.
+                float3 posWSWorld = WP_PaintingToWorldPos(posWS);
+                float3 nWSWorld   = WP_PaintingToWorldNormal(nWS);
+                float4 clip=TransformWorldToHClip(ApplyShadowBias(posWSWorld,nWSWorld,ld));
                 #if UNITY_REVERSED_Z
                     clip.z=min(clip.z,UNITY_NEAR_CLIP_VALUE);
                 #else
@@ -858,8 +867,10 @@ Shader "WorldPainter/IndirectGrass"
             // buffer matches the forward silhouette (otherwise depth says "blocker" everywhere and
             // anything behind a transparent card gets z-rejected). Must mirror the forward pass.
             #pragma shader_feature_local _ALPHACLIP
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             struct BladeInstance { float3 posWS; uint packedYawScale; uint hash; };
             struct GrassInteractorGpu { float3 posWS; float radius; float strength; float _p0; float _p1; float _p2; };
@@ -1000,7 +1011,8 @@ Shader "WorldPainter/IndirectGrass"
                 #else
                     float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),false);
                 #endif
-                o.positionCS=TransformWorldToHClip(posWS);
+                // P2-Root: map painting-space posWS to world before clip.
+                o.positionCS=TransformWorldToHClip(WP_PaintingToWorldPos(posWS));
                 #if defined(_ALPHACLIP)
                     o.uv = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 #endif

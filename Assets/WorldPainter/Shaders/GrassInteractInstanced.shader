@@ -46,8 +46,10 @@ Shader "WorldPainter/InstancedGrass"
             // Cutout grass cards (BaseMap with an alpha channel): discard fragments under _Cutoff
             // so transparent texels disappear instead of rendering as solid blade quads.
             #pragma shader_feature_local _ALPHACLIP
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseColor;
@@ -81,6 +83,8 @@ Shader "WorldPainter/InstancedGrass"
 
                 // No deform: the per-instance matrix already carries all motion (once C# is live).
                 float3 posWS   = TransformObjectToWorld(input.positionOS.xyz);
+                // P2-Root: treat object-space-derived posWS as painting space and map to world.
+                posWS = WP_PaintingToWorldPos(posWS);
                 float  heightT = saturate(input.uv.y);
 
                 output.positionCS = TransformWorldToHClip(posWS);
@@ -121,9 +125,11 @@ Shader "WorldPainter/InstancedGrass"
             #pragma multi_compile _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             // Mirror the forward keyword so the shadow silhouette matches the visible blade.
             #pragma shader_feature_local _ALPHACLIP
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             float3 _LightDirection;
             float3 _LightPosition;
@@ -174,6 +180,9 @@ Shader "WorldPainter/InstancedGrass"
                 // No deform: plain world placement from the per-instance matrix.
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 nrmWS = TransformObjectToWorldNormal(input.normalOS);
+                // P2-Root: treat object-space-derived posWS/nrmWS as painting space and map to world.
+                posWS = WP_PaintingToWorldPos(posWS);
+                nrmWS = WP_PaintingToWorldNormal(nrmWS);
 
                 output.positionCS = ShadowClipPos(posWS, nrmWS);
                 #if defined(_ALPHACLIP)
@@ -210,8 +219,10 @@ Shader "WorldPainter/InstancedGrass"
             #pragma multi_compile_instancing
             // Mirror the forward keyword so the depth-prepass silhouette matches.
             #pragma shader_feature_local _ALPHACLIP
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             #if defined(_ALPHACLIP)
                 TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
@@ -242,6 +253,8 @@ Shader "WorldPainter/InstancedGrass"
 
                 // No deform: plain world placement from the per-instance matrix.
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
+                // P2-Root: treat object-space-derived posWS as painting space and map to world.
+                posWS = WP_PaintingToWorldPos(posWS);
 
                 output.positionCS = TransformWorldToHClip(posWS);
                 #if defined(_ALPHACLIP)

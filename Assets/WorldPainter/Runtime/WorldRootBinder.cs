@@ -37,6 +37,9 @@ namespace WorldPainter
             this.root = root;
         }
 
+        /// <summary>The root Transform that defines painting space (= the WorldPainter GameObject).</summary>
+        internal Transform Root => this.root;
+
         /// <summary>painting → world point transform (root.localToWorldMatrix). Valid after PushGlobals.</summary>
         public Matrix4x4 LocalToWorld { get; private set; } = Matrix4x4.identity;
 

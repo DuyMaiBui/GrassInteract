@@ -231,7 +231,18 @@ namespace WorldPainter.Editor
         private TerrainTileGpuResources? FindGpu(WorldPainter painter, Vector2Int coord)
             => painter.ResourcesForCoord(coord);
 
-        private bool TryGetBrushWorldPoint(Ray ray, WorldPainter painter, out Vector3 worldPoint)
+        /// <summary>
+        /// Resolves the brush contact point in PAINTING space (= WorldPainter root local space).
+        /// <para>
+        /// The analytical terrain raycasts (TryMapSurfaceHit / TryInlineTilesSurfaceHit) operate
+        /// entirely in painting space, so the incoming world-space camera ray is converted to
+        /// painting space before those casts. The Physics.Raycast fallback (for scatter-prop
+        /// colliders) still fires the original world-space ray and converts the result back to
+        /// painting space via InverseTransformPoint. For an identity root the transform is a
+        /// passthrough — zero behaviour change.
+        /// </para>
+        /// </summary>
+        private bool TryGetBrushWorldPoint(Ray worldRay, WorldPainter painter, out Vector3 paintingPoint)
         {
             // CPU-authoritative terrain hit FIRST (SSOT with the rendered mesh). The GPU terrain
             // renders from the full-res (257) height texture via VTF, but the streamed physics
@@ -241,17 +252,27 @@ namespace WorldPainter.Editor
             // land exactly on the visible terrain. Physics.Raycast is the fallback for non-terrain
             // pickables (scatter prop colliders) only when the ray is not over a terrain tile.
             // Tiles live in the WorldMapAsset (SSOT, P2+); painter.Tiles is the legacy back-compat list.
-            if (painter.Map != null && TryMapSurfaceHit(ray, painter.Map, out worldPoint))
+
+            // Convert the world-space scene camera ray to painting space so the analytical terrain
+            // methods receive coordinates consistent with TerrainWorldGrid / tile heightmaps.
+            Transform root = painter.transform;
+            var paintingRay = new Ray(
+                root.InverseTransformPoint(worldRay.origin),
+                root.InverseTransformDirection(worldRay.direction));
+
+            if (painter.Map != null && TryMapSurfaceHit(paintingRay, painter.Map, out paintingPoint))
                 return true;
-            if (TryInlineTilesSurfaceHit(ray, painter, out worldPoint))
+            if (TryInlineTilesSurfaceHit(paintingRay, painter, out paintingPoint))
                 return true;
 
-            if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity))
+            // Physics.Raycast operates in world space — use the original world-space ray and
+            // convert the hit point back to painting space.
+            if (Physics.Raycast(worldRay, out RaycastHit hit, Mathf.Infinity))
             {
-                worldPoint = hit.point; return true;
+                paintingPoint = root.InverseTransformPoint(hit.point); return true;
             }
 
-            worldPoint = Vector3.zero;
+            paintingPoint = Vector3.zero;
             return false;
         }
 

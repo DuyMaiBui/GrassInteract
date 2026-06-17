@@ -311,6 +311,7 @@ namespace WorldPainter
             {
                 var engine = new InstancedPropEngine(this.scatterCullCompute, mat);
                 engine.Build(adapter, origin, this.scatterPool!, sampler);
+                engine.BindRootSpace(this.RootBinder);
 
                 this.surfacePropEngines.Add(engine);
                 this.surfacePropAdapters.Add(adapter);

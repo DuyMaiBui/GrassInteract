@@ -59,6 +59,10 @@ namespace WorldPainter.Editor
         private static Texture2D? maskTexture;
         private static double     lastSetTime = -1000d;
 
+        // Root TRS (painting → world). Set by the sculpt tool each frame so the ring is drawn
+        // under the WorldPainter root's transform. Identity when root is unset (default).
+        private static Matrix4x4  rootMatrix  = Matrix4x4.identity;
+
         // ── Mask-decal resources (lazily created, editor-only) ─────────────────
 
         private const string DECAL_SHADER = "Hidden/WorldPainter/BrushDecal";
@@ -93,16 +97,26 @@ namespace WorldPainter.Editor
         /// Pushes the current brush state. Call from <c>OnToolGUI</c> every event the brush
         /// is hovering a surface. <paramref name="height"/> lets the ring conform to the terrain;
         /// pass null to fall back to a flat ring at the hit point.
+        /// <para>
+        /// <paramref name="paintingToWorld"/> is the WorldPainter root's <c>localToWorldMatrix</c>.
+        /// It is applied as <c>Handles.matrix</c> during drawing so the ring renders on the
+        /// transformed (world-space) terrain surface. Pass <c>Matrix4x4.identity</c> (or omit)
+        /// for an identity root — no visual change.
+        /// </para>
         /// </summary>
-        internal static void Set(Vector3 worldPoint, float radius, Color tint, BrushShape shape,
-            HeightFn? height, Texture2D? mask = null)
+        internal static void Set(Vector3 paintingPoint, float radius, Color tint, BrushShape shape,
+            HeightFn? height, Texture2D? mask = null,
+            Matrix4x4 paintingToWorld = default)
         {
-            hitPoint    = worldPoint;
+            hitPoint    = paintingPoint;
             brushRadius = radius;
             tintColor   = tint;
             brushShape  = shape;
             heightAt    = height;
             maskTexture = mask;
+            // A zero (default) matrix is invalid for drawing — fall back to identity so existing
+            // callers that omit the parameter get the same behaviour as before.
+            rootMatrix  = paintingToWorld.m33 == 0f ? Matrix4x4.identity : paintingToWorld;
             lastSetTime = EditorApplication.timeSinceStartup;
         }
 
@@ -117,13 +131,23 @@ namespace WorldPainter.Editor
                 !IsFinite(brushRadius) || brushRadius <= 0f)
                 return;
 
+            // Apply the root TRS so all Handles draw calls map painting-space coords to world.
+            // For an identity root, rootMatrix == Matrix4x4.identity and prevMatrix == identity —
+            // no visual change. Save/restore to avoid leaking into subsequent scene-view drawers.
+            var prevMatrix = Handles.matrix;
+            Handles.matrix = rootMatrix;
+
             // Mask decal first (under everything): shows the brush mask's SHAPE projected on the
             // ground at the footprint. Only when a mask texture is set — plain circle/square brushes
             // keep just the ring below.
             DrawMaskDecal();
 
             BuildPerimeter();
-            if (perimeter.Count < 3) return;
+            if (perimeter.Count < 3)
+            {
+                Handles.matrix = prevMatrix;
+                return;
+            }
 
             var pts = perimeter.ToArray();
 
@@ -142,6 +166,8 @@ namespace WorldPainter.Editor
             ring.a = 1f;
             Handles.color = ring;
             Handles.DrawAAPolyLine(OUTLINE_COLOR_WIDTH, pts);
+
+            Handles.matrix = prevMatrix;
 
             sceneView.Repaint();
         }
@@ -175,10 +201,13 @@ namespace WorldPainter.Editor
 
             // Square brush half-extent = radius; circle's bounding box is also 2×radius. The mask
             // texture fills the footprint either way.
-            var matrix = Matrix4x4.TRS(
+            // Pre-multiply by rootMatrix: hitPoint is in painting space; Graphics.DrawMeshNow
+            // ignores Handles.matrix, so we bake the root TRS into the draw matrix directly.
+            var localMatrix = Matrix4x4.TRS(
                 new Vector3(hitPoint.x, hitPoint.y + lift, hitPoint.z),
                 Quaternion.identity,
                 new Vector3(brushRadius * 2f, 1f, brushRadius * 2f));
+            var matrix = rootMatrix * localMatrix;
 
             if (decalMat.SetPass(0))
                 Graphics.DrawMeshNow(quadMesh, matrix);

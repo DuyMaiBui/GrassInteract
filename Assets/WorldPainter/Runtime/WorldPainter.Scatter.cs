@@ -213,6 +213,7 @@ namespace WorldPainter
                 var gpuEngine = new GrassGpuEngine(
                     cullCompute, indirectMaterial, this.scatterExtraCullMargin);
                 gpuEngine.Build(layer, origin, this.scatterPool!, sampler);
+                gpuEngine.BindRootSpace(this.RootBinder);
 
                 if (!gpuEngine.SelfTest(out string testReason))
                 {

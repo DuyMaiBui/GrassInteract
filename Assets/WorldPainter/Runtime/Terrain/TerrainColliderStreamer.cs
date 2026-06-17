@@ -137,7 +137,14 @@ namespace WorldPainter
                 return;
             }
             float range = this.worldPainter.LodRangeMetres(this.colliderLodBand);
-            var desired = TerrainColliderRing.ComputeDesired(camPos, range);
+
+            // Convert camera world position to painting space so the ring picks tiles correctly
+            // when the WorldPainter root has a non-identity TRS. Identity root → no-op (binder
+            // returns the same position unchanged).
+            WorldRootBinder binder = this.worldPainter.RootBinder;
+            Vector3 camPosPainting = binder.IsIdentity ? camPos : binder.WorldToPainting(camPos);
+
+            var desired = TerrainColliderRing.ComputeDesired(camPosPainting, range);
 
             // Keep live host visibility in sync with the debug toggle (cheap; ≤ ring size).
             foreach (var handle in this.live.Values)

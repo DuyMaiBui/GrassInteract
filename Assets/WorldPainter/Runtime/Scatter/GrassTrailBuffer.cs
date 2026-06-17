@@ -109,17 +109,19 @@ namespace WorldPainter
         /// <summary>
         /// Snapshots <paramref name="interactors"/>, flattens all per-trail samples into
         /// <see cref="TrailSegmentGpu"/> records, skips segment pairs bridging a stroke break,
-        /// and uploads up to <see cref="MAX_TRAIL_SEGMENTS"/> records via
-        /// <see cref="GraphicsBuffer.SetData"/>.
+        /// converts each sample position from world to painting space via <paramref name="binder"/>
+        /// (guarded by <see cref="WorldRootBinder.IsIdentity"/>), and uploads up to
+        /// <see cref="MAX_TRAIL_SEGMENTS"/> records via <see cref="GraphicsBuffer.SetData"/>.
         ///
         /// <para>
         /// Fake-null stale entries (edit-mode domain-reload artefacts) are skipped.
         /// Overflow entries are dropped with a one-time warning.
         /// </para>
         /// </summary>
-        internal void Upload(IReadOnlyList<GrassTrailInteractor> interactors)
+        internal void Upload(IReadOnlyList<GrassTrailInteractor> interactors, WorldRootBinder? binder)
         {
             int segCount = 0;
+            bool convertPositions = binder != null && !binder.IsIdentity;
 
             for (int t = 0; t < interactors.Count && segCount < MAX_TRAIL_SEGMENTS; t++)
             {
@@ -141,11 +143,20 @@ namespace WorldPainter
 
                     float alphaA = 1f - s[i - 1].Age / duration;
                     float alphaB = 1f - s[i    ].Age / duration;
+
+                    Vector3 posA = s[i - 1].PosWS;
+                    Vector3 posB = s[i    ].PosWS;
+                    if (convertPositions)
+                    {
+                        posA = binder.WorldToPainting(posA);
+                        posB = binder.WorldToPainting(posB);
+                    }
+
                     this.staging[segCount++] = new TrailSegmentGpu
                     {
-                        PosA       = s[i - 1].PosWS,
+                        PosA       = posA,
                         Radius     = radius,
-                        PosB       = s[i    ].PosWS,
+                        PosB       = posB,
                         Alpha      = 0.5f * (alphaA + alphaB),
                         MaxBendRad = maxBendRad,
                         CenterPct  = centerPct,

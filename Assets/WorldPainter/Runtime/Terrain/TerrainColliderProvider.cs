@@ -105,7 +105,7 @@ namespace WorldPainter
             var host = new GameObject($"{HOST_PREFIX}{tile.tileCoord.x}_{tile.tileCoord.y}");
             host.hideFlags = debugVisible ? HideFlags.DontSave : HideFlags.HideAndDontSave;
             host.transform.SetParent(parent, worldPositionStays: false);
-            host.transform.position = new Vector3(origin.x, tile.minHeight, origin.y);
+            host.transform.localPosition = new Vector3(origin.x, tile.minHeight, origin.y);
 
             // Attach Terrain + TerrainCollider (the cheapest heightfield collider in Unity).
             var terrain   = host.AddComponent<Terrain>();

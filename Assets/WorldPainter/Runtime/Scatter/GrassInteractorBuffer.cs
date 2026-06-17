@@ -92,15 +92,18 @@ namespace WorldPainter
         // ── Per-frame upload ──────────────────────────────────────────────────
 
         /// <summary>
-        /// Snapshots <paramref name="active"/>, copies up to <see cref="MAX_INTERACTORS"/> records
-        /// into the staging array, and calls <see cref="GraphicsBuffer.SetData"/>.
+        /// Snapshots <paramref name="active"/>, converts each interactor world position to painting
+        /// space via <paramref name="binder"/> (no-op when <paramref name="binder"/> is null or
+        /// <see cref="WorldRootBinder.IsIdentity"/>), copies up to <see cref="MAX_INTERACTORS"/>
+        /// records into the staging array, and calls <see cref="GraphicsBuffer.SetData"/>.
         /// Fake-null stale entries (edit-mode domain-reload artefacts) are skipped.
         /// If <c>active.Count &gt; MAX_INTERACTORS</c> a warning is logged ONCE and the
         /// overflow entries are dropped silently.
         /// </summary>
-        public void Upload(IReadOnlyList<GrassInteractor> active)
+        public void Upload(IReadOnlyList<GrassInteractor> active, WorldRootBinder? binder)
         {
             int filled = 0;
+            bool convertPositions = binder != null && !binder.IsIdentity;
 
             for (int i = 0; i < active.Count; ++i)
             {
@@ -120,9 +123,13 @@ namespace WorldPainter
                     break;
                 }
 
+                Vector3 pos = interactor.WorldPosition;
+                if (convertPositions)
+                    pos = binder.WorldToPainting(pos);
+
                 this.staging[filled] = new InteractorGpu
                 {
-                    posWS    = interactor.WorldPosition,
+                    posWS    = pos,
                     radius   = interactor.Radius,
                     strength = interactor.Strength,
                     pad0     = 0f,
