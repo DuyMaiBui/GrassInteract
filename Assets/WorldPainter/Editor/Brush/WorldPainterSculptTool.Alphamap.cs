@@ -51,11 +51,18 @@ namespace WorldPainter.Editor
             return rt;
         }
 
-        /// <summary>Sync-flush every cached alphamap RT into its target texture (call on mouse-up).</summary>
+        /// <summary>
+        /// Sync-flush cached alphamap RTs into their target textures (call on mouse-up). Persists
+        /// ONLY tiles actually painted this stroke: seam-aware Smooth seeds a straddled neighbour's
+        /// alphamap RT as a READ-ONLY blur source (TerrainLayerDispatch.BindAlphaNeighbors) whose
+        /// coord never enters strokeTouchedCoords — flushing it would quantise the unpainted
+        /// neighbour's float alphamap to RGBA32 with no undo entry, so skip it.
+        /// </summary>
         internal void FlushAllAlphamapRTs()
         {
             foreach (var kv in this.alphamapRtCache)
-                this.alphamapEncoder.ExecuteSync(kv.Value.target, kv.Value.rt);
+                if (this.strokeTouchedCoords.Contains(kv.Key.coord))
+                    this.alphamapEncoder.ExecuteSync(kv.Value.target, kv.Value.rt);
         }
 
         /// <summary>

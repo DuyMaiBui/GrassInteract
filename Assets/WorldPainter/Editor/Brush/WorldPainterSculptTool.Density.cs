@@ -81,8 +81,14 @@ namespace WorldPainter.Editor
 
         internal void FlushAllDensityRTs()
         {
+            // Persist ONLY tiles actually painted this stroke. Seam-aware Smooth seeds a straddled
+            // neighbour's density RT as a READ-ONLY blur source (DensityDispatch.BindDensityNeighbors)
+            // — those coords never enter strokeTouchedCoords. Flushing them would rewrite an unpainted
+            // neighbour with a lossy resampled round-trip and no undo entry, so skip them. LEGACY_COORD
+            // (single-map path) is always persisted since it has no per-tile coord to match.
             foreach (var kv in this.densityRtCache)
-                this.densityEncoder.ExecuteSync(kv.Value.target, kv.Value.rt);
+                if (kv.Key == LEGACY_COORD || this.strokeTouchedCoords.Contains(kv.Key))
+                    this.densityEncoder.ExecuteSync(kv.Value.target, kv.Value.rt);
         }
 
         // ── Release ───────────────────────────────────────────────────────────

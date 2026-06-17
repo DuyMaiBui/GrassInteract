@@ -1,4 +1,6 @@
 #nullable enable
+using UnityEngine;
+
 namespace WorldPainter.Editor
 {
     /// <summary>
@@ -63,6 +65,13 @@ namespace WorldPainter.Editor
                 BrushMaskBinder.BindToCompute(ctx.Compute, k);
                 ctx.Compute.SetTexture(k, "_DensityRT", dRT);
                 ctx.Compute.SetInt("_DensityMode", mode);
+
+                // Seam-aware Smooth (mode 2): bind any straddled neighbour tile's working density
+                // RT so the box blur reads across the shared edge. Paint/Erase bind placeholders
+                // (flag 0) — the kernel references the neighbour textures unconditionally, so every
+                // PaintDensity dispatch must keep all four slots bound.
+                BindDensityNeighbors(in ctx, k, ctx.Tile.tileCoord, dRT, smooth: mode == 2);
+
                 ctx.Compute.Dispatch(k, ctx.Groups, ctx.Groups, 1);
 
                 // Queue throttled async writeback to this tile's density texture.
@@ -70,6 +79,53 @@ namespace WorldPainter.Editor
                 return;
             }
 
+        }
+
+        /// <summary>
+        /// Binds the four cardinal neighbour density RTs for the Smooth kernel. When
+        /// <paramref name="smooth"/> and a neighbour tile already has a density texture, its working
+        /// RT (created on demand, seeded from the committed map) is bound with flag 1; otherwise the
+        /// self RT is bound as an inert placeholder with flag 0 (never sampled). A neighbour without
+        /// existing density is never created (read-only resolve), so seam continuity applies only
+        /// where the neighbour already has grass. A neighbour bound here as a pure read source is
+        /// NOT painted, so it never enters strokeTouchedCoords and FlushAllDensityRTs skips it — its
+        /// committed texture is left byte-for-byte untouched (no lossy round-trip, no spurious undo).
+        /// </summary>
+        private static void BindDensityNeighbors(
+            in BrushToolContext ctx, int kernel, Vector2Int coord, RenderTexture self, bool smooth)
+        {
+            BindDensityDir(in ctx, kernel, "_NeighborDensityPosX", "_HasNeighborDensityPosX",
+                new Vector2Int(coord.x + 1, coord.y), self, smooth);
+            BindDensityDir(in ctx, kernel, "_NeighborDensityNegX", "_HasNeighborDensityNegX",
+                new Vector2Int(coord.x - 1, coord.y), self, smooth);
+            BindDensityDir(in ctx, kernel, "_NeighborDensityPosZ", "_HasNeighborDensityPosZ",
+                new Vector2Int(coord.x, coord.y + 1), self, smooth);
+            BindDensityDir(in ctx, kernel, "_NeighborDensityNegZ", "_HasNeighborDensityNegZ",
+                new Vector2Int(coord.x, coord.y - 1), self, smooth);
+        }
+
+        private static void BindDensityDir(
+            in BrushToolContext ctx, int kernel, string texProp, string flagProp,
+            Vector2Int neighborCoord, RenderTexture self, bool smooth)
+        {
+            RenderTexture? rt = null;
+            if (smooth)
+            {
+                var tex = BrushToolTargets.ResolveGrassDensityForTile(ctx.Painter, neighborCoord);
+                if (tex != null)
+                    rt = ctx.Tool.GetOrCreateDensityRT(tex, neighborCoord);
+            }
+
+            if (rt != null && !ReferenceEquals(rt, self))
+            {
+                ctx.Compute.SetTexture(kernel, texProp, rt);
+                ctx.Compute.SetInt(flagProp, 1);
+            }
+            else
+            {
+                ctx.Compute.SetTexture(kernel, texProp, self);
+                ctx.Compute.SetInt(flagProp, 0);
+            }
         }
     }
 }

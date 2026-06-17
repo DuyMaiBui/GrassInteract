@@ -30,6 +30,7 @@ namespace WorldPainter.Editor
         {
             new TerrainLayerPaintTool(),
             new TerrainLayerEraseTool(),
+            new TerrainLayerSmoothTool(),
         };
 
         private static readonly IBrushTool[] DensityTools =
