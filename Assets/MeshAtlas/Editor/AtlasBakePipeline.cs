@@ -30,12 +30,7 @@ namespace MeshAtlas.Editor
         public static PipelineResult Run(IReadOnlyList<GameObject> roots, BakeOptions options)
         {
             var result = new PipelineResult();
-            var renderers = CollectRenderers(roots, result.SkippedMeshes);
-            if (renderers.Count < 2)
-            {
-                result.Error = $"Need at least 2 atlas-able meshes after the UV guard; found {renderers.Count}.";
-                return result;
-            }
+            var renderers = RendererCollector.Collect(roots, result.SkippedMeshes);
 
             // Unique materials → packing sizes (albedo size, else default).
             var materials = new List<Material>();
@@ -43,6 +38,10 @@ namespace MeshAtlas.Editor
             var sizes = new List<Vector2Int>();
             foreach (var rc in renderers)
             {
+                if (rc.Materials == null)
+                {
+                    continue;
+                }
                 foreach (var mat in rc.Materials)
                 {
                     if (mat == null || matIndex.ContainsKey(mat))
@@ -53,6 +52,15 @@ namespace MeshAtlas.Editor
                     materials.Add(mat);
                     sizes.Add(SourceSize(mat));
                 }
+            }
+
+            // Atlasing is defined by combining 2+ MATERIALS into one — the mesh count is
+            // irrelevant. A single mesh with two submesh materials qualifies.
+            if (materials.Count < 2)
+            {
+                result.Error = $"Need at least 2 unique materials to atlas; found {materials.Count}. "
+                    + "(A single mesh with 2+ submesh materials qualifies.)";
+                return result;
             }
 
             var packed = new AtlasPacker(options.padding, options.maxAtlasSize).Pack(sizes);
@@ -66,49 +74,17 @@ namespace MeshAtlas.Editor
             var inputs = BuildInputs(materials, packed.Rects);
             var atlases = new MapBaker().Bake(inputs, atlasSize, options.EnabledChannels(), options.padding);
 
-            var items = BuildCombineItems(renderers, matIndex, packed.Rects, result.Warnings);
+            var rectByMaterial = new Dictionary<Material, Rect>(materials.Count);
+            for (var i = 0; i < materials.Count; i++)
+            {
+                rectByMaterial[materials[i]] = packed.Rects[i];
+            }
+            var items = CombineItemBuilder.Build(renderers, rectByMaterial, result.Warnings);
             var combined = MeshCombiner.Combine(items);
             result.Output = AtlasAssetWriter.Write(atlases, combined, options.outputFolder, options.baseName);
             result.CombinedCount = renderers.Count;
             result.Success = true;
             return result;
-        }
-
-        private static List<RendererClip> CollectRenderers(IReadOnlyList<GameObject> roots, List<string> skipped)
-        {
-            var clips = new List<RendererClip>();
-            if (roots == null)
-            {
-                return clips;
-            }
-            foreach (var root in roots)
-            {
-                if (root == null)
-                {
-                    continue;
-                }
-                foreach (var mr in root.GetComponentsInChildren<MeshRenderer>())
-                {
-                    var mf = mr.GetComponent<MeshFilter>();
-                    var mesh = mf != null ? mf.sharedMesh : null;
-                    if (mesh == null)
-                    {
-                        continue;
-                    }
-                    if (UvRangeInspector.HasOutOfRangeUv(mesh.uv, out _))
-                    {
-                        if (!skipped.Contains(mesh.name)) { skipped.Add(mesh.name); }
-                        continue;
-                    }
-                    clips.Add(new RendererClip
-                    {
-                        Transform = mr.transform.localToWorldMatrix,
-                        Mesh = mesh,
-                        Materials = mr.sharedMaterials,
-                    });
-                }
-            }
-            return clips;
         }
 
         private static List<BakeInput> BuildInputs(List<Material> materials, Rect[] rects)
@@ -128,45 +104,6 @@ namespace MeshAtlas.Editor
                 });
             }
             return inputs;
-        }
-
-        private static List<CombineItem> BuildCombineItems(List<RendererClip> renderers, Dictionary<Material, int> matIndex, Rect[] rects, List<string> warnings)
-        {
-            var pivot = SelectionPivot(renderers);
-            var toPivot = Matrix4x4.Translate(-pivot);
-            var items = new List<CombineItem>();
-            foreach (var rc in renderers)
-            {
-                var subCount = rc.Mesh.subMeshCount;
-                for (var s = 0; s < subCount; s++)
-                {
-                    var mat = s < rc.Materials.Length ? rc.Materials[s] : null;
-                    if (mat == null || !matIndex.TryGetValue(mat, out var mi))
-                    {
-                        // Surface the dropped geometry — never lose a submesh silently.
-                        warnings.Add($"{rc.Mesh.name} submesh {s}: no resolvable material → dropped.");
-                        continue;
-                    }
-                    items.Add(new CombineItem
-                    {
-                        Mesh = rc.Mesh,
-                        SubMeshIndex = s,
-                        Transform = toPivot * rc.Transform,
-                        SubRect = rects[mi],
-                    });
-                }
-            }
-            return items;
-        }
-
-        private static Vector3 SelectionPivot(List<RendererClip> renderers)
-        {
-            var sum = Vector3.zero;
-            foreach (var rc in renderers)
-            {
-                sum += (Vector3)rc.Transform.GetColumn(3);
-            }
-            return sum / renderers.Count;
         }
 
         private static Vector2Int SourceSize(Material m)
@@ -192,13 +129,6 @@ namespace MeshAtlas.Editor
                 }
             }
             return null;
-        }
-
-        private sealed class RendererClip
-        {
-            public Matrix4x4 Transform;
-            public Mesh Mesh;
-            public Material[] Materials;
         }
     }
 }
