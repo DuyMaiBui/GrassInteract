@@ -884,7 +884,12 @@ namespace WorldPainter
             cmd.SetComputeBufferParam(this.computeShader, this.kernelCull, "chunkAabbs",    aabbBuffer);
             cmd.SetComputeIntParam   (this.computeShader,                  "chunkCount",    chunkCount);
             cmd.SetComputeVectorArrayParam(this.computeShader, "frustumPlanes", frustumPlanes);
+            // Compute-kernel camera must be PAINTING space too — GrassCull.compute tests it against
+            // painting-space chunk AABBs / blade posWS for distance reject + LOD bucketing. (Frustum
+            // planes + the render-VS _CamPosWS are already painting-space; this was the missing one.)
             Vector3 camPos = cam.transform.position;
+            if (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                camPos = this.rootSpace.WorldToPainting(camPos);
             cmd.SetComputeVectorParam(this.computeShader, "camPosWS",
                 new Vector4(camPos.x, camPos.y, camPos.z, 0f));
             cmd.SetComputeFloatParam (this.computeShader, "maxCullSqrDistance", maxSqrDistance);

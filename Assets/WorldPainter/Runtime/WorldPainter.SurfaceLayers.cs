@@ -310,8 +310,11 @@ namespace WorldPainter
             try
             {
                 var engine = new InstancedPropEngine(this.scatterCullCompute, mat);
-                engine.Build(adapter, origin, this.scatterPool!, sampler);
+                // Bind the root space BEFORE Build: Build → BuildColliderRuntime reads rootSpace to
+                // parent the collider pool under the root. Binding after Build leaves the prop
+                // colliders detached from the rendered props under a non-identity root.
                 engine.BindRootSpace(this.RootBinder);
+                engine.Build(adapter, origin, this.scatterPool!, sampler);
 
                 this.surfacePropEngines.Add(engine);
                 this.surfacePropAdapters.Add(adapter);
