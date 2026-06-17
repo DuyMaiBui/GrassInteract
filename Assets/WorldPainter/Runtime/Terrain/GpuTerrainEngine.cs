@@ -60,6 +60,10 @@ namespace WorldPainter
         private readonly ComputeShader computeShader;
         private readonly Material      sourceMaterial;
 
+        // Root-transform binder (painting↔world). Null or identity → cull runs in world space
+        // (which equals painting space at identity). Bound by WorldPainter after Build.
+        private WorldRootBinder? rootSpace;
+
         // ── Kernel index ──────────────────────────────────────────────────────
         private readonly int kernelNodeCull;
 
@@ -263,6 +267,12 @@ namespace WorldPainter
         }
 
         /// <summary>
+        /// Bind the WorldPainter root-transform binder so CDLOD selection + frustum culling run in
+        /// PAINTING space (matching the painting-space node positions). Identity root → no transform.
+        /// </summary>
+        internal void BindRootSpace(WorldRootBinder binder) => this.rootSpace = binder;
+
+        /// <summary>
         /// Pushes <paramref name="tile"/>.alphamaps[] onto <paramref name="material"/>.
         /// Slots beyond the tile's count are bound to <c>Texture2D.blackTexture</c> so the
         /// shader can safely read them when the loop body short-circuits on count.
@@ -297,8 +307,12 @@ namespace WorldPainter
             Camera? cullCam = targetCamera ?? Camera.main;
             if (cullCam == null) return;
 
-            // 1. CDLOD quadtree selection (CPU)
-            IReadOnlyList<CdlodNode> nodes = this.quadtree.Select(cameraPos);
+            // 1. CDLOD quadtree selection (CPU) — in PAINTING space. Nodes live in painting
+            // space, so the camera driving LOD selection must be transformed by the root's
+            // inverse TRS (no-op when identity). Preserves the XZ-only crack invariant.
+            Vector3 selectPos = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.WorldToPainting(cameraPos) : cameraPos;
+            IReadOnlyList<CdlodNode> nodes = this.quadtree.Select(selectPos);
             if (nodes.Count == 0) return;
 
             // 2. Upload nodes + AABBs to GPU
@@ -311,14 +325,22 @@ namespace WorldPainter
             if (this.visibleNodesBuf != null)
                 this.patchMaterial.SetBuffer(ID_VisibleNodeIndices, this.visibleNodesBuf);
 
-            // 4. Frustum planes
+            // 4. Frustum planes — transformed into PAINTING space when the root is non-identity
+            // (node AABBs the cull compute tests are in painting space).
             GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
-            for (int i = 0; i < 6; ++i)
-                this.frustumPlanes[i] = new Vector4(
-                    this.planeScratch[i].normal.x,
-                    this.planeScratch[i].normal.y,
-                    this.planeScratch[i].normal.z,
-                    this.planeScratch[i].distance);
+            if (this.rootSpace != null && !this.rootSpace.IsIdentity)
+            {
+                this.rootSpace.WorldPlanesToPainting(this.planeScratch, this.frustumPlanes);
+            }
+            else
+            {
+                for (int i = 0; i < 6; ++i)
+                    this.frustumPlanes[i] = new Vector4(
+                        this.planeScratch[i].normal.x,
+                        this.planeScratch[i].normal.y,
+                        this.planeScratch[i].normal.z,
+                        this.planeScratch[i].distance);
+            }
 
             // 5. Cull CommandBuffer
             this.cullCmd.Clear();
@@ -404,6 +426,8 @@ namespace WorldPainter
             this.cullCmd.SetComputeVectorArrayParam(this.computeShader, "frustumPlanes",
                 this.frustumPlanes);
             Vector3 camPos = cam.transform.position;
+            if (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                camPos = this.rootSpace.WorldToPainting(camPos);
             this.cullCmd.SetComputeVectorParam(this.computeShader, "camPosWS",
                 new Vector4(camPos.x, camPos.y, camPos.z, 0f));
             this.cullCmd.SetComputeFloatParam(this.computeShader, "maxCullSqrDistance", 0f);

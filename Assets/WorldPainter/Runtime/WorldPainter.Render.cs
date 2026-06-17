@@ -251,6 +251,7 @@ namespace WorldPainter
             var engine = new GpuTerrainEngine(this.cullCompute!, this.patchMaterial!);
             engine.Build(tile, gpu, this.lodRangesM);
             engine.BindPalette(this.paletteBinder);
+            engine.BindRootSpace(this.RootBinder);
 
             bool ok = engine.SelfTest(out string msg);
             Debug.Log($"[WorldPainter] Tile {tile.tileCoord}: {msg}");
@@ -297,6 +298,7 @@ namespace WorldPainter
             var engine = new GpuTerrainEngine(this.cullCompute!, this.patchMaterial!);
             engine.Build(tile, gpu, this.lodRangesM);
             engine.BindPalette(this.paletteBinder);
+            engine.BindRootSpace(this.RootBinder);
 
             bool ok = engine.SelfTest(out string msg);
             Debug.Log($"[WorldPainter] Tile[{tileIndex}] {tile.tileCoord}: {msg}");
