@@ -64,6 +64,10 @@ Shader "WorldPainter/TerrainPatch"
             // multi_compile (not shader_feature) so the variant survives runtime/quality-tier toggling.
             #pragma multi_compile _ _TERRAIN_STOCHASTIC
 
+            // WorldPainter root-transform (painting space → world). Global keyword set by
+            // WorldRootBinder; OFF variant is byte-identical to the pre-feature shader.
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
+
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
@@ -76,6 +80,8 @@ Shader "WorldPainter/TerrainPatch"
             // Palette-driven (Unity-Terrain-style) blend with up to 16 layers
             // across 4 alphamaps.
             #include "TerrainPalette.hlsl"
+            // WorldPainter root-transform: maps painting space → world (no-op when off).
+            #include "WorldRootTransform.hlsl"
 
             // ── Node buffer ──────────────────────────────────────────────────
             // RenderNode layout must match CdlodNode.STRIDE = 32 B EXACTLY.
@@ -128,7 +134,10 @@ Shader "WorldPainter/TerrainPatch"
                     node.worldOffset.x + vtxXZ.x * node.scale,
                     0.0,
                     node.worldOffset.z + vtxXZ.y * node.scale);
-                float3 camPos    = _WorldSpaceCameraPos;
+                // CDLOD morph uses the camera in PAINTING space so the GPU morph metric matches
+                // the painting-space CDLOD selection (CdlodQuadtree.Select fed camera→painting).
+                // No-op when _WP_ROOT_TRANSFORM is off.
+                float3 camPos    = WP_WorldToPaintingPos(_WorldSpaceCameraPos);
                 // CDLOD crack fix: the LOD quadtree selects nodes and builds morphStart/morphEnd
                 // from XZ-ONLY distance (CdlodQuadtree.SqrDistXZ ignores camera height). The morph
                 // blend MUST use the SAME metric — otherwise vtxWorldXZ.y=0 vs camPos.y folds the
@@ -154,7 +163,10 @@ Shader "WorldPainter/TerrainPatch"
                 // 6. Sample height via VTF (TerrainVtf.hlsl)
                 float worldY = SampleHeightVTF(tileUV);
 
-                float3 posWS = float3(worldX, worldY, worldZ);
+                // Painting-space surface position → world (root TRS). tileUV/worldXZ stay in
+                // painting space — height + palette are authored there; only the rendered
+                // position maps to world. No-op when _WP_ROOT_TRANSFORM is off.
+                float3 posWS = WP_PaintingToWorldPos(float3(worldX, worldY, worldZ));
                 OUT.positionCS = TransformWorldToHClip(posWS);
                 OUT.positionWS = posWS;
                 OUT.tileUV     = tileUV;
@@ -168,7 +180,9 @@ Shader "WorldPainter/TerrainPatch"
             {
                 // ── Normal: derived from heightmap central-difference ─────────
                 // TerrainNormals.hlsl: DeriveNormalWS uses SampleHeightVTF + _NormalEpsilon.
-                float3 normalWS = DeriveNormalWS(IN.tileUV);
+                // It returns a PAINTING-space normal; map to world via the inverse-transpose
+                // normal matrix so lighting is correct under non-uniform root scale. No-op when off.
+                float3 normalWS = WP_PaintingToWorldNormal(DeriveNormalWS(IN.tileUV));
 
                 // ── Albedo: TerrainPalette-blended texture array ──────────────
                 // TerrainPalette.hlsl: BlendTerrainPalette samples N alphamaps
@@ -222,11 +236,17 @@ Shader "WorldPainter/TerrainPatch"
             #pragma vertex vertShadow
             #pragma fragment fragShadow
 
+            // Shadow geometry must apply the SAME root transform as the forward pass,
+            // else the shadow silhouette desyncs from the lit surface under a non-identity root.
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
+
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             // Height decode + CDLOD morph helpers (SSOT). Provides _HeightTex / _MinHeight /
             // _MaxHeight / _TileOriginWS / _TileSizeM / DecodeHeight / SampleHeightVTF /
             // MorphVertex / CalcMorphBlend — do NOT re-declare these here.
             #include "TerrainVtf.hlsl"
+            // WorldPainter root-transform (painting → world); same seam as the forward pass.
+            #include "WorldRootTransform.hlsl"
 
             struct RenderNode
             {
@@ -257,7 +277,9 @@ Shader "WorldPainter/TerrainPatch"
                 float2 vtxXZ      = IN.uv;
                 float3 vtxWorldXZ = float3(node.worldOffset.x + vtxXZ.x * node.scale, 0.0,
                                            node.worldOffset.z + vtxXZ.y * node.scale);
-                float2 deltaXZ    = vtxWorldXZ.xz - _WorldSpaceCameraPos.xz;
+                // Camera in PAINTING space so the morph metric matches the forward pass + selection.
+                float2 camPaintXZ = WP_WorldToPaintingPos(_WorldSpaceCameraPos).xz;
+                float2 deltaXZ    = vtxWorldXZ.xz - camPaintXZ;
                 float  morphBlend = CalcMorphBlend(dot(deltaXZ, deltaXZ), node.morphStart, node.morphEnd);
                 float2 morphedXZ  = MorphVertex(vtxXZ, morphBlend);
 
@@ -265,7 +287,8 @@ Shader "WorldPainter/TerrainPatch"
                 float worldZ = node.worldOffset.z + morphedXZ.y * node.scale;
                 // Tile-local UV (subtract tile origin so non-(0,0) tiles are correct).
                 float worldY = SampleHeightVTF((float2(worldX, worldZ) - _TileOriginWS) / _TileSizeM);
-                float3 posWS = float3(worldX, worldY, worldZ);
+                // Painting-space position → world (root TRS); same seam as the forward pass.
+                float3 posWS = WP_PaintingToWorldPos(float3(worldX, worldY, worldZ));
                 OUT.positionCS = TransformWorldToHClip(posWS);
                 return OUT;
             }

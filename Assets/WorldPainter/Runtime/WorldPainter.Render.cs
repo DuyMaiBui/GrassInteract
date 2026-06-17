@@ -39,6 +39,16 @@ namespace WorldPainter
         // Map-level TerrainLayer palette array (shared across all tile engines).
         private readonly TerrainPaletteBinder paletteBinder = new();
 
+        // Root-transform SSOT: maps painting space (root-local) → world space. Lazily bound to
+        // this.transform; pushed once per submit so render/cull/colliders/editor stay in lockstep.
+        private WorldRootBinder? rootBinder;
+
+        /// <summary>
+        /// Root-transform binder (painting space ↔ world). Lazily created on this.transform.
+        /// Consumed by cull (camera/frustum → painting), colliders, and editor brush mapping.
+        /// </summary>
+        internal WorldRootBinder RootBinder => this.rootBinder ??= new WorldRootBinder(this.transform);
+
         /// <summary>True once <see cref="TryBuild"/> has succeeded with ≥1 tile.</summary>
         internal bool IsBuilt { get; private set; }
 
@@ -327,6 +337,11 @@ namespace WorldPainter
 
         private void SubmitTerrain(Camera? cam)
         {
+            // Push the root TRS as global shader matrices BEFORE any terrain/grass/prop submit.
+            // This is the single DRY seam hit by both the play-mode LateUpdate and the edit-mode
+            // OnBeginCameraRenderingEdit paths, so the whole pipeline live-follows the root.
+            this.RootBinder.PushGlobals();
+
             Vector3 camPos = cam != null ? cam.transform.position :
                              (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
             foreach (var engine in this.engines)

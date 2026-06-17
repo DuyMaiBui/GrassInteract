@@ -122,9 +122,11 @@ Shader "WorldPainter/ScatterInstanced"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile _ _SHADOWS_SOFT
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseColor;
@@ -445,10 +447,12 @@ Shader "WorldPainter/ScatterInstanced"
                 // matching normalWS so TBN stays orthonormal under wind/interactor deform.
                 float3 tangentWS = SCATTER_TangentWS(inst, tiltQ, tangentOS.xyz);
 
-                o.positionCS = TransformWorldToHClip(posWS);
-                o.normalWS   = normalWS;
+                // P2-Root: map painting-space posWS/normalWS to world before clip.
+                float3 posWSWorld = WP_PaintingToWorldPos(posWS);
+                o.positionCS = TransformWorldToHClip(posWSWorld);
+                o.normalWS   = WP_PaintingToWorldNormal(normalWS);
                 o.uv         = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
-                o.positionWS = posWS;
+                o.positionWS = posWSWorld;
                 o.tangentWS  = tangentWS;
                 return o;
             }
@@ -606,9 +610,11 @@ Shader "WorldPainter/ScatterInstanced"
             #pragma multi_compile_local _ SCATTER_ALIGN_TO_NORMAL
             // Phase 3: alpha-clip shadow caster. OFF = solid caster (Phase 2 behavior unchanged).
             #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             struct InstanceData { float3 posWS; uint packedYawScale; uint lodHash; };
             struct SC_InteractorGpu { float3 posWS; float radius; float strength; float _p0; float _p1; float _p2; };
@@ -702,7 +708,11 @@ Shader "WorldPainter/ScatterInstanced"
                 posWS += lightDir * _ShadowDepthBias;
                 posWS += nrmWS   * _ShadowNormalBias;
 
-                float4 clip = TransformWorldToHClip(ApplyShadowBias(posWS, nrmWS, lightDir));
+                // P2-Root: map painting-space posWS/nrmWS to world before shadow clip.
+                float3 posWSWorld = WP_PaintingToWorldPos(posWS);
+                float3 nrmWSWorld = WP_PaintingToWorldNormal(nrmWS);
+
+                float4 clip = TransformWorldToHClip(ApplyShadowBias(posWSWorld, nrmWSWorld, lightDir));
                 #if UNITY_REVERSED_Z
                     clip.z = min(clip.z, UNITY_NEAR_CLIP_VALUE);
                 #else
@@ -745,8 +755,10 @@ Shader "WorldPainter/ScatterInstanced"
             #pragma vertex depthVert
             #pragma fragment depthFrag
             #pragma multi_compile_local _ SCATTER_ALIGN_TO_NORMAL
+            #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "WorldRootTransform.hlsl"
 
             struct InstanceData { float3 posWS; uint packedYawScale; uint lodHash; };
             struct SD_InteractorGpu { float3 posWS; float radius; float strength; float _p0; float _p1; float _p2; };
@@ -806,7 +818,8 @@ Shader "WorldPainter/ScatterInstanced"
                 uint dIdx = _VisibleIndices[iid];
                 InstanceData inst = _Instances[dIdx];
                 float4 tiltQ = (_TiltEnabled >= 0.5f) ? _InstanceTilt[dIdx] : float4(0,0,0,1);
-                o.positionCS = TransformWorldToHClip(TransformInstancePos3(inst, tiltQ, posOS.xyz));
+                // P2-Root: map painting-space pos to world before clip.
+                o.positionCS = TransformWorldToHClip(WP_PaintingToWorldPos(TransformInstancePos3(inst, tiltQ, posOS.xyz)));
                 return o;
             }
 
