@@ -95,6 +95,34 @@ namespace WorldPainter
         public Vector3 PaintingToWorld(Vector3 paintingPos) => this.LocalToWorld.MultiplyPoint3x4(paintingPos);
 
         /// <summary>
+        /// Transform a painting-space axis-aligned <see cref="Bounds"/> into the smallest WORLD-space
+        /// AABB that encloses it under the root's full TRS. Content (terrain/grass/props) is authored
+        /// in painting space, but <c>RenderParams.worldBounds</c> is what URP/RenderGraph frustum-culls
+        /// the indirect draw against in WORLD space — so per-tile bounds MUST be mapped to world or the
+        /// whole draw is culled at the wrong location once the root is non-identity. Identity root →
+        /// returns the input unchanged (byte-identical path). Valid after <see cref="PushGlobals"/>.
+        ///
+        /// Uses the standard affine-AABB formula: new center = M·center; new extent axis = Σ|Mᵢⱼ|·extentⱼ
+        /// (rotation/non-uniform scale grow the extents correctly without enumerating all 8 corners).
+        /// </summary>
+        public Bounds PaintingBoundsToWorld(Bounds paintingBounds)
+        {
+            if (this.IsIdentity) return paintingBounds;
+
+            Matrix4x4 m = this.LocalToWorld;
+            Vector3 c = paintingBounds.center;
+            Vector3 e = paintingBounds.extents;
+
+            Vector3 worldCenter = m.MultiplyPoint3x4(c);
+            Vector3 worldExtent = new Vector3(
+                Mathf.Abs(m.m00) * e.x + Mathf.Abs(m.m01) * e.y + Mathf.Abs(m.m02) * e.z,
+                Mathf.Abs(m.m10) * e.x + Mathf.Abs(m.m11) * e.y + Mathf.Abs(m.m12) * e.z,
+                Mathf.Abs(m.m20) * e.x + Mathf.Abs(m.m21) * e.y + Mathf.Abs(m.m22) * e.z);
+
+            return new Bounds(worldCenter, worldExtent * 2f);
+        }
+
+        /// <summary>
         /// Transform world-space frustum planes (from GeometryUtility.CalculateFrustumPlanes) into
         /// painting space so a painting-space culler (CdlodQuadtree / GrassCull.compute) stays
         /// metric-correct under the root's non-uniform TRS.

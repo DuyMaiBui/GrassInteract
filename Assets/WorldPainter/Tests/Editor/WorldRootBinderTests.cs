@@ -109,6 +109,64 @@ namespace WorldPainter.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // ── Painting-space AABB → world-space AABB (RenderParams.worldBounds seam) ─
+
+        [Test]
+        public void PaintingBoundsToWorld_IdentityRoot_IsNoOp()
+        {
+            var go = MakeRoot(Vector3.zero, Quaternion.identity, Vector3.one, out WorldRootBinder binder);
+            try
+            {
+                var b = new Bounds(new Vector3(32f, 5f, 32f), new Vector3(64f, 10f, 64f));
+                Bounds got = binder.PaintingBoundsToWorld(b);
+                Assert.That((got.center - b.center).magnitude, Is.LessThan(EPS), "identity center no-op");
+                Assert.That((got.size   - b.size).magnitude,   Is.LessThan(EPS), "identity size no-op");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void PaintingBoundsToWorld_EnclosesAllEightCornersTightly_UnderTRS()
+        {
+            // Regression for the terrain "whole tile pops out in Scene view" bug: RenderParams.worldBounds
+            // must be the world-space AABB of the root-transformed painting bounds, else RenderGraph
+            // frustum-culls the indirect draw at the wrong location once the root is non-identity.
+            var go = MakeRoot(
+                new Vector3(7f, 2f, -9f), Quaternion.Euler(20f, -110f, 35f), new Vector3(1.5f, 2.5f, 0.75f),
+                out WorldRootBinder binder);
+            try
+            {
+                Assert.IsFalse(binder.IsIdentity, "TRS root should not be identity");
+
+                var painting = new Bounds(new Vector3(32f, 5f, 32f), new Vector3(64f, 12f, 64f));
+                Bounds got = binder.PaintingBoundsToWorld(painting);
+
+                // Oracle: transform all 8 corners to world, take their min/max AABB.
+                Vector3 mn = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                Vector3 mx = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+                Vector3 c = painting.center, e = painting.extents;
+                for (int i = 0; i < 8; i++)
+                {
+                    var corner = new Vector3(
+                        c.x + ((i & 1) == 0 ? -e.x : e.x),
+                        c.y + ((i & 2) == 0 ? -e.y : e.y),
+                        c.z + ((i & 4) == 0 ? -e.z : e.z));
+                    Vector3 w = binder.PaintingToWorld(corner);
+                    mn = Vector3.Min(mn, w);
+                    mx = Vector3.Max(mx, w);
+                }
+                var expected = new Bounds();
+                expected.SetMinMax(mn, mx);
+
+                // Tight equality to the 8-corner min/max oracle proves the returned AABB both
+                // encloses every transformed corner AND adds no slack. (A direct Bounds.Contains
+                // check on the extremal corners is FP-fragile — they lie exactly on the min/max.)
+                Assert.That((got.center - expected.center).magnitude, Is.LessThan(1e-3f), "world AABB center");
+                Assert.That((got.size   - expected.size).magnitude,   Is.LessThan(1e-3f), "world AABB size (tight)");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         // ── Frustum planes → painting space preserve the inside/outside test ─────
 
         [Test]
