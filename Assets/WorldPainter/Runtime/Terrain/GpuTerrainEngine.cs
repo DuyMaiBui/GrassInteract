@@ -33,6 +33,18 @@ namespace WorldPainter
         // Byte offset of instanceCount in IndirectDrawIndexedArgs (second uint = 4 bytes in).
         private const uint ARGS_INSTANCE_COUNT_OFFSET = 4;
 
+        // Minimum skirt depth (metres) so flat/low tiles still drop a visible curtain.
+        private const float MIN_SKIRT_DEPTH_M = 2f;
+
+        /// <summary>
+        /// Metres skirt-border vertices drop to cover inter-tile LOD-seam cracks. A seam gap can
+        /// never exceed the tile's height variation, so the full range guarantees coverage; floored
+        /// so flat tiles still skirt. SSOT — drives both the _SkirtDepth binding AND the draw bounds
+        /// Y expansion (the skirt descends below minHeight, so the cull bounds must include it).
+        /// </summary>
+        private static float SkirtDepthFor(TerrainTileAsset tile) =>
+            Mathf.Max(MIN_SKIRT_DEPTH_M, tile.maxHeight - tile.minHeight);
+
         // ── Property ID cache ─────────────────────────────────────────────────
         private static readonly int ID_NodeBuffer         = Shader.PropertyToID("_NodeBuffer");
         private static readonly int ID_VisibleNodeIndices = Shader.PropertyToID("_VisibleNodeIndices");
@@ -43,6 +55,8 @@ namespace WorldPainter
         // Also resolves MINOR-2: TILE_SIZE_M is no longer a hardcoded literal in the shader.
         private static readonly int ID_TileOriginWS       = Shader.PropertyToID("_TileOriginWS");
         private static readonly int ID_TileSizeM          = Shader.PropertyToID("_TileSizeM");
+        // Skirt depth (inter-tile CDLOD crack fix): metres skirt-border vertices drop.
+        private static readonly int ID_SkirtDepth         = Shader.PropertyToID("_SkirtDepth");
         // Phase 2a — TerrainPalette + alphamap bindings.
         private static readonly int ID_TerrainPaletteArray  = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_PALETTE_ARRAY);
         private static readonly int ID_TerrainPaletteCount  = Shader.PropertyToID(TerrainShadingConfig.PROPERTY_PALETTE_COUNT);
@@ -173,14 +187,20 @@ namespace WorldPainter
             this.tileAsset    = tile;
             this.gpuResources = gpuRes;
 
-            // Tile world bounds (non-zero extent required — RenderGraph culls zero-extent draws)
+            // Tile world bounds (non-zero extent required — RenderGraph culls zero-extent draws).
+            // Y range = [minHeight - skirtDepth, maxHeight]: the skirt drops vertices BELOW
+            // minHeight, so the cull bounds must include the curtain or an edge-on camera framing
+            // only the skirt would cull the tile and re-expose the very crack the skirt covers.
             Vector2 origin = TerrainWorldGrid.TileOriginWorld(tile.tileCoord);
+            float skirtDepth = SkirtDepthFor(tile);
+            float boundsBottomY = tile.minHeight - skirtDepth;
+            float boundsTopY    = tile.maxHeight;
             this.worldBounds = new Bounds(
                 new Vector3(origin.x + TerrainWorldGrid.TILE_SIZE_M * 0.5f,
-                            (tile.minHeight + tile.maxHeight) * 0.5f,
+                            (boundsBottomY + boundsTopY) * 0.5f,
                             origin.y + TerrainWorldGrid.TILE_SIZE_M * 0.5f),
                 new Vector3(TerrainWorldGrid.TILE_SIZE_M,
-                            Mathf.Max(1f, tile.maxHeight - tile.minHeight),
+                            Mathf.Max(1f, boundsTopY - boundsBottomY),
                             TerrainWorldGrid.TILE_SIZE_M));
 
             // CDLOD quadtree
@@ -245,6 +265,9 @@ namespace WorldPainter
             this.patchMaterial.SetVector(ID_TileOriginWS, new Vector4(origin.x, origin.y, 0f, 0f));
             this.patchMaterial.SetFloat(ID_TileSizeM, TerrainWorldGrid.TILE_SIZE_M);
             this.TileOriginWS = origin;
+
+            // Skirt depth (SSOT: SkirtDepthFor, same value used for the draw-bounds Y expansion).
+            this.patchMaterial.SetFloat(ID_SkirtDepth, skirtDepth);
 
             this.cullCmd = new CommandBuffer { name = "GpuTerrainEngine.Cull" };
             this.isBuilt = true;

@@ -24,6 +24,10 @@ Shader "WorldPainter/TerrainPatch"
         // Anti-tiling: per-cell rotated stochastic albedo sampling (2-tap).
         // Toggles the _TERRAIN_STOCHASTIC keyword on the forward pass.
         [Toggle(_TERRAIN_STOCHASTIC)] _StochasticTiling ("Stochastic Tiling (anti-repeat)", Float) = 0
+
+        // Skirt depth (m): how far skirt-border vertices drop to cover inter-tile LOD-seam
+        // cracks. Bound per-tile by GpuTerrainEngine (tile height range); this is the fallback.
+        _SkirtDepth ("Skirt Depth (m)", Float) = 8
     }
 
     SubShader
@@ -163,6 +167,11 @@ Shader "WorldPainter/TerrainPatch"
                 // 6. Sample height via VTF (TerrainVtf.hlsl)
                 float worldY = SampleHeightVTF(tileUV);
 
+                // 6b. Skirt drop: skirt-border vertices (positionOS.y = SKIRT_FLAG) push DOWN to
+                // form a vertical curtain covering inter-tile LOD-seam cracks. No-op for surface
+                // vertices. Applied in painting space so it scales with the root TRS below.
+                worldY -= SkirtDrop(IN.positionOS.y);
+
                 // Painting-space surface position → world (root TRS). tileUV/worldXZ stay in
                 // painting space — height + palette are authored there; only the rendered
                 // position maps to world. No-op when _WP_ROOT_TRANSFORM is off.
@@ -287,6 +296,8 @@ Shader "WorldPainter/TerrainPatch"
                 float worldZ = node.worldOffset.z + morphedXZ.y * node.scale;
                 // Tile-local UV (subtract tile origin so non-(0,0) tiles are correct).
                 float worldY = SampleHeightVTF((float2(worldX, worldZ) - _TileOriginWS) / _TileSizeM);
+                // Skirt drop — identical to the forward pass so shadow geometry matches the curtain.
+                worldY -= SkirtDrop(IN.positionOS.y);
                 // Painting-space position → world (root TRS); same seam as the forward pass.
                 float3 posWS = WP_PaintingToWorldPos(float3(worldX, worldY, worldZ));
                 OUT.positionCS = TransformWorldToHClip(posWS);

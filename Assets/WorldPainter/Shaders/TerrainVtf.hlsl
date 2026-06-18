@@ -26,6 +26,24 @@ SamplerState sampler_HeightTex;     // declared separately (Unity sampler conven
 float2  _TileOriginWS;      // bound per-material in GpuTerrainEngine.Build
 float   _TileSizeM;         // bound per-material in GpuTerrainEngine.Build
 
+// ─── Skirt depth (inter-tile CDLOD crack fix) ────────────────────────────────
+// Metres a skirt-bottom vertex is pushed DOWN (painting-space Y) to form a vertical
+// curtain that covers LOD-seam cracks between adjacent tiles. Bound per-material in
+// GpuTerrainEngine.Build to the tile's full height range so any seam gap is covered.
+// The shader-property default (8 m) is only a fallback for a material used without the binder.
+float   _SkirtDepth;
+
+// ─── Skirt push helper ───────────────────────────────────────────────────────
+// posOsY: vertex positionOS.y (TerrainPatchMesh writes SKIRT_FLAG = -1 for skirt-bottom
+// vertices, 0 for surface vertices). Returns the metres to subtract from the painting-space
+// worldY. Branchless so both forward + shadow passes share identical math (SSOT).
+float SkirtDrop(float posOsY)
+{
+    // isSkirt = 1 when posOsY <= -0.5 (skirt-bottom), 0 for the surface grid.
+    float isSkirt = 1.0 - step(-0.5, posOsY);
+    return isSkirt * _SkirtDepth;
+}
+
 // ─── Height decode (SSOT — mirrors TerrainHeightFormat.DecodeHeight EXACTLY) ─
 // raw is the normalised [0,1] value read from the R16/RHalf texture sample.
 float DecodeHeight(float raw)
