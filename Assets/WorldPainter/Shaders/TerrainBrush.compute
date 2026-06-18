@@ -72,6 +72,26 @@ RWTexture2D<float> _DensityRT;
 /// Density paint mode: 0 = Paint (add), 1 = Erase (subtract), 2 = Smooth (blur).
 int _DensityMode;
 
+/// Seam-aware density Smooth: a straddled neighbour tile's working density RT bound per
+/// direction so the box blur reads across the shared tile edge instead of clamping at the
+/// border (mirror of the height Smooth seam handling — see the Smooth kernel notes above).
+/// Unbound directions get a placeholder + flag 0 (never sampled) so the texture stays bound
+/// for every PaintDensity dispatch (paint/erase included), as the kernel references them.
+Texture2D<float> _NeighborDensityPosX;  int _HasNeighborDensityPosX;
+Texture2D<float> _NeighborDensityNegX;  int _HasNeighborDensityNegX;
+Texture2D<float> _NeighborDensityPosZ;  int _HasNeighborDensityPosZ;
+Texture2D<float> _NeighborDensityNegZ;  int _HasNeighborDensityNegZ;
+
+// ── PaintAlphamap Smooth parameters (TerrainPalette path) ────────────────────
+
+/// Seam-aware alphamap Smooth: a straddled neighbour tile's working alphamap RT (same
+/// alphamap index) bound per direction so the active-channel box blur reads across the
+/// shared tile edge. Same placeholder/flag contract as the density neighbours above.
+Texture2D<float4> _NeighborAlphaPosX;  int _HasNeighborAlphaPosX;
+Texture2D<float4> _NeighborAlphaNegX;  int _HasNeighborAlphaNegX;
+Texture2D<float4> _NeighborAlphaPosZ;  int _HasNeighborAlphaPosZ;
+Texture2D<float4> _NeighborAlphaNegZ;  int _HasNeighborAlphaNegZ;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Smooth falloff: backward-compat CPU reference (kept for inline kernel path).
@@ -215,7 +235,37 @@ void Flatten(uint3 id : SV_DispatchThreadID)
 //
 // _DensityMode 0 = Paint  : add Strength * weight (clamped to [0,1])
 // _DensityMode 1 = Erase  : subtract Strength * weight (clamped to [0,1])
-// _DensityMode 2 = Smooth : lerp toward local 3×3 average by Strength * weight
+// _DensityMode 2 = Smooth : lerp toward local 7×7 average by Strength * weight (seam-aware)
+
+// Resolves one density neighbourhood tap. In-tile reads _DensityRT; an overflow into a bound
+// neighbour reads that neighbour's RT (shared-edge remap, identical convention to the height
+// SampleNeighborhood). Returns false (caller skips → original single-tile box blur) when the
+// tap is outside this tile AND no neighbour is bound in that direction; diagonal overflow is
+// skipped (negligible 4-tile-corner texel), matching the height seam handling.
+bool SampleNeighborhoodDensity(int2 nb, out float d)
+{
+    bool inX = (nb.x >= 0 && nb.x < _RTRes);
+    bool inY = (nb.y >= 0 && nb.y < _RTRes);
+    if (inX && inY) { d = _DensityRT[nb]; return true; }
+
+    if (!inX && inY)
+    {
+        if (nb.x >= _RTRes && _HasNeighborDensityPosX != 0)
+        { d = _NeighborDensityPosX.Load(int3(nb.x - (_RTRes - 1), nb.y, 0)); return true; }
+        if (nb.x < 0 && _HasNeighborDensityNegX != 0)
+        { d = _NeighborDensityNegX.Load(int3((_RTRes - 1) + nb.x, nb.y, 0)); return true; }
+    }
+    else if (inX && !inY)
+    {
+        if (nb.y >= _RTRes && _HasNeighborDensityPosZ != 0)
+        { d = _NeighborDensityPosZ.Load(int3(nb.x, nb.y - (_RTRes - 1), 0)); return true; }
+        if (nb.y < 0 && _HasNeighborDensityNegZ != 0)
+        { d = _NeighborDensityNegZ.Load(int3(nb.x, (_RTRes - 1) + nb.y, 0)); return true; }
+    }
+
+    d = 0.0f;
+    return false;
+}
 
 [numthreads(8, 8, 1)]
 void PaintDensity(uint3 id : SV_DispatchThreadID)
@@ -241,17 +291,21 @@ void PaintDensity(uint3 id : SV_DispatchThreadID)
     }
     else
     {
-        // Smooth: box-blur the density RT within the brush radius (3×3 kernel).
+        // Smooth: seam-aware box-blur of the density RT within the brush radius (7×7 window).
+        // Taps that cross a tile edge read a bound neighbour's RT so the shared edge averages
+        // over the SAME neighbourhood on both tiles (continuous across the seam, no step).
         float sum = 0.0f;
         float cnt = 0.0f;
         for (int dy = -3; dy <= 3; ++dy)
         {
             for (int dx = -3; dx <= 3; ++dx)
             {
-                int2 nb = int2(id.xy) + int2(dx, dy);
-                if (nb.x < 0 || nb.x >= _RTRes || nb.y < 0 || nb.y >= _RTRes) continue;
-                sum += _DensityRT[nb];
-                cnt += 1.0f;
+                float d;
+                if (SampleNeighborhoodDensity(int2(id.xy) + int2(dx, dy), d))
+                {
+                    sum += d;
+                    cnt += 1.0f;
+                }
             }
         }
         float avg = (cnt > 0.0f) ? (sum / cnt) : cur;
@@ -271,6 +325,62 @@ void PaintDensity(uint3 id : SV_DispatchThreadID)
 // on the OTHER alphamaps are not normalised against this one (intentional — Unity-Terrain
 // behaviour). The shader-side blend in TerrainPalette.hlsl handles cross-alphamap
 // normalisation by dividing by the sum of all sampled weights.
+
+/// Reads one channel from a float4 alphamap sample by index [0,3].
+float AlphaChannel(float4 a, int channel)
+{
+    if (channel == 0) return a.x;
+    if (channel == 1) return a.y;
+    if (channel == 2) return a.z;
+    return a.w;
+}
+
+/// When the active channel's new value pushes the per-texel total above 1, scales the OTHER
+/// channels down proportionally so the sum stays ≤ 1 (the active channel is preserved). Shared
+/// by Paint and Smooth so both honour the same ≤1 invariant. Total ≤ 1 is left untouched —
+/// TerrainPalette.hlsl renormalises by the sum of sampled weights at blend time.
+void RenormalizeAlphaOthers(inout float4 target, int channel)
+{
+    float total = target.x + target.y + target.z + target.w;
+    if (total <= 1.0f) return;
+
+    float activeVal = AlphaChannel(target, channel);
+    float budget    = saturate(1.0f - activeVal);
+    float otherSum  = total - activeVal;
+    float scale     = (otherSum > 1e-6f) ? (budget / otherSum) : 0.0f;
+
+    if (channel != 0) target.x *= scale;
+    if (channel != 1) target.y *= scale;
+    if (channel != 2) target.z *= scale;
+    if (channel != 3) target.w *= scale;
+}
+
+// Resolves one alphamap neighbourhood tap (float4). Same shared-edge remap + skip contract as
+// SampleNeighborhoodDensity, but over the RGBA alphamap RT. Used by the active-channel Smooth.
+bool SampleNeighborhoodAlpha(int2 nb, out float4 a)
+{
+    bool inX = (nb.x >= 0 && nb.x < _RTRes);
+    bool inY = (nb.y >= 0 && nb.y < _RTRes);
+    if (inX && inY) { a = _AlphamapRT[nb]; return true; }
+
+    if (!inX && inY)
+    {
+        if (nb.x >= _RTRes && _HasNeighborAlphaPosX != 0)
+        { a = _NeighborAlphaPosX.Load(int3(nb.x - (_RTRes - 1), nb.y, 0)); return true; }
+        if (nb.x < 0 && _HasNeighborAlphaNegX != 0)
+        { a = _NeighborAlphaNegX.Load(int3((_RTRes - 1) + nb.x, nb.y, 0)); return true; }
+    }
+    else if (inX && !inY)
+    {
+        if (nb.y >= _RTRes && _HasNeighborAlphaPosZ != 0)
+        { a = _NeighborAlphaPosZ.Load(int3(nb.x, nb.y - (_RTRes - 1), 0)); return true; }
+        if (nb.y < 0 && _HasNeighborAlphaNegZ != 0)
+        { a = _NeighborAlphaNegZ.Load(int3(nb.x, (_RTRes - 1) + nb.y, 0)); return true; }
+    }
+
+    a = float4(0, 0, 0, 0);
+    return false;
+}
 
 [numthreads(8, 8, 1)]
 void PaintAlphamap(uint3 id : SV_DispatchThreadID)
@@ -296,6 +406,40 @@ void PaintAlphamap(uint3 id : SV_DispatchThreadID)
         return;
     }
 
+    // Smooth: seam-aware box-blur of the ACTIVE channel only (active-channel-only contract).
+    // Lerp the active channel toward its 7×7 neighbourhood average by Strength * weight; the
+    // other channels are left as-is, then renormalised so the per-texel total stays ≤ 1. Softens
+    // the active layer's coverage edge without disturbing the relative weights of the others.
+    if (_AlphamapMode == 2)
+    {
+        float sum = 0.0f;
+        float cnt = 0.0f;
+        for (int dy = -3; dy <= 3; ++dy)
+        {
+            for (int dx = -3; dx <= 3; ++dx)
+            {
+                float4 na;
+                if (SampleNeighborhoodAlpha(int2(id.xy) + int2(dx, dy), na))
+                {
+                    sum += AlphaChannel(na, _AlphamapChannel);
+                    cnt += 1.0f;
+                }
+            }
+        }
+        float curActive = AlphaChannel(alphas, _AlphamapChannel);
+        float avg       = (cnt > 0.0f) ? (sum / cnt) : curActive;
+        float blended   = saturate(lerp(curActive, avg, paint));
+
+        if (_AlphamapChannel == 0) target.x = blended;
+        if (_AlphamapChannel == 1) target.y = blended;
+        if (_AlphamapChannel == 2) target.z = blended;
+        if (_AlphamapChannel == 3) target.w = blended;
+
+        RenormalizeAlphaOthers(target, _AlphamapChannel);
+        _AlphamapRT[id.xy] = target;
+        return;
+    }
+
     // Paint: accumulate into the active channel.
     if (_AlphamapChannel == 0) target.x = saturate(target.x + paint);
     if (_AlphamapChannel == 1) target.y = saturate(target.y + paint);
@@ -304,24 +448,7 @@ void PaintAlphamap(uint3 id : SV_DispatchThreadID)
 
     // Renormalise: when paint pushes the total above 1, scale the OTHER channels down
     // proportionally so the sum stays ≤ 1. Active channel's new value is preserved.
-    float total = target.x + target.y + target.z + target.w;
-    if (total > 1.0f)
-    {
-        float activeVal = 0.0f;
-        if (_AlphamapChannel == 0) activeVal = target.x;
-        if (_AlphamapChannel == 1) activeVal = target.y;
-        if (_AlphamapChannel == 2) activeVal = target.z;
-        if (_AlphamapChannel == 3) activeVal = target.w;
-
-        float budget   = saturate(1.0f - activeVal);
-        float otherSum = total - activeVal;
-        float scale    = (otherSum > 1e-6f) ? (budget / otherSum) : 0.0f;
-
-        if (_AlphamapChannel != 0) target.x *= scale;
-        if (_AlphamapChannel != 1) target.y *= scale;
-        if (_AlphamapChannel != 2) target.z *= scale;
-        if (_AlphamapChannel != 3) target.w *= scale;
-    }
+    RenormalizeAlphaOthers(target, _AlphamapChannel);
 
     _AlphamapRT[id.xy] = target;
 }

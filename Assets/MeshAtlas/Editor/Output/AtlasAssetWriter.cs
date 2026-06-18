@@ -22,18 +22,41 @@ namespace MeshAtlas.Editor.Output
     /// </summary>
     public static class AtlasAssetWriter
     {
+        /// <summary>Bake-mode write: encode the freshly baked channel atlases to PNGs, then
+        /// create the combined mesh, URP-Lit material, and prefab.</summary>
         public static AtlasWriteResult Write(Texture2D[] atlasesByChannel, Mesh combinedMesh, string folder, string baseName)
         {
             EnsureFolder(folder);
             var imported = new Texture2D[BakeChannelInfo.COUNT];
             for (var c = 0; c < BakeChannelInfo.COUNT; c++)
             {
-                if (atlasesByChannel[c] != null)
+                if (atlasesByChannel != null && atlasesByChannel[c] != null)
                 {
                     imported[c] = WriteTexture(atlasesByChannel[c], (BakeChannel)c, folder, baseName);
                 }
             }
+            return WriteMeshMaterialPrefab(imported, combinedMesh, folder, baseName);
+        }
 
+        /// <summary>Import-mode write: the channel textures already exist as project assets, so
+        /// they are referenced directly — no PNG encode, no importer reconfiguration. Only the
+        /// combined mesh, material, and prefab are created.</summary>
+        public static AtlasWriteResult WriteExisting(Texture2D[] existingByChannel, Mesh combinedMesh, string folder, string baseName)
+        {
+            EnsureFolder(folder);
+            var imported = new Texture2D[BakeChannelInfo.COUNT];
+            if (existingByChannel != null)
+            {
+                for (var c = 0; c < BakeChannelInfo.COUNT && c < existingByChannel.Length; c++)
+                {
+                    imported[c] = existingByChannel[c];
+                }
+            }
+            return WriteMeshMaterialPrefab(imported, combinedMesh, folder, baseName);
+        }
+
+        private static AtlasWriteResult WriteMeshMaterialPrefab(Texture2D[] imported, Mesh combinedMesh, string folder, string baseName)
+        {
             var meshPath = $"{folder}/{baseName}_Mesh.asset";
             AssetDatabase.CreateAsset(combinedMesh, meshPath);
 

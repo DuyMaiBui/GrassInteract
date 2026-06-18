@@ -447,9 +447,17 @@ namespace WorldPainter
 
         private RenderParams MakeRenderParams(Camera? drawCamera)
         {
+            // worldBounds is what URP/RenderGraph frustum-culls the indirect draw against in WORLD
+            // space. this.worldBounds is in PAINTING space (built from TileOriginWorld); under a
+            // non-identity root the geometry renders at LocalToWorld·bounds, so the painting-space
+            // bounds would cull the whole tile at the wrong location. Map to world (identity → no-op).
+            Bounds drawBounds = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.PaintingBoundsToWorld(this.worldBounds)
+                : this.worldBounds;
+
             return new RenderParams(this.patchMaterial!)
             {
-                worldBounds       = this.worldBounds, // non-zero — RenderGraph culls zero-extent draws
+                worldBounds       = drawBounds, // non-zero — RenderGraph culls zero-extent draws
                 shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On,
                 receiveShadows    = true,
                 camera            = drawCamera,

@@ -42,7 +42,15 @@ namespace WorldPainter.Editor
         internal readonly WorldPainterAlphamapEncoder alphamapEncoder = new WorldPainterAlphamapEncoder();
         internal readonly TileRtCache                rtCache         = new TileRtCache();
         internal readonly WorldPainterStroke         stroke          = new WorldPainterStroke();
+        internal readonly StrokeStampBuffer          stampBuffer     = new StrokeStampBuffer();
         internal readonly BrushFalloffLut            falloffLut      = new BrushFalloffLut();
+
+        // ── Buffered-drain cadence (smooth grass paint) ───────────────────────
+        // Stamps captured during a drag are buffered (StrokeStampBuffer) and drained at a fixed
+        // cadence so high-frequency mouse events don't each trigger a density dispatch + scatter
+        // rebuild (the stutter source in the old path). ~15 Hz balances responsiveness vs. cost.
+        private const double DRAIN_INTERVAL_SEC = 1.0 / 15.0;
+        private double lastDrainTime;
 
         // ── Density RT (per-tile RT cache, managed in WorldPainterSculptTool.Density.cs) ──
         // densityRT / activeDensityMap properties live in the Density partial (legacy compat shims).
@@ -96,6 +104,12 @@ namespace WorldPainter.Editor
             WorldPainterState.ActiveLayerChanged += this.OnActiveLayerChangedForTransform;
 
             EditorApplication.update += this.OnEditorUpdate;
+
+            // Destroy the overlay material/mesh before a domain reload too: Unity does NOT reliably
+            // call the inspector's OnDisable (→ our Disable) ahead of an assembly recompile, so
+            // without this the lazily-created resources would only be reclaimed by HideAndDontSave
+            // auto-destroy, leaving stale references. Mirrors TerrainBrushPreview's reload cleanup.
+            AssemblyReloadEvents.beforeAssemblyReload += this.DisposeDensityOverlay;
         }
 
         /// <summary>Unsubscribes events + tears down any in-flight stroke. Called by the inspector on disable.</summary>
@@ -105,6 +119,7 @@ namespace WorldPainter.Editor
             Undo.undoRedoPerformed -= this.OnUndoRedoPerformed;
             WorldPainterState.ActiveLayerChanged -= this.OnActiveLayerChangedForTransform;
             EditorApplication.update -= this.OnEditorUpdate;
+            AssemblyReloadEvents.beforeAssemblyReload -= this.DisposeDensityOverlay;
 
             if (this.stroke.InStroke)
                 this.TeardownActiveStroke(WorldPainterState.ActivePainter);
@@ -112,6 +127,7 @@ namespace WorldPainter.Editor
                 this.rtCache.ReleaseAll();
 
             this.falloffLut.Dispose();
+            this.DisposeDensityOverlay();
         }
 
         private void OnEditorUpdate()
@@ -120,14 +136,22 @@ namespace WorldPainter.Editor
             this.densityEncoder.Tick();
             this.alphamapEncoder.Tick();
 
-            // NOTE: previously this block scheduled a coalesced grass/prop layer rebuild every
-            // editor frame while a stroke was in progress, to give a live scatter preview.
-            // Even at one rebuild per frame, the rebuild Disposes the engine's argsLodN
-            // GraphicsBuffers — and Graphics.RenderMeshIndirect is player-loop-deferred, so the
-            // previous frame's still-pending draw catches the just-released buffer and the GPU
-            // renders garbage (the black-square flicker reported in Scene / Game / Inspector).
-            // The stroke-end path already calls painter.RebuildScatterPreview() once, cleanly,
-            // on mouse-up — that is the authoritative refresh point. No in-stroke rebuild.
+            var painter = WorldPainterState.ActivePainter;
+            if (painter == null) return;
+
+            // Dispose grass engines retired by an in-stroke deferred rebuild, once their pending
+            // RenderMeshIndirect draw has flushed (framesLeft countdown in SurfaceLayers). This is
+            // what makes live in-stroke rebuild flicker-free: an earlier per-frame rebuild path was
+            // removed because engine.Dispose() freed the argsLodN GraphicsBuffers while a
+            // player-loop-deferred draw was still pending (black-square flicker). Deferred disposal
+            // keeps the old engine + its buffers alive until that draw completes.
+            painter.TickDeferredScatterDispose();
+
+            // Throttled drain (~15 Hz): buffered stamps are dispatched as a batch + ONE scoped
+            // scatter rebuild per tick, instead of the old per-event dispatch that stuttered.
+            // Driven from the update loop so a paused-but-held drag still flushes within a tick.
+            if (this.stroke.InStroke)
+                this.MaybeDrain(painter);
         }
 
         // ── LUT re-upload (finding #3) ────────────────────────────────────────
@@ -303,6 +327,13 @@ namespace WorldPainter.Editor
                     return;
                 }
             }
+
+            // Density heatmap overlay: during a grass stroke the blade scatter is deferred to
+            // mouse-up (perf — PreviewActiveScatter no longer rebuilds mid-drag), so draw the
+            // painted-density footprint per touched tile as the live indicator. Repaint-only —
+            // Graphics.DrawMeshNow requires it.
+            if (e.type == EventType.Repaint && this.stroke.InStroke)
+                this.DrawDensityOverlay(painter);
 
             switch (e.GetTypeForControl(controlId))
             {

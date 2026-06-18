@@ -27,6 +27,14 @@ namespace WorldPainter
         private readonly List<IGrassEngine>            surfacePropEngines  = new();
         private readonly List<PropLayerScatterLayer>   surfacePropAdapters = new();
 
+        // Grass engines retired by an in-stroke DEFERRED rebuild (see RebuildGrassLayerDeferred).
+        // Kept alive `framesLeft` editor frames so a still-pending, player-loop-deferred
+        // RenderMeshIndirect draw doesn't read a freed argsLodN buffer (black-square flicker).
+        // 2 = one extra frame of margin beyond the single deferred draw.
+        private const int DEFERRED_DISPOSE_FRAMES = 2;
+        private readonly List<(IGrassEngine engine, GrassTileScatterLayer adapter, int framesLeft)>
+            pendingGrassDispose = new();
+
         /// <summary>(Re)builds one frozen engine per (grass layer, tile) from <see cref="WorldMapAsset.SurfaceLayers"/>.</summary>
         internal void RebuildSurfaceLayers()
         {
@@ -101,6 +109,100 @@ namespace WorldPainter
                 ? il.IndexOf(layer)
                 : -1;
             this.BuildGrassLayerEngines(layerIndex, layer, this.transform.position, gpuCapable, probeReason);
+        }
+
+        /// <summary>
+        /// Flicker-free variant of <see cref="RebuildGrassLayer"/> for in-stroke live preview: builds
+        /// the layer's new engines first, but routes the OLD engines to a DEFERRED-dispose queue
+        /// (<see cref="pendingGrassDispose"/>) instead of disposing them immediately. The old engine's
+        /// <c>argsLodN</c> GraphicsBuffers stay valid until its already-issued, player-loop-deferred
+        /// <c>Graphics.RenderMeshIndirect</c> draw has flushed — eliminating the black-square flicker
+        /// that the old per-frame immediate-dispose rebuild produced.
+        ///
+        /// The editor brush ticks <see cref="TickDeferredScatterDispose"/> each frame; full teardown
+        /// (<see cref="DisposeSurfaceLayers"/>) flushes the queue via <see cref="FlushDeferredScatterDispose"/>.
+        /// </summary>
+        internal void RebuildGrassLayerDeferred(GrassLayer layer)
+        {
+            if (layer == null || this.map == null) return;
+
+            this.DisposeGrassLayerEnginesDeferred(layer);
+
+            // Hidden (eye toggle off) → stay disposed; the dispose above already retired its engines.
+            if (!layer.Enabled) return;
+
+            this.scatterSampler ??= new HeightmapSurfaceSampler(c => this.map != null ? this.map.GetTile(c) : null);
+            this.ResolveScatterInfra();
+            this.scatterPool ??= new InstanceBatchPool(this.scatterPrewarmSlabs);
+
+#if UNITY_EDITOR || !UNITY_WEBGL
+            bool gpuCapable = GrassTierProbe.TryGpu(out string probeReason);
+#else
+            bool gpuCapable  = false;
+            string probeReason = "WebGL";
+#endif
+
+            int layerIndex = this.map.SurfaceLayers is System.Collections.Generic.IList<WorldPainterLayer> il
+                ? il.IndexOf(layer)
+                : -1;
+            this.BuildGrassLayerEngines(layerIndex, layer, this.transform.position, gpuCapable, probeReason);
+        }
+
+        /// <summary>
+        /// Move <paramref name="layer"/>'s live engines/adapters to the deferred-dispose queue (do NOT
+        /// dispose yet). They stop being Submitted (removed from <c>surfaceEngines</c>) but their
+        /// buffers survive until <see cref="TickDeferredScatterDispose"/> frees them a couple of frames
+        /// later — after the last pending indirect draw has executed.
+        /// </summary>
+        private void DisposeGrassLayerEnginesDeferred(GrassLayer layer)
+        {
+            for (int i = this.surfaceAdapters.Count - 1; i >= 0; --i)
+            {
+                if (this.surfaceAdapters[i].SourceLayer != layer) continue;
+                this.pendingGrassDispose.Add(
+                    (this.surfaceEngines[i], this.surfaceAdapters[i], DEFERRED_DISPOSE_FRAMES));
+                this.surfaceEngines.RemoveAt(i);
+                this.surfaceAdapters.RemoveAt(i);
+            }
+        }
+
+        /// <summary>
+        /// Counts down each queued retired grass engine and disposes it once its pending indirect draw
+        /// is guaranteed flushed. Called every editor frame by the brush update loop. Cheap no-op when
+        /// the queue is empty (the common case outside a stroke).
+        /// </summary>
+        internal void TickDeferredScatterDispose()
+        {
+            for (int i = this.pendingGrassDispose.Count - 1; i >= 0; --i)
+            {
+                var entry = this.pendingGrassDispose[i];
+                int left = entry.framesLeft - 1;
+                if (left <= 0)
+                {
+                    entry.engine.Dispose();
+                    DestroyAdapter(entry.adapter);
+                    this.pendingGrassDispose.RemoveAt(i);
+                }
+                else
+                {
+                    this.pendingGrassDispose[i] = (entry.engine, entry.adapter, left);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Dispose every queued retired grass engine immediately (no frame delay). Called on full
+        /// teardown / Map swap so nothing leaks; safe because no further rebuild follows in the same
+        /// frame to race the freed buffers.
+        /// </summary>
+        internal void FlushDeferredScatterDispose()
+        {
+            for (int i = 0; i < this.pendingGrassDispose.Count; ++i)
+            {
+                this.pendingGrassDispose[i].engine.Dispose();
+                DestroyAdapter(this.pendingGrassDispose[i].adapter);
+            }
+            this.pendingGrassDispose.Clear();
         }
 
         /// <summary>
@@ -239,6 +341,10 @@ namespace WorldPainter
         /// <summary>Disposes all surface-layer engines + their transient adapters (grass + props).</summary>
         internal void DisposeSurfaceLayers()
         {
+            // Flush any engines parked by an in-stroke deferred rebuild before the full teardown,
+            // so their GraphicsBuffers don't leak when a stroke ends with a final full rebuild.
+            this.FlushDeferredScatterDispose();
+
             for (int i = 0; i < this.surfaceEngines.Count; ++i)
                 this.surfaceEngines[i].Dispose();
             this.surfaceEngines.Clear();
