@@ -163,6 +163,38 @@ namespace WorldPainter.Tests
                 "Large radius must clamp to CIRCLE_SEGMENTS_MAX body points.");
         }
 
+        // ── Lift compensation (root-scale float fix) ──────────────────────────
+
+        [Test]
+        public void Lift_IsConstant_IndependentOfRadius()
+        {
+            // null HeightFn → Y = origin.y + lift. origin.y = 0 → perimeter Y == lift.
+            // The lift must NOT grow with brush radius: a radius-proportional lift floats large
+            // brushes above the terrain, and a floating ring parallax-shifts off the cursor when the
+            // scene camera is angled — the "brush preview doesn't follow the mouse" bug.
+            var small = new List<Vector3>();
+            var big   = new List<Vector3>();
+            TerrainBrushPreview.BuildPerimeterPoints(Vector3.zero, 5f,   BrushShape.Circle, null, small);
+            TerrainBrushPreview.BuildPerimeterPoints(Vector3.zero, 200f, BrushShape.Circle, null, big);
+
+            Assert.AreEqual(TerrainBrushPreview.Y_OFFSET, small[0].y, 1e-3f, "Lift must equal the constant Y_OFFSET.");
+            Assert.AreEqual(TerrainBrushPreview.Y_OFFSET, big[0].y,   1e-3f,
+                "Lift must stay constant for a 40× larger radius (no parallax float).");
+        }
+
+        [Test]
+        public void Lift_CompensatedScale_ScalesConstantLift()
+        {
+            // Under a root scaled ×3, liftScale = 1/3 so the painting-space lift is divided by 3 —
+            // after the ×3 root matrix maps it to world the on-screen lift is unchanged (root-scale fix).
+            const float liftScale = 1f / 3f;
+            var output = new List<Vector3>();
+            TerrainBrushPreview.BuildPerimeterPoints(Vector3.zero, 20f, BrushShape.Circle, null, output, liftScale);
+
+            Assert.AreEqual(TerrainBrushPreview.Y_OFFSET * liftScale, output[0].y, 1e-3f,
+                "liftScale must scale the constant lift (root-scale world-invariance).");
+        }
+
         // ── Set() smoke test (keep one; confirms the public API compiles/runs) ─
 
         [Test]

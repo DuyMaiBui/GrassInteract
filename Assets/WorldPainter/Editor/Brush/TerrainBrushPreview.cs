@@ -29,11 +29,15 @@ namespace WorldPainter.Editor
 
         // ── Constants ─────────────────────────────────────────────────────────
 
-        // Lift the conformed ring above the surface so it isn't occluded by the GPU-rendered
-        // terrain. Scales with brush radius (bigger brush ⇒ coarser surrounding LOD ⇒ larger
-        // dip), with a floor.
-        private const float  Y_OFFSET_MIN      = 0.15f; // metres (floor for small brushes)
-        private const float  Y_OFFSET_FRACTION = 0.15f; // × brushRadius
+        // Tiny constant anti-z-fight nudge above the conformed surface. Deliberately NOT
+        // proportional to brush radius: a large lift floats the ring above the terrain, and a
+        // floating ring seen from an angled scene camera projects to a screen position OFFSET from
+        // the cursor (parallax) — which shifts as you orbit, so the ring appears to "stop following
+        // the mouse" (the reported bug, worst on big brushes / grazing angles). The Handles fill +
+        // ring draw with zTest=Always (see OnSceneGui), so they stay visible with NO lift at all;
+        // this hair only biases the mask decal off the surface to avoid z-fighting. Kept sub-metre
+        // in world (×RootLiftCompensation) so the residual parallax is imperceptible at any angle.
+        internal const float Y_OFFSET = 0.05f; // metres, painting space
 
         // Reject hover points farther than 1e6 m from origin (|p|² > 1e12).
         private const float  MAX_HIT_SQR   = 1e12f;
@@ -192,7 +196,10 @@ namespace WorldPainter.Editor
             }
             if (quadMesh == null) quadMesh = BuildGroundQuad();
 
-            float lift = Mathf.Max(Y_OFFSET_MIN, brushRadius * Y_OFFSET_FRACTION);
+            // Small constant lift (see Y_OFFSET), root-scale compensated: hitPoint.y + lift is in
+            // painting space and rootMatrix below scales it, so divide the lift to keep the decal a
+            // constant sub-metre height above the surface. Identity root → factor 1 → unchanged.
+            float lift = Y_OFFSET * RootLiftCompensation();
             var color  = tintColor;
             color.a    = DECAL_ALPHA;
 
@@ -238,8 +245,19 @@ namespace WorldPainter.Editor
         private static void BuildPerimeter()
         {
             perimeter.Clear();
-            BuildPerimeterPoints(hitPoint, brushRadius, brushShape, heightAt, perimeter);
+            BuildPerimeterPoints(hitPoint, brushRadius, brushShape, heightAt, perimeter, RootLiftCompensation());
         }
+
+        /// <summary>
+        /// Painting→world compensation for the vertical lift. The lift is added to the vertex Y in
+        /// PAINTING space, then <see cref="Handles.matrix"/> (= the root's localToWorldMatrix) maps the
+        /// ring to world — so a non-identity root <b>scale</b> multiplies the lift, floating the ring
+        /// <c>×scale</c> above the rendered terrain surface (XZ is unaffected because the same scale maps
+        /// ring and terrain identically). Dividing the lift by the root's world Y-scale keeps the
+        /// on-screen lift constant regardless of root scale. Identity root → <c>lossyScale.y == 1</c> →
+        /// factor 1 → byte-identical to the pre-root-transform path.
+        /// </summary>
+        private static float RootLiftCompensation() => 1f / Mathf.Max(1e-4f, rootMatrix.lossyScale.y);
 
         /// <summary>
         /// Pure perimeter builder — no static-state reads. Appends world-space points
@@ -258,9 +276,13 @@ namespace WorldPainter.Editor
             float             radius,
             BrushShape        shape,
             HeightFn?         height,
-            List<Vector3>     output)
+            List<Vector3>     output,
+            float             liftScale = 1f)
         {
-            float lift = Mathf.Max(Y_OFFSET_MIN, radius * Y_OFFSET_FRACTION);
+            // Constant (radius-independent) lift so the ring hugs the surface and tracks the cursor
+            // at every camera angle — see Y_OFFSET. liftScale compensates the root's world Y-scale so
+            // the lift stays world-invariant under a scaled root (defaults to 1 → identity behaviour).
+            float lift = Y_OFFSET * liftScale;
 
             if (shape == BrushShape.Square)
             {
