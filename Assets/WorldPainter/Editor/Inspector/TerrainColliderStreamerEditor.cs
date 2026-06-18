@@ -46,6 +46,25 @@ namespace WorldPainter.Editor
             }
 
             EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Manual Generation", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Edit mode does not stream colliders automatically. Use these buttons to cook them " +
+                "manually. At runtime the camera ring still generates missing colliders on demand.",
+                MessageType.None);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Generate Colliders (All Tiles)"))
+                {
+                    int n = streamer.GenerateAllColliders();
+                    Debug.Log($"[TerrainColliderStreamer] Cooked {n} tile collider(s); " +
+                              $"{streamer.LiveCount} live.");
+                }
+                if (GUILayout.Button("Clear Colliders"))
+                    streamer.ClearColliders();
+            }
+            EditorGUILayout.LabelField("Live colliders", streamer.LiveCount.ToString());
+
+            EditorGUILayout.Space();
             EditorGUILayout.LabelField("Debug", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(debug);
 

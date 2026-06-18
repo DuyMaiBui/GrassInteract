@@ -5,17 +5,20 @@ using UnityEngine;
 namespace WorldPainter
 {
     /// <summary>
-    /// MonoBehaviour: manages a near-tile ring of heightfield colliders — zero-wiring.
+    /// MonoBehaviour: heightfield collider generation for terrain tiles — zero-wiring.
     ///
     /// Self-wiring sibling of <see cref="WorldPainter"/> (<c>[RequireComponent]</c>): tiles, camera,
     /// and collider range all resolve from the sibling. No manual tile-source assignment.
     ///
-    /// Each tick (LateUpdate in play; the Scene/Game render callback in edit mode):
-    ///   1. Derive the desired ring from <c>WorldPainter.lodRangesM[colliderLodBand]</c> via
-    ///      <see cref="TerrainColliderRing"/> (nearest-edge metric). Off → evict all and stop.
-    ///   2. Diff against the live set → enqueue builds / schedule evictions.
-    ///   3. Cook up to <see cref="TerrainColliderConfig.MAX_COOKS_PER_FRAME"/> new colliders (amortised).
-    ///   4. Evict handles that left the ring immediately (no hysteresis for colliders).
+    /// Two generation paths:
+    ///   • RUNTIME (play mode): a near-tile ring streams around the main camera every LateUpdate —
+    ///     missing colliders are cooked on demand as tiles enter range and evicted as they leave.
+    ///     Each runtime tick derives the desired ring from <c>WorldPainter.lodRangesM[colliderLodBand]</c>
+    ///     via <see cref="TerrainColliderRing"/>, diffs against the live set, cooks up to
+    ///     <see cref="TerrainColliderConfig.MAX_COOKS_PER_FRAME"/> per frame, and evicts tiles that left.
+    ///   • EDIT MODE: no automatic streaming. Cook colliders manually via the inspector
+    ///     "Generate Colliders (All Tiles)" button (<see cref="GenerateAllColliders"/>); remove them
+    ///     with "Clear Colliders" (<see cref="ClearColliders"/>).
     ///
     /// Tile resolution order: runtime-registration override → sibling <c>WorldPainter.Map</c> (P2) →
     /// legacy inline <c>WorldPainter.Tiles</c> (linear scan).
@@ -83,19 +86,10 @@ namespace WorldPainter
             // A domain reload resets `live` (managed state) but cooked hosts can survive — purge any
             // untracked orphans so a tile that already has a (now-untracked) collider is not re-cooked.
             this.PurgeOrphanColliders();
-
-#if UNITY_EDITOR
-            // Edit-mode driving: one tick per editor frame from a SINGLE authoritative camera.
-            if (!Application.isPlaying)
-                UnityEditor.EditorApplication.update += this.EditorTick;
-#endif
         }
 
         private void OnDisable()
         {
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= this.EditorTick;
-#endif
             this.EvictAll();
         }
 
@@ -105,22 +99,6 @@ namespace WorldPainter
             Camera? cam = Camera.main;
             if (cam != null) this.Tick(cam.transform.position);
         }
-
-#if UNITY_EDITOR
-        /// <summary>
-        /// Edit-mode tick: drives the collider ring from the active SceneView camera ONCE per editor
-        /// frame. Replaces a per-camera <c>OnRenderObject</c> tick — that fired for EVERY rendering
-        /// camera (Scene view + the scene's Game camera at different positions), so each camera's tick
-        /// evicted and re-cooked the other's colliders every frame (perpetual create/destroy thrash).
-        /// </summary>
-        private void EditorTick()
-        {
-            if (Application.isPlaying || this.suppressEditorAutoTick) return;
-            UnityEditor.SceneView sv = UnityEditor.SceneView.lastActiveSceneView;
-            if (sv == null || sv.camera == null) return;
-            this.Tick(sv.camera.transform.position);
-        }
-#endif
 
         // ── Core tick ─────────────────────────────────────────────────────────
 
@@ -290,6 +268,50 @@ namespace WorldPainter
         /// </summary>
         public void InvalidateCollider(Vector2Int coord) => this.Evict(coord);
 
+        /// <summary>
+        /// Manually cook a heightfield collider for EVERY known tile (sibling map + legacy inline
+        /// list + runtime-registered overrides), skipping tiles that already have a live collider.
+        /// Unlike the runtime ring, this ignores camera range and the per-frame cook budget — it is
+        /// the "manual create" path driven by the inspector button in edit mode. Returns the number
+        /// of colliders newly cooked.
+        /// </summary>
+        public int GenerateAllColliders()
+        {
+            this.worldPainter ??= this.GetComponent<WorldPainter>();
+
+            // Gather the distinct coord set across all three tile sources.
+            var coords = new HashSet<Vector2Int>();
+            foreach (var coord in this.tileIndex.Keys)
+                coords.Add(coord);
+            WorldMapAsset? map = this.worldPainter != null ? this.worldPainter.Map : null;
+            if (map != null)
+                foreach (var tile in map.EnumerateTiles())
+                    if (tile != null) coords.Add(tile.tileCoord);
+            List<TileEntry>? tiles = this.worldPainter != null ? this.worldPainter.Tiles : null;
+            if (tiles != null)
+                foreach (var entry in tiles)
+                    if (entry.tileAsset != null) coords.Add(entry.tileAsset.tileCoord);
+
+            int cooked = 0;
+            foreach (var coord in coords)
+            {
+                if (this.live.ContainsKey(coord)) continue; // already cooked
+                TerrainTileAsset? tile = this.ResolveTile(coord);
+                if (tile == null) continue;
+                var handle = TerrainColliderProvider.Build(tile, this.transform, this.heightfieldRes,
+                                                           this.debugShowColliders);
+                if (handle != null)
+                {
+                    this.live[coord] = handle;
+                    cooked++;
+                }
+            }
+            return cooked;
+        }
+
+        /// <summary>Evict all live colliders and clear the pending cook queue (inspector "Clear" button).</summary>
+        public void ClearColliders() => this.EvictAll();
+
         /// <summary>Number of live collider handles (test / inspector helper).</summary>
         public int LiveCount => this.live.Count;
 
@@ -297,19 +319,12 @@ namespace WorldPainter
         public int PendingCookCount => this.cookQueue.Count;
 
 #if UNITY_EDITOR
-        // ── Editor auto-tick suppression (test determinism) ───────────────────
-
-        // When true, EditorTick no-ops so EditMode tests can drive Tick deterministically via
-        // TickForTest without the background SceneView auto-tick mutating the live set.
-        private bool suppressEditorAutoTick;
-
         // ── Test seams (EditMode only; internal visible to WorldPainter.Tests) ──
 
         internal void TickForTest(Vector3 camPos) => this.Tick(camPos);
         internal TerrainTileAsset? ResolveTileForTest(Vector2Int coord) => this.ResolveTile(coord);
         internal bool GenerateCollidersForTest { get => this.generateColliders; set => this.generateColliders = value; }
         internal int  ColliderLodBandForTest   { get => this.colliderLodBand;   set => this.colliderLodBand = value; }
-        internal bool SuppressEditorAutoTick   { get => this.suppressEditorAutoTick; set => this.suppressEditorAutoTick = value; }
         internal bool DebugShowCollidersForTest { get => this.debugShowColliders; set => this.debugShowColliders = value; }
         internal void PurgeOrphansForTest()    => this.PurgeOrphanColliders();
 #endif

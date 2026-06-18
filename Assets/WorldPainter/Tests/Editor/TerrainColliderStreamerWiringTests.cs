@@ -31,8 +31,7 @@ namespace WorldPainter.Tests
             // RequireComponent(WorldPainter) auto-adds the sibling when the streamer is added.
             this.streamer = this.go.AddComponent<TerrainColliderStreamer>();
             this.wp = this.go.GetComponent<WorldPainter>();
-            // Drive Tick deterministically — suppress the background SceneView editor auto-tick.
-            this.streamer.SuppressEditorAutoTick = true;
+            // Tick is driven explicitly via TickForTest; there is no background editor auto-tick.
         }
 
         [TearDown]
@@ -148,6 +147,37 @@ namespace WorldPainter.Tests
             Assert.IsNotNull(tc, "A cooked TerrainCollider host should exist.");
             Assert.AreEqual(HideFlags.DontSave, tc.gameObject.hideFlags,
                 "With debugShowColliders on, the host should be visible (DontSave), not hidden.");
+        }
+
+        // ── Manual generation (editor button) ─────────────────────────────────
+
+        [Test]
+        public void GenerateAllColliders_CooksEveryTile_IgnoringRange()
+        {
+            // Tiles spread far apart — well outside any single camera ring.
+            this.streamer.RegisterTile(MakeValidTile(new Vector2Int(0, 0)));
+            this.streamer.RegisterTile(MakeValidTile(new Vector2Int(50, 50)));
+            this.streamer.RegisterTile(MakeValidTile(new Vector2Int(-30, 12)));
+
+            int cooked = this.streamer.GenerateAllColliders();
+            Assert.AreEqual(3, cooked, "Manual generation cooks every tile regardless of camera range.");
+            Assert.AreEqual(3, this.streamer.LiveCount, "All three colliders should be live.");
+
+            // Idempotent: a second call cooks nothing new (already-live tiles are skipped).
+            Assert.AreEqual(0, this.streamer.GenerateAllColliders(),
+                "Re-running manual generation must skip tiles that already have a live collider.");
+        }
+
+        [Test]
+        public void ClearColliders_EvictsEveryLiveCollider()
+        {
+            this.streamer.RegisterTile(MakeValidTile(new Vector2Int(0, 0)));
+            this.streamer.RegisterTile(MakeValidTile(new Vector2Int(7, 7)));
+            this.streamer.GenerateAllColliders();
+            Assert.AreEqual(2, this.streamer.LiveCount);
+
+            this.streamer.ClearColliders();
+            Assert.AreEqual(0, this.streamer.LiveCount, "ClearColliders must evict every live collider.");
         }
 
         // ── Orphan reconciliation (domain-reload duplicate guard) ─────────────
