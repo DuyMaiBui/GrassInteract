@@ -20,7 +20,7 @@
 //
 // InstanceData layout (20 B, byte-identical to BladeInstance in GrassCull.compute):
 //   float3 posWS          (12 B)  — base world position
-//   uint   packedYawScale  (4 B)  — hi16=yaw/65535*360, lo16=scale/65535*_ScaleMax2
+//   uint   packedYawScale  (4 B)  — hi16=yaw/65535*360, lo16=scale/65535*_ScaleMax2*_ScaleFactor
 //   uint   lodHash         (4 B)  — legacy: decorrelation hash; oriented: octNormal16|pitch8|roll8
 //
 // Phase 4 — Orient mode (_OrientMode uniform):
@@ -39,7 +39,7 @@
 // Buffer binding contract:
 //   _Instances           — global, set via Shader.SetGlobalBuffer (MeshScatterEngine).
 //   _VisibleIndices      — per-LOD, bound via material.SetBuffer (NOT MPB).
-//   _ScaleMax2           — global float.
+//   _ScaleMax2, _ScaleFactor — per-material floats; _ScaleFactor is render-time scale multiplier.
 //   _OrientMode          — per-material float, set at Build time. 0=legacy, 1=oriented.
 //   _RotationOffsetEuler — per-material float3 (degrees), applied as uniform offset.
 //   _InteractsWithDeform — per-material float, 0=static (default), 1=deform. Set by MeshScatterEngine.
@@ -186,7 +186,8 @@ Shader "WorldPainter/ScatterInstanced"
             StructuredBuffer<SCATTER_InteractorGpu> _Interactors;   // global, shared with GrassInteractIndirect
             StructuredBuffer<float4>                _InstanceTilt;  // global, per-instance rigid tilt quaternion (xyzw, baked-order indexed)
 
-            float  _ScaleMax2;       // global float — scale decode upper bound
+            float  _ScaleMax2;       // per-material — scale decode upper bound
+            float  _ScaleFactor;     // per-material — render-time scale multiplier (default 1)
             float  _GrassTime;       // global — time accumulator (set by GrassGpuEngine or MeshScatterEngine)
             float2 _WindDir;         // global — wind direction (normalised XZ)
             float  _WindStrength;    // global — wind sway amplitude
@@ -297,7 +298,7 @@ Shader "WorldPainter/ScatterInstanced"
                 uint  hi     = (inst.packedYawScale >> 16) & 0xFFFFu;
                 uint  lo     =  inst.packedYawScale & 0xFFFFu;
                 float yawDeg = (float)hi / 65535.0f * 360.0f;
-                float scale  = (float)lo / 65535.0f * _ScaleMax2;
+                float scale  = (float)lo / 65535.0f * _ScaleMax2 * _ScaleFactor;
 
                 float3x3 baseRot = SCATTER_BaseRot(inst, yawDeg);
 
@@ -387,7 +388,7 @@ Shader "WorldPainter/ScatterInstanced"
                 uint  hi     = (inst.packedYawScale >> 16) & 0xFFFFu;
                 uint  lo     =  inst.packedYawScale & 0xFFFFu;
                 float yawDeg = (float)hi / 65535.0f * 360.0f;
-                float scale  = (float)lo / 65535.0f * _ScaleMax2;
+                float scale  = (float)lo / 65535.0f * _ScaleMax2 * _ScaleFactor;
 
                 float3x3 baseRot  = SCATTER_BaseRot(inst, yawDeg);
                 float3   anchorWS = inst.posWS + mul(baseRot, _AnchorOffset.xyz * scale);
@@ -625,6 +626,7 @@ Shader "WorldPainter/ScatterInstanced"
             StructuredBuffer<float4>         _InstanceTilt;
 
             float _ScaleMax2;
+            float _ScaleFactor;
             float _OrientMode;
             float4 _RotationOffsetEuler;
             float _WindEnabled;
@@ -653,7 +655,7 @@ Shader "WorldPainter/ScatterInstanced"
             void TransformInstance2(InstanceData inst, float4 tiltQ, float3 lp, float3 ln, out float3 wp, out float3 wn)
             {
                 uint hi=(inst.packedYawScale>>16)&0xFFFFu,lo=inst.packedYawScale&0xFFFFu;
-                float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2;
+                float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2*_ScaleFactor;
                 float3x3 baseRot=SC_BaseRot2(inst,yaw);
                 float3 anchorWS=inst.posWS+mul(baseRot,_AnchorOffset.xyz*scale);
                 float2 windXZ=float2(0,0);
@@ -769,6 +771,7 @@ Shader "WorldPainter/ScatterInstanced"
             StructuredBuffer<float4>         _InstanceTilt;
 
             float _ScaleMax2;
+            float _ScaleFactor;
             float _OrientMode;
             float4 _RotationOffsetEuler;
             float _WindEnabled;
@@ -790,7 +793,7 @@ Shader "WorldPainter/ScatterInstanced"
             float3 TransformInstancePos3(InstanceData inst, float4 tiltQ, float3 lp)
             {
                 uint hi=(inst.packedYawScale>>16)&0xFFFFu,lo=inst.packedYawScale&0xFFFFu;
-                float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2;
+                float yaw=(float)hi/65535.0f*360.0f, scale=(float)lo/65535.0f*_ScaleMax2*_ScaleFactor;
                 float3x3 baseRot=SD_BaseRot3(inst,yaw);
                 float3 anchorWS=inst.posWS+mul(baseRot,_AnchorOffset.xyz*scale);
                 float2 windXZ=float2(0,0);

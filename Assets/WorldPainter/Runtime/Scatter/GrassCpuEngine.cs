@@ -53,6 +53,19 @@ namespace WorldPainter
         /// <inheritdoc/>
         public Bounds WorldBounds => this.scatter?.WorldBounds ?? default;
 
+        // ── IGrassEngine : SetScaleFactor ─────────────────────────────────────
+
+        private bool warnedScaleFactor;
+
+        /// <inheritdoc/>
+        /// CPU engine does not support render-time scale factor. Logs a one-time warning.
+        public void SetScaleFactor(float factor)
+        {
+            if (this.warnedScaleFactor) return;
+            this.warnedScaleFactor = true;
+            Debug.LogWarning("[GrassCpuEngine] scaleFactor is a GPU render feature; the CPU fallback ignores it.");
+        }
+
         /// <inheritdoc/>
         public void Dispose()
         {

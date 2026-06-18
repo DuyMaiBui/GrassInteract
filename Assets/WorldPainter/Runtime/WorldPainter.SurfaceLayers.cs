@@ -244,6 +244,32 @@ namespace WorldPainter
             return null;
         }
 
+        /// <summary>
+        /// Pushes a live render-time scale factor to every grass engine belonging to
+        /// <paramref name="layer"/> (one engine per tile). No re-scatter is triggered.
+        /// Called by the inspector slider; NOT routed through the rebuild scheduler.
+        /// </summary>
+        internal void SetGrassLayerScaleFactor(GrassLayer layer, float f)
+        {
+            if (layer == null) return;
+            for (int i = 0; i < this.surfaceAdapters.Count; ++i)
+            {
+                if (this.surfaceAdapters[i].SourceLayer == layer)
+                    this.surfaceEngines[i].SetScaleFactor(f);
+            }
+        }
+
+        /// <summary>
+        /// Pushes a live render-time scale factor to the prop engine belonging to
+        /// <paramref name="layer"/>. No re-scatter is triggered.
+        /// Called by the inspector slider; NOT routed through the rebuild scheduler.
+        /// </summary>
+        internal void SetPropLayerScaleFactor(PropLayer layer, float f)
+        {
+            InstancedPropEngine? engine = this.TryGetPropEngine(layer);
+            engine?.SetScaleFactor(f);
+        }
+
         /// <summary>Builds one engine per tile for <paramref name="grass"/>.</summary>
         private void BuildGrassLayerEngines(int layerIndex, GrassLayer grass, Vector3 painterOrigin,
             bool gpuCapable, string probeReason)

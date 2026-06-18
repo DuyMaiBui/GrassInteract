@@ -54,6 +54,7 @@ namespace WorldPainter
 
         public override Vector2 FieldBounds         => this.explicitFieldBounds;
         public override Vector2 ScaleRange          => this.layer.ScaleRange;
+        public override float   ScaleFactor         => this.layer.ScaleFactor;
         public override Vector3 RotationOffsetEuler => this.layer.RotationOffsetEuler;
         public override bool    IsOriented          => this.layer.IsOriented;
 

@@ -35,6 +35,7 @@ namespace WorldPainter
         private static readonly int ID_Interactors        = Shader.PropertyToID("_Interactors");
         private static readonly int ID_InteractorCount    = Shader.PropertyToID("_InteractorCount");
         private static readonly int ID_ScaleMax2          = Shader.PropertyToID("_ScaleMax2");
+        private static readonly int ID_ScaleFactor        = Shader.PropertyToID("_ScaleFactor");
         private static readonly int ID_GrassTime          = Shader.PropertyToID("_GrassTime");
         private static readonly int ID_WindDir            = Shader.PropertyToID("_WindDir");
         private static readonly int ID_WindStrength       = Shader.PropertyToID("_WindStrength");
@@ -156,6 +157,11 @@ namespace WorldPainter
         // Per-blade frustum-cull margin (metres) = blade vertical reach + extraCullMargin. Computed in
         // Build from config (SSOT-mirrors the chunk-AABB baker's bladeReachY) and pushed to BladeCull.
         private float bladeCullMargin;
+        // Render-time scale factor. Base snapshots are taken at Build time so SetScaleFactor always
+        // computes from BASE × factor (never compounds repeated calls).
+        private float scaleFactor = 1f;
+        private float baseBladeCullMargin;
+        private Bounds baseWorldBounds;
         // FIX 7: snapshot shadow mode from config so MakeRenderParams can honor it.
         private UnityEngine.Rendering.ShadowCastingMode shadowCastingMode;
         // Phase 3: snapshot receive-shadows flag (no more hardcoded false).
@@ -261,6 +267,18 @@ namespace WorldPainter
             float bakedMaxScale = this.bladeBuffer.ScaleMax2;
             this.bladeCullMargin = Mathf.Max(0f,
                 layer.Bounds.MaxBladeHeight * bakedMaxScale + layer.Bounds.BendHeadroom + this.extraCullMargin);
+            // Snapshot base values for scale-factor math. SetScaleFactor always computes
+            // from BASE × factor so repeated calls don't compound.
+            this.baseBladeCullMargin = this.bladeCullMargin;
+            this.baseWorldBounds     = this.worldBounds;
+            // Apply the initial scaleFactor from the layer (default 1 = no-op). Establish the
+            // cull-margin / worldBounds lockstep NOW (base × factor) so a layer serialized with
+            // scaleFactor != 1 is culled at the scaled size after ANY (re)build — paint stroke,
+            // density edit, domain reload, Play-mode entry — not only after a live SetScaleFactor.
+            // The shader uniform _ScaleFactor is pushed below via SetLodFloat once the LOD mats exist.
+            this.scaleFactor     = Mathf.Clamp(layer.ScaleFactor, 0.1f, 5f);
+            this.bladeCullMargin = this.baseBladeCullMargin * this.scaleFactor;
+            this.worldBounds     = ScaleBoundsExtents(this.baseWorldBounds, this.scaleFactor);
 
             // ── LOD meshes sourced from the layer (SSOT) ──
             Mesh[] meshes = render.LodMeshes;
@@ -370,7 +388,10 @@ namespace WorldPainter
             Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
             // _ScaleMax2 is a PER-LAYER scale-decode bound read only by the render VS (NOT the cull compute).
             // Set it PER-MATERIAL so a sibling scatter layer can't clobber ours via the shared global.
-            this.SetLodFloat(ID_ScaleMax2, this.bladeBuffer.ScaleMax2);
+            this.SetLodFloat(ID_ScaleMax2,    this.bladeBuffer.ScaleMax2);
+            // _ScaleFactor is a render-time uniform scale multiplier (default 1 = inert). PER-MATERIAL
+            // so concurrent per-tile engines don't clobber each other through a shared global.
+            this.SetLodFloat(ID_ScaleFactor,  this.scaleFactor);
 
             // ── Reusable CommandBuffer ──────────────────────────────────────
             this.cullCmd = new CommandBuffer { name = "GrassGpuEngine.Cull" };
@@ -508,7 +529,9 @@ namespace WorldPainter
             if (this.interactorBuffer?.Buffer != null)
                 Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
-            this.SetLodFloat(ID_ScaleMax2, this.bladeBuffer?.ScaleMax2 ?? 1f);
+            this.SetLodFloat(ID_ScaleMax2,   this.bladeBuffer?.ScaleMax2 ?? 1f);
+            // PER-MATERIAL — never SetGlobal: each tile/layer has its own independent scaleFactor.
+            this.SetLodFloat(ID_ScaleFactor, this.scaleFactor);
 
             // ── 5. RenderMeshIndirect ×3 ─────────────────────────────────────
             // RenderParams MUST be built via the Material constructor: the object-initializer form leaves
@@ -556,6 +579,32 @@ namespace WorldPainter
             if (this.lodMat0 != null) this.lodMat0.SetBuffer(id, buf);
             if (this.lodMat1 != null) this.lodMat1.SetBuffer(id, buf);
             if (this.lodMat2 != null) this.lodMat2.SetBuffer(id, buf);
+        }
+
+        // ── IGrassEngine : SetScaleFactor ─────────────────────────────────────
+
+        /// <inheritdoc/>
+        /// Applies the uniform scale multiplier at render time. Updates the cull margin and
+        /// worldBounds in lockstep (painting-space, no space change). Next Submit re-pushes
+        /// the updated _ScaleFactor; no re-scatter is triggered.
+        public void SetScaleFactor(float factor)
+        {
+            this.scaleFactor     = Mathf.Clamp(factor, 0.1f, 5f);
+            // Grow/shrink cull margin and bounds from BASE × factor so repeated calls never compound.
+            this.bladeCullMargin = this.baseBladeCullMargin * this.scaleFactor;
+            this.worldBounds     = ScaleBoundsExtents(this.baseWorldBounds, this.scaleFactor);
+            // Push immediately so the very next Submit (already queued by beginCameraRendering) uses the new value.
+            this.SetLodFloat(ID_ScaleFactor, this.scaleFactor);
+        }
+
+        /// <summary>
+        /// Scales a <see cref="Bounds"/> extents about its center by <paramref name="factor"/>.
+        /// Center is unchanged; only the half-extents grow/shrink. Stays in PAINTING space —
+        /// <c>MakeRenderParams</c> maps painting→world per frame.
+        /// </summary>
+        internal static Bounds ScaleBoundsExtents(Bounds b, float factor)
+        {
+            return new Bounds(b.center, b.size * factor);
         }
 
         /// <summary>

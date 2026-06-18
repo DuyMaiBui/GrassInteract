@@ -182,6 +182,7 @@ Shader "WorldPainter/IndirectGrass"
             // TRAIL DEFORM END
 
             float  _ScaleMax2;
+            float  _ScaleFactor;
             float  _GrassTime;
             float2 _WindDir;
             float  _WindStrength;
@@ -298,7 +299,7 @@ Shader "WorldPainter/IndirectGrass"
                 uint  hi      = (b.packedYawScale >> 16) & 0xFFFFu;
                 uint  lo      =  b.packedYawScale & 0xFFFFu;
                 float yawDeg  = (float)hi / 65535.0 * 360.0;
-                float scaleXZ = (float)lo / 65535.0 * _ScaleMax2;
+                float scaleXZ = (float)lo / 65535.0 * _ScaleMax2 * _ScaleFactor;
                 float scaleY  = scaleXZ;
 
                 // Wind contribution (independent gate).
@@ -662,7 +663,7 @@ Shader "WorldPainter/IndirectGrass"
             StructuredBuffer<uint>               _VisibleIndices;
             StructuredBuffer<GrassInteractorGpu> _Interactors;
 
-            float  _ScaleMax2; float _GrassTime; float2 _WindDir; float _WindStrength;
+            float  _ScaleMax2; float _ScaleFactor; float _GrassTime; float2 _WindDir; float _WindStrength;
             float  _WindFrequency; float _WindNoiseScale; float _BendStrength; float _Flatten;
             float  _WindGustScale; float _WindRippleScale; float _WindGustSpeed; float _WindRippleSpeed; float _WindRippleWeight;
             int    _InteractorCount; float3 _CamPosWS;
@@ -728,7 +729,7 @@ Shader "WorldPainter/IndirectGrass"
             float3 ReconstructWS(BladeInstance b, float3 lp, float bendT, bool bb)
             {
                 uint hi=(b.packedYawScale>>16)&0xFFFFu, lo=b.packedYawScale&0xFFFFu;
-                float yaw=(float)hi/65535.0*360.0, sxz=(float)lo/65535.0*_ScaleMax2, sy2=sxz;
+                float yaw=(float)hi/65535.0*360.0, sxz=(float)lo/65535.0*_ScaleMax2*_ScaleFactor, sy2=sxz;
                 float2 wt=float2(0,0);
                 if(_WindEnabled>=0.5){
                     #ifdef _WIND_PERLIN
@@ -900,7 +901,7 @@ Shader "WorldPainter/IndirectGrass"
             StructuredBuffer<uint>               _VisibleIndices;
             StructuredBuffer<GrassInteractorGpu> _Interactors;
 
-            float  _ScaleMax2; float _GrassTime; float2 _WindDir; float _WindStrength;
+            float  _ScaleMax2; float _ScaleFactor; float _GrassTime; float2 _WindDir; float _WindStrength;
             float  _WindFrequency; float _WindNoiseScale; float _BendStrength; float _Flatten;
             float  _WindGustScale; float _WindRippleScale; float _WindGustSpeed; float _WindRippleSpeed; float _WindRippleWeight;
             int    _InteractorCount; float3 _CamPosWS;
@@ -935,7 +936,7 @@ Shader "WorldPainter/IndirectGrass"
             float3 ReconstructWS(BladeInstance b, float3 lp, float bendT, bool bb)
             {
                 uint hi=(b.packedYawScale>>16)&0xFFFFu, lo=b.packedYawScale&0xFFFFu;
-                float yaw=(float)hi/65535.0*360.0, sxz=(float)lo/65535.0*_ScaleMax2, sy2=sxz;
+                float yaw=(float)hi/65535.0*360.0, sxz=(float)lo/65535.0*_ScaleMax2*_ScaleFactor, sy2=sxz;
                 float2 wt=float2(0,0);
                 if(_WindEnabled>=0.5){
                     #ifdef _WIND_PERLIN

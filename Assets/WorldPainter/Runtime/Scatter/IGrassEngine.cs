@@ -57,6 +57,14 @@ namespace WorldPainter
         Bounds WorldBounds { get; }
 
         /// <summary>
+        /// Sets the render-time uniform scale multiplier for this layer. The factor is applied at
+        /// render time (GPU decode: scale = packed/65535 * _ScaleMax2 * _ScaleFactor) — no
+        /// re-scatter required. Instant in both edit and play mode.
+        /// CPU engine: no-op + one-time warning (GPU-only feature).
+        /// </summary>
+        void SetScaleFactor(float factor);
+
+        /// <summary>
         /// Releases all engine-owned resources. CPU engine: returns pooled base slabs to the facade's pool
         /// via <c>GrassScatter.ReturnSlabs</c>. GPU engine (future): releases GraphicsBuffers.
         /// Safe to call on a never-built or already-disposed engine.

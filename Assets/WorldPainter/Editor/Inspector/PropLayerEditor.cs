@@ -35,6 +35,7 @@ namespace WorldPainter.Editor
         SerializedProperty? propPropAlignToNormal;
         SerializedProperty? propOverrideScaleRange;
         SerializedProperty? propScaleRangeOverride;
+        SerializedProperty? propScaleFactor;
         SerializedProperty? propAuthoredInstances;
         SerializedProperty? propGenerateColliders;
         SerializedProperty? propMaxCollidersPerFrame;
@@ -65,6 +66,7 @@ namespace WorldPainter.Editor
             this.propPropAlignToNormal    = this.serializedObject.FindProperty("propAlignToNormal");
             this.propOverrideScaleRange   = this.serializedObject.FindProperty("overrideScaleRange");
             this.propScaleRangeOverride   = this.serializedObject.FindProperty("scaleRangeOverride");
+            this.propScaleFactor          = this.serializedObject.FindProperty("scaleFactor");
             this.propAuthoredInstances    = this.serializedObject.FindProperty("authoredInstances");
             this.propGenerateColliders    = this.serializedObject.FindProperty("generateColliders");
             this.propMaxCollidersPerFrame  = this.serializedObject.FindProperty("maxCollidersPerFrame");
@@ -96,6 +98,10 @@ namespace WorldPainter.Editor
         {
             this.serializedObject.Update();
 
+            // Snapshot scaleFactor before any drawing so we can detect a scaleFactor-only
+            // change and guard the outer MarkPropDirty call below from firing on it.
+            float scaleFactorBefore = this.propScaleFactor != null ? this.propScaleFactor.floatValue : 1f;
+
             EditorGUI.BeginChangeCheck();
 
             // Prop layer fields are editable only inside the WorldPainter detail card; the
@@ -111,9 +117,23 @@ namespace WorldPainter.Editor
             bool changed = EditorGUI.EndChangeCheck();
             this.serializedObject.ApplyModifiedProperties();
 
-            // Live preview: rebuild ONLY this prop layer's engine on every painter that
-            // references the owning map. Other layers stay live → no full-map flicker.
-            if (changed && this.target is PropLayer prop)
+            if (this.target is not PropLayer prop) return;
+
+            float scaleFactorAfter = this.propScaleFactor != null ? this.propScaleFactor.floatValue : 1f;
+            bool scaleFactorChanged = !Mathf.Approximately(scaleFactorBefore, scaleFactorAfter);
+
+            // Live scaleFactor path: push to engine immediately, no rebuild.
+            // MUST NOT call MarkPropDirty — that would trigger a full re-scatter.
+            if (scaleFactorChanged)
+                ApplyScaleFactorOnAllPainters(prop, scaleFactorAfter);
+
+            // Rebuild path: fires only when something OTHER than scaleFactor changed.
+            // Guard: if the ONLY change was scaleFactor, skip MarkPropDirty entirely.
+            // Known minor limitation: a single GUI pass changing scaleFactor AND another field at
+            // once (Undo/Redo/Reset/paste) skips the rebuild for that pass; the other field reflects
+            // on the next rebuild-triggering edit. Build() re-applies scaleFactor in cull/bounds
+            // lockstep, so no render desync results.
+            if (changed && !scaleFactorChanged)
                 RebuildOnAllPainters(prop);
         }
 
@@ -123,6 +143,22 @@ namespace WorldPainter.Editor
             // fire EndChangeCheck multiple times per frame; the scheduler collapses them so the
             // game-view render doesn't catch a partially-disposed GPU buffer.
             WorldPainterRebuildScheduler.MarkPropDirty(layer);
+        }
+
+        /// <summary>
+        /// Pushes the new <paramref name="factor"/> to the live prop engine for
+        /// <paramref name="layer"/> without triggering a re-scatter.
+        /// </summary>
+        static void ApplyScaleFactorOnAllPainters(PropLayer layer, float factor)
+        {
+            var painters = UnityEngine.Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            for (int i = 0; i < painters.Length; ++i)
+            {
+                var p = painters[i];
+                if (p == null || p.Map == null) continue;
+                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
+                p.SetPropLayerScaleFactor(layer, factor);
+            }
         }
 
         static void DrawBox(string label, System.Action body)
@@ -191,6 +227,10 @@ namespace WorldPainter.Editor
             EditorGUILayout.PropertyField(this.propOverrideScaleRange!);
             if (this.propOverrideScaleRange!.boolValue)
                 EditorGUILayout.PropertyField(this.propScaleRangeOverride!);
+            // scaleFactor is drawn here for inspector placement but its change is detected via
+            // the scaleFactorBefore/After guard in OnInspectorGUI — it routes to
+            // SetPropLayerScaleFactor (live, no rebuild) and is excluded from MarkPropDirty.
+            EditorGUILayout.PropertyField(this.propScaleFactor!);
 
             EditorGUILayout.Space(2f);
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);

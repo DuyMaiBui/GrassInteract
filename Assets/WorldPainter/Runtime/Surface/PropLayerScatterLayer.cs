@@ -60,6 +60,8 @@ namespace WorldPainter
                 ? this.layer.ScaleRangeOverride
                 : this.ComputeScaleRangeFromAuthored();
 
+        public override float ScaleFactor => this.layer.ScaleFactor;
+
         public override Vector3 RotationOffsetEuler => Vector3.zero;
 
         public override bool IsOriented => this.ComputeIsOrientedFromAuthored();

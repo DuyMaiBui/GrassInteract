@@ -62,6 +62,11 @@ namespace WorldPainter
         [Tooltip("Sub-asset holding authored per-instance records.")]
         [SerializeField] private AuthoredInstancesData? authoredInstances;
 
+        // ── Render-time scale factor ─────────────────────────────────────────────
+
+        [Tooltip("Render-time uniform scale multiplier — resizes the whole layer's scatter live, no re-scatter.")]
+        [SerializeField, Range(0.1f, 5f)] private float scaleFactor = 1f;
+
         // ── Scale-range override ─────────────────────────────────────────────────
 
         [Tooltip("When true, ScaleRange is driven by scaleRangeOverride.")]
@@ -130,6 +135,7 @@ namespace WorldPainter
 
         // ── Scale override ───────────────────────────────────────────────────────
 
+        public float   ScaleFactor         => this.scaleFactor;
         public bool    OverrideScaleRange  => this.overrideScaleRange;
         public Vector2 ScaleRangeOverride  => this.scaleRangeOverride;
 

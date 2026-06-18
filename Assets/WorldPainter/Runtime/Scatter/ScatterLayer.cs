@@ -67,6 +67,9 @@ namespace WorldPainter
         /// <summary>Instance scale random range [min, max]. Used by engines for cull AABB.</summary>
         public abstract Vector2 ScaleRange { get; }
 
+        /// <summary>Render-time uniform scale multiplier. Default 1 = inert. Engines bind _ScaleFactor per-material each frame.</summary>
+        public virtual float ScaleFactor => 1f;
+
         /// <summary>Uniform rotation offset applied to every instance. Passed to shader.</summary>
         public abstract Vector3 RotationOffsetEuler { get; }
 

@@ -42,6 +42,9 @@ namespace WorldPainter
 
         [SerializeField] private Vector2 scaleRange = new Vector2(0.8f, 1.2f);
 
+        [Tooltip("Render-time uniform scale multiplier — resizes the whole layer's scatter live, no re-scatter.")]
+        [SerializeField, Range(0.1f, 5f)] private float scaleFactor = 1f;
+
         [SerializeField] private int seed = 0;
 
         [Tooltip("Placement allowed only when ground slope (deg) is within [x, y].")]
@@ -88,6 +91,7 @@ namespace WorldPainter
 
         public Vector2 FieldBounds => this.fieldBounds;
         public Vector2 ScaleRange => this.scaleRange;
+        public float ScaleFactor => this.scaleFactor;
         public int Seed => this.seed;
         public Vector2 SlopeRange => this.slopeRange;
 

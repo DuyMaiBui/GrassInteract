@@ -26,6 +26,7 @@ namespace WorldPainter.Editor
         SerializedProperty? propPlacement;
         SerializedProperty? propFieldBounds;
         SerializedProperty? propScaleRange;
+        SerializedProperty? propScaleFactor;
         SerializedProperty? propSeed;
         SerializedProperty? propSlopeRange;
         SerializedProperty? propTargetDensityPerSqM;
@@ -44,6 +45,7 @@ namespace WorldPainter.Editor
             this.propPlacement          = this.serializedObject.FindProperty("placement");
             this.propFieldBounds        = this.serializedObject.FindProperty("fieldBounds");
             this.propScaleRange         = this.serializedObject.FindProperty("scaleRange");
+            this.propScaleFactor        = this.serializedObject.FindProperty("scaleFactor");
             this.propSeed               = this.serializedObject.FindProperty("seed");
             this.propSlopeRange         = this.serializedObject.FindProperty("slopeRange");
             this.propTargetDensityPerSqM    = this.serializedObject.FindProperty("targetDensityPerSqM");
@@ -57,6 +59,10 @@ namespace WorldPainter.Editor
         public override void OnInspectorGUI()
         {
             this.serializedObject.Update();
+
+            // Snapshot scaleFactor before any drawing so we can detect a scaleFactor-only
+            // change and guard the outer MarkGrassDirty call below from firing on it.
+            float scaleFactorBefore = this.propScaleFactor != null ? this.propScaleFactor.floatValue : 1f;
 
             EditorGUI.BeginChangeCheck();
 
@@ -75,9 +81,23 @@ namespace WorldPainter.Editor
             bool changed = EditorGUI.EndChangeCheck();
             this.serializedObject.ApplyModifiedProperties();
 
-            // Live preview: rebuild ONLY this grass layer's engines on every painter that
-            // references the owning map. Other layers stay live → no full-map flicker.
-            if (changed && this.target is GrassLayer grass)
+            if (this.target is not GrassLayer grass) return;
+
+            float scaleFactorAfter = this.propScaleFactor != null ? this.propScaleFactor.floatValue : 1f;
+            bool scaleFactorChanged = !Mathf.Approximately(scaleFactorBefore, scaleFactorAfter);
+
+            // Live scaleFactor path: push to engines immediately, no rebuild.
+            // MUST NOT call MarkGrassDirty — that would trigger a full re-scatter.
+            if (scaleFactorChanged)
+                ApplyScaleFactorOnAllPainters(grass, scaleFactorAfter);
+
+            // Rebuild path: fires only when something OTHER than scaleFactor changed.
+            // Guard: if the ONLY change was scaleFactor, skip MarkGrassDirty entirely.
+            // Known minor limitation: if a single GUI pass changes scaleFactor AND another field
+            // at once (Undo/Redo/Reset/paste), the rebuild is skipped for that pass; the other
+            // field's change reflects on the next rebuild-triggering edit. Build() re-applies the
+            // serialized scaleFactor in cull/bounds lockstep, so no render desync results.
+            if (changed && !scaleFactorChanged)
                 RebuildOnAllPainters(grass);
         }
 
@@ -87,6 +107,22 @@ namespace WorldPainter.Editor
             // fire EndChangeCheck multiple times per frame; the scheduler collapses them so the
             // game-view render doesn't catch a partially-disposed GPU buffer.
             WorldPainterRebuildScheduler.MarkGrassDirty(layer);
+        }
+
+        /// <summary>
+        /// Pushes the new <paramref name="factor"/> to every live grass engine for
+        /// <paramref name="layer"/> without triggering a re-scatter.
+        /// </summary>
+        static void ApplyScaleFactorOnAllPainters(GrassLayer layer, float factor)
+        {
+            var painters = UnityEngine.Object.FindObjectsByType<WorldPainter>(FindObjectsSortMode.None);
+            for (int i = 0; i < painters.Length; ++i)
+            {
+                var p = painters[i];
+                if (p == null || p.Map == null) continue;
+                if (!p.Map.SurfaceLayers.Contains(layer)) continue;
+                p.SetGrassLayerScaleFactor(layer, factor);
+            }
         }
 
         static void DrawBox(string label, System.Action body)
@@ -139,6 +175,10 @@ namespace WorldPainter.Editor
             DrawNestedBox("Placement Config", this.propPlacement!);
             EditorGUILayout.PropertyField(this.propFieldBounds!);
             EditorGUILayout.PropertyField(this.propScaleRange!);
+            // scaleFactor is drawn here for inspector placement but its change is detected via
+            // the scaleFactorBefore/After guard in OnInspectorGUI — it routes to
+            // SetGrassLayerScaleFactor (live, no rebuild) and is excluded from MarkGrassDirty.
+            EditorGUILayout.PropertyField(this.propScaleFactor!);
             EditorGUILayout.PropertyField(this.propSeed!);
             EditorGUILayout.PropertyField(this.propSlopeRange!);
             EditorGUILayout.PropertyField(this.propTargetDensityPerSqM!);

@@ -261,6 +261,7 @@ namespace WorldPainter
             public void Step(float dt) => this.inner.Step(dt);
             public void Submit(Camera? cam, Vector3 lodRef) => this.inner.Submit(cam, lodRef);
             public Bounds WorldBounds => this.inner.WorldBounds;
+            public void SetScaleFactor(float factor) => this.inner.SetScaleFactor(factor);
             public void Dispose() => this.inner.Dispose();
         }
     }

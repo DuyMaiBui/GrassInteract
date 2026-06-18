@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -26,6 +27,7 @@ namespace WorldPainter
         // ── Shader global IDs ─────────────────────────────────────────────────
         private static readonly int ID_Instances             = Shader.PropertyToID("_Instances");
         private static readonly int ID_ScaleMax2             = Shader.PropertyToID("_ScaleMax2");
+        private static readonly int ID_ScaleFactor           = Shader.PropertyToID("_ScaleFactor");
         private static readonly int ID_VisibleIndices        = Shader.PropertyToID("_VisibleIndices");
         private static readonly int ID_OrientMode            = Shader.PropertyToID("_OrientMode");
         private static readonly int ID_RotationOffsetEuler   = Shader.PropertyToID("_RotationOffsetEuler");
@@ -117,6 +119,23 @@ namespace WorldPainter
         // ── Phase 3: shadow config snapshot ──────────────────────────────────
         private UnityEngine.Rendering.ShadowCastingMode shadowCastingMode;
         private bool receiveShadows;
+
+        // ── Render-time scale factor ──────────────────────────────────────────
+        // Base snapshots taken at Build so SetScaleFactor(f) always computes BASE × f (no compounding).
+        private float scaleFactor       = 1f;
+        private float baseBladeCullMargin;
+        private Bounds baseWorldBounds;
+
+        // ── Collider base-scale arrays (stored at Build for ApplyColliderScale) ─
+        // Parallel authored-indexed arrays: baseColliderScales[i] = rec.scale * rec.colliderScale.
+        // ApplyColliderScale multiplies each by scaleFactor and updates the live pool in-place.
+        // All null until BuildColliderRuntime populates them (edit mode / no colliders → null → no-op).
+        private float[]?           baseColliderScales;
+        private Vector3[]?         colliderPositions;
+        private Quaternion[]?      colliderRotations;
+        private Mesh?[]?           colliderMeshes;
+        private bool[]?            colliderConvexFlags;
+        private PhysicsMaterial?[]? colliderMaterials;
 
         // ── Deform state ──────────────────────────────────────────────────────
         private bool affectedByWind;
@@ -239,6 +258,17 @@ namespace WorldPainter
                 : 0f;
             this.bladeCullMargin = Mathf.Max(0f,
                 meshBounds.extents.magnitude * bakedScaleMax * (1f + tiltSweep));
+            // Snapshot base values for scale-factor math — AFTER tiltSweep is folded in so the
+            // lockstep includes tilt headroom. SetScaleFactor always computes BASE × factor.
+            this.baseBladeCullMargin = this.bladeCullMargin;
+            this.baseWorldBounds     = this.worldBounds;
+            // Apply the initial scaleFactor from the layer (default 1 = no-op). Establish the
+            // cull-margin / worldBounds lockstep NOW (base × factor) so a layer serialized with
+            // scaleFactor != 1 is culled at the scaled size after ANY (re)build, matching the live
+            // SetScaleFactor path. The shader uniform _ScaleFactor is pushed below via SetLodFloat.
+            this.scaleFactor     = Mathf.Clamp(layer.ScaleFactor, 0.1f, 5f);
+            this.bladeCullMargin = this.baseBladeCullMargin * this.scaleFactor;
+            this.worldBounds     = GrassGpuEngine.ScaleBoundsExtents(this.baseWorldBounds, this.scaleFactor);
 
             int chunkCap = Mathf.Max(1, this.instanceBuffer.TotalChunks);
             int instCap  = Mathf.Max(1, this.instanceBuffer.TotalInstances);
@@ -318,7 +348,10 @@ namespace WorldPainter
             // _ScaleMax2 is a PER-LAYER scale-decode bound consumed only by the render VS (NOT the cull
             // compute). Set it PER-MATERIAL so a second scatter layer's ScaleMax can't clobber ours via the
             // shared global. (Root-cause class: per-layer render uniforms must never go through SetGlobal.)
-            this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
+            this.SetLodFloat(ID_ScaleMax2,    this.instanceBuffer.ScaleMax);
+            // _ScaleFactor is a render-time uniform scale multiplier (default 1 = inert). PER-MATERIAL
+            // so concurrent per-tile/per-layer engines don't clobber each other through a shared global.
+            this.SetLodFloat(ID_ScaleFactor,  this.scaleFactor);
 
             // _InstanceTilt is PER-LAYER (per-engine) tilt data — bind PER-MATERIAL for the same
             // multi-prop-layer reason as _Instances above (a global would be clobbered by the last
@@ -416,7 +449,9 @@ namespace WorldPainter
             this.SyncLiveMaterialStyle();
 
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
-            this.SetLodFloat(ID_ScaleMax2, this.instanceBuffer.ScaleMax);
+            this.SetLodFloat(ID_ScaleMax2,   this.instanceBuffer.ScaleMax);
+            // PER-MATERIAL — never SetGlobal: each tile/layer has its own independent scaleFactor.
+            this.SetLodFloat(ID_ScaleFactor, this.scaleFactor);
 
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling prop layer would clobber our tilt.
             if (this.tiltSim?.TiltBuffer != null)
@@ -485,6 +520,59 @@ namespace WorldPainter
 
         public Bounds WorldBounds => this.worldBounds;
 
+        // ── IGrassEngine : SetScaleFactor ─────────────────────────────────────
+
+        /// <inheritdoc/>
+        /// Applies the uniform scale multiplier at render time. Updates the cull margin and
+        /// worldBounds in lockstep (painting-space, no space change). Next Submit re-pushes
+        /// the updated _ScaleFactor; no re-scatter is triggered.
+        public void SetScaleFactor(float factor)
+        {
+            this.scaleFactor     = Mathf.Clamp(factor, 0.1f, 5f);
+            // Grow/shrink cull margin and bounds from BASE × factor so repeated calls never compound.
+            this.bladeCullMargin = this.baseBladeCullMargin * this.scaleFactor;
+            this.worldBounds     = GrassGpuEngine.ScaleBoundsExtents(this.baseWorldBounds, this.scaleFactor);
+            // Push immediately so the very next Submit uses the new value.
+            this.SetLodFloat(ID_ScaleFactor, this.scaleFactor);
+            // Phase 4: rescale live colliders. No-op when colliders aren't built (edit mode).
+            this.ApplyColliderScale();
+        }
+
+        /// <summary>
+        /// Rescales all currently active pool colliders to baseScale × scaleFactor in-place.
+        /// No-op when colliders are not built (edit mode / colliders disabled).
+        /// The pool's Acquire "already active" branch updates the existing collider's localScale
+        /// without re-adding it to the active dictionary — safe to call every SetScaleFactor call.
+        /// </summary>
+        public void ApplyColliderScale()
+        {
+            // Guard: collider arrays are null in edit mode or when no colliders were generated.
+            if (this.colliderPool == null ||
+                this.baseColliderScales  == null ||
+                this.colliderPositions   == null ||
+                this.colliderRotations   == null ||
+                this.colliderMeshes      == null ||
+                this.colliderConvexFlags == null ||
+                this.colliderMaterials   == null) return;
+            if (!Application.isPlaying) return; // colliders only exist in Play mode
+
+            // Snapshot the active keys before the rescale loop. Acquire's "already active" branch
+            // does not mutate the active dictionary today, but iterating the live KeyCollection while
+            // calling Acquire is fragile-by-construction — a future evict-on-cap in Acquire would throw.
+            foreach (int authoredIdx in new List<int>(this.colliderPool.ActiveKeys))
+            {
+                if ((uint)authoredIdx >= (uint)this.baseColliderScales.Length) continue;
+                this.colliderPool.Acquire(
+                    authoredIdx,
+                    this.colliderPositions[authoredIdx],
+                    this.colliderRotations[authoredIdx],
+                    this.baseColliderScales[authoredIdx] * this.scaleFactor,
+                    this.colliderMeshes[authoredIdx],
+                    this.colliderConvexFlags[authoredIdx],
+                    this.colliderMaterials[authoredIdx]);
+            }
+        }
+
         // ── IGrassEngine : Dispose ────────────────────────────────────────────
 
         public void Dispose()
@@ -518,6 +606,13 @@ namespace WorldPainter
             this.colliderPool?.Dispose();
             this.colliderPool   = null;
             SafeDestroy(this.colliderRoot); this.colliderRoot = null;
+
+            this.baseColliderScales  = null;
+            this.colliderPositions   = null;
+            this.colliderRotations   = null;
+            this.colliderMeshes      = null;
+            this.colliderConvexFlags = null;
+            this.colliderMaterials   = null;
 
             SafeDestroy(this.lodMat0); this.lodMat0 = null;
             SafeDestroy(this.lodMat1); this.lodMat1 = null;
@@ -560,14 +655,15 @@ namespace WorldPainter
             // Small prewarm — lazy budgeted Acquire fills the rest progressively.
             this.colliderPool.Prewarm(Mathf.Min(instLayer.MaxCollidersPerFrame, instLayer.PoolCap));
 
-            int count           = records.Length;
-            var positions       = new Vector3[count];
-            var rotations       = new Quaternion[count];
-            var scales          = new float[count];
-            var meshes          = new Mesh?[count];
-            var convexFlags     = new bool[count];
-            var wantsCollider   = new bool[count];
-            var materials       = new PhysicsMaterial?[count];
+            int count              = records.Length;
+            var positions          = new Vector3[count];
+            var rotations          = new Quaternion[count];
+            var baseScales         = new float[count]; // rec.scale * rec.colliderScale (no scaleFactor)
+            var scales             = new float[count]; // baseScales * scaleFactor (live value)
+            var meshes             = new Mesh?[count];
+            var convexFlags        = new bool[count];
+            var wantsCollider      = new bool[count];
+            var materials          = new PhysicsMaterial?[count];
 
             for (int i = 0; i < count; ++i)
             {
@@ -595,12 +691,23 @@ namespace WorldPainter
 
                 positions[i]     = rec.position;
                 rotations[i]     = rec.rotation;
-                scales[i]        = rec.scale * rec.colliderScale;
+                baseScales[i]    = rec.scale * rec.colliderScale;
+                scales[i]        = baseScales[i] * this.scaleFactor;
                 meshes[i]        = colMesh;
                 convexFlags[i]   = rec.colliderConvex;
                 wantsCollider[i] = colMesh != null && (instLayer.GenerateColliders || rec.generateCollider);
                 materials[i]     = colMat;
             }
+
+            // Snapshot the authored arrays so ApplyColliderScale can rescale active colliders live.
+            // baseColliderScales holds rec.scale × rec.colliderScale (no scaleFactor) — multiply by
+            // scaleFactor at apply time so each SetScaleFactor call drives from BASE, never compounds.
+            this.baseColliderScales  = baseScales;
+            this.colliderPositions   = positions;
+            this.colliderRotations   = rotations;
+            this.colliderMeshes      = meshes;
+            this.colliderConvexFlags = convexFlags;
+            this.colliderMaterials   = materials;
 
             // Verify 1:1 prop invariant: scatter.TotalCount must equal records.Length so flatIdx == pool key i.
             // InstancePlacement emits exactly one instance per authored record, so this always holds for props.
