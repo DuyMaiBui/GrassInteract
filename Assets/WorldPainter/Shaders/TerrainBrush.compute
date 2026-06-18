@@ -291,17 +291,25 @@ void PaintDensity(uint3 id : SV_DispatchThreadID)
     }
     else
     {
-        // Smooth: seam-aware box-blur of the density RT within the brush radius (7×7 window).
-        // Taps that cross a tile edge read a bound neighbour's RT so the shared edge averages
-        // over the SAME neighbourhood on both tiles (continuous across the seam, no step).
+        // Smooth: seam-aware box-blur of the density RT spread across the BRUSH FOOTPRINT, not a
+        // fixed ±3 texels. A ±3-texel window at BRUSH_RT_RES is below the perceptual threshold once
+        // the RT is downsampled to DENSITY_RES and consumed by the sparse stochastic grass scatter
+        // (DensityPlacement) — that blur was invisible, so Smooth appeared to do nothing on grass
+        // even though the identical math is visible on the continuous splat blend. Spread a bounded
+        // 7×7 tap grid over ~the brush radius via an integer stride so the averaged neighbourhood
+        // actually spans the painted area. Taps crossing a tile edge read a bound neighbour's RT
+        // (seam-aware, unchanged); the stride scales the reach, not the tap count (cost stays 49).
+        const int HALF_TAPS = 3;                                            // 7×7 = 49 taps
+        float radiusTexels  = _BrushRadiusUV * (float)_RTRes;
+        int   stride        = max(1, (int)(radiusTexels / (float)HALF_TAPS)); // grid spans ~±radius
         float sum = 0.0f;
         float cnt = 0.0f;
-        for (int dy = -3; dy <= 3; ++dy)
+        for (int ty = -HALF_TAPS; ty <= HALF_TAPS; ++ty)
         {
-            for (int dx = -3; dx <= 3; ++dx)
+            for (int tx = -HALF_TAPS; tx <= HALF_TAPS; ++tx)
             {
                 float d;
-                if (SampleNeighborhoodDensity(int2(id.xy) + int2(dx, dy), d))
+                if (SampleNeighborhoodDensity(int2(id.xy) + int2(tx, ty) * stride, d))
                 {
                     sum += d;
                     cnt += 1.0f;

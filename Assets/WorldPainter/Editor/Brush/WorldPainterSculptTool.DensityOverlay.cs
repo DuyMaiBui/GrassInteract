@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using WorldPainter;
 using UnityEditor;
 using UnityEngine;
@@ -27,12 +28,25 @@ namespace WorldPainter.Editor
         // internal so tests can reference it instead of hardcoding the magic string.
         internal const string HEATMAP_SHADER = "Hidden/WorldPainter/DensityHeatmap";
 
-        // Lift the flat quad above the surface so it isn't z-fought by the GPU terrain. ZTest Always
+        // Lift the overlay above the surface so it isn't z-fought by the GPU terrain. ZTest Always
         // in the shader already shows it through terrain; the lift just keeps it visually above hills.
-        private const float HEATMAP_LIFT = 0.25f; // metres above sampled tile-centre height
+        private const float HEATMAP_LIFT = 0.25f; // metres above the sampled surface height
+
+        // Tessellation of the per-tile overlay. The overlay grid CONFORMS to the terrain surface
+        // (per-vertex height sample) instead of being one flat quad — a flat quad at a single
+        // tile-centre height projects off the sculpted surface (the offset is amplified by a
+        // non-identity root scale), so the density colour landed beside the surface-snapped grass.
+        internal const int HEATMAP_GRID_CELLS = 24; // cells per tile edge → (N+1)² verts
 
         private Material? heatmapMat;
-        private Mesh?     heatmapQuad;
+
+        // One conformed mesh PER tile coord. A single shared mesh mutated via SetVertices between
+        // immediate DrawMeshNow calls is a Unity footgun — the shared vertex buffer can be clobbered
+        // by the next tile's SetVertices before the previous tile's draw flushes, so a multi-tile drag
+        // rendered every tile with the LAST tile's geometry (correct for a single tile, wrong the
+        // moment the brush straddles two). Per-coord meshes share no buffer, so each tile draws its own.
+        private readonly Dictionary<Vector2Int, Mesh> heatmapMeshes = new();
+        private Vector3[]? heatmapVerts; // reused conformed vertex build buffer (no per-draw alloc)
 
         /// <summary>
         /// Draws the density heatmap for every touched tile in the active grass stroke. No-op when
@@ -51,12 +65,13 @@ namespace WorldPainter.Editor
                 if (shader == null) return; // shader not imported → skip overlay, keep the brush ring
                 this.heatmapMat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             }
-            if (this.heatmapQuad == null) this.heatmapQuad = BuildHeatmapQuad();
-            if (!this.heatmapMat.SetPass(0)) return;
+            this.PruneStaleHeatmapMeshes();
 
             Matrix4x4 rootMatrix = painter.transform.localToWorldMatrix;
             const float tile = TerrainWorldGrid.TILE_SIZE_M;
-            const float half = tile * 0.5f;
+            const int   n    = HEATMAP_GRID_CELLS + 1; // verts per tile edge
+
+            this.heatmapVerts ??= new Vector3[n * n];
 
             foreach (var kv in this.densityRtCache)
             {
@@ -66,53 +81,132 @@ namespace WorldPainter.Editor
                 RenderTexture rt = kv.Value.rt;
                 if (rt == null) continue;
 
-                // Painting-space tile centre. Tiles span [origin, origin + TILE_SIZE_M] in XZ.
-                Vector2 origin = TerrainWorldGrid.TileOriginWorld(coord);
-                float cx = origin.x + half;
-                float cz = origin.y + half;
+                // Tessellate the tile rect [origin, origin + TILE_SIZE_M] into an n×n grid CONFORMED
+                // to the terrain surface via a per-vertex height sample — the same technique the brush
+                // ring uses (TerrainBrushPreview.AppendConformed). The previous single flat quad sat at
+                // one tile-centre height, so on sculpted terrain (and amplified by a non-identity root
+                // scale) it projected beside the surface-snapped grass; a conformed grid drapes the
+                // density on the actual surface where the blades land. Bilinear CPU samples, bounded by
+                // touched-tile count × (N+1)² — cheap relative to the per-tile scatter rebuild this
+                // overlay already replaces during a drag.
+                Vector2 origin    = TerrainWorldGrid.TileOriginWorld(coord); // painting-space corner
+                var     tileAsset = this.FindTile(painter, coord);
 
-                // Flat quad Y = sampled tile-centre height + lift (painting space). Off-tile → 0.
-                // Re-sampled per repaint, but bounded by touched-tile count (a few cheap bilinear
-                // CPU samples) — not the per-tile scatter cost this change removed; and with ZTest
-                // Always the quad shows through terrain regardless, so the Y is display-only.
-                float cy = 0f;
-                var tileAsset = this.FindTile(painter, coord);
-                if (tileAsset != null)
-                    TerrainHeightSampleCpu.TrySampleWorld(tileAsset, cx, cz, out cy);
+                for (int j = 0; j < n; ++j)
+                for (int i = 0; i < n; ++i)
+                {
+                    float u  = i / (float)HEATMAP_GRID_CELLS;
+                    float v  = j / (float)HEATMAP_GRID_CELLS;
+                    float px = origin.x + u * tile;
+                    float pz = origin.y + v * tile;
+                    float py = 0f;
+                    if (tileAsset != null)
+                        TerrainHeightSampleCpu.TrySampleWorld(tileAsset, px, pz, out py);
+                    this.heatmapVerts[j * n + i] = new Vector3(px, py + HEATMAP_LIFT, pz);
+                }
 
+                // Per-coord mesh: no shared vertex buffer across tiles, so a multi-tile drag draws each
+                // tile with its OWN geometry (a single shared mesh would render every tile with the last
+                // tile's vertices — the cross-tile preview corruption).
+                Mesh mesh = this.GetOrCreateHeatmapMesh(coord);
+                mesh.SetVertices(this.heatmapVerts);
+
+                // Bind THIS tile's density RT, then SetPass — Graphics.DrawMeshNow renders with the
+                // pass state captured at SetPass time, so the texture must be bound BEFORE SetPass.
+                // A single SetPass before the loop made every tile draw with the same (stale) texture
+                // — all tiles showed one tile's density. Per-tile SetPass binds each tile's own RT.
                 this.heatmapMat.SetTexture("_MainTex", rt);
+                if (!this.heatmapMat.SetPass(0)) return;
 
-                var localMatrix = Matrix4x4.TRS(
-                    new Vector3(cx, cy + HEATMAP_LIFT, cz),
-                    Quaternion.identity,
-                    new Vector3(tile, 1f, tile));
-                Graphics.DrawMeshNow(this.heatmapQuad, rootMatrix * localMatrix);
+                // Vertices are already in painting space; rootMatrix maps painting → world (applies the
+                // WorldPainter root TRS incl. non-identity scale), exactly as the conformed brush ring.
+                Graphics.DrawMeshNow(mesh, rootMatrix);
             }
         }
 
-        /// <summary>Releases the lazily-created overlay material + mesh. Called from <see cref="Disable"/>.</summary>
-        private void DisposeDensityOverlay()
+        /// <summary>Returns (or lazily builds) the conformed overlay mesh for one tile coord.</summary>
+        private Mesh GetOrCreateHeatmapMesh(Vector2Int coord)
         {
-            if (this.heatmapMat != null)  { Object.DestroyImmediate(this.heatmapMat);  this.heatmapMat = null; }
-            if (this.heatmapQuad != null) { Object.DestroyImmediate(this.heatmapQuad); this.heatmapQuad = null; }
+            if (!this.heatmapMeshes.TryGetValue(coord, out Mesh mesh) || mesh == null)
+            {
+                mesh = BuildHeatmapQuad();
+                this.heatmapMeshes[coord] = mesh;
+            }
+            return mesh;
         }
 
         /// <summary>
-        /// Unit quad (1×1) centred on origin, flat on the XZ plane, UVs 0..1 (tile density UV space).
-        /// internal so tests can assert its geometry.
+        /// Destroys overlay meshes for coords no longer in the density RT cache (stroke ended / tile
+        /// untouched), so the per-coord mesh table tracks the live painted set instead of growing for
+        /// the session. Cheap: the cache holds only the few tiles touched this stroke.
+        /// </summary>
+        private void PruneStaleHeatmapMeshes()
+        {
+            if (this.heatmapMeshes.Count == 0) return;
+            this.staleHeatmapCoords.Clear();
+            foreach (var kv in this.heatmapMeshes)
+                if (!this.densityRtCache.ContainsKey(kv.Key))
+                    this.staleHeatmapCoords.Add(kv.Key);
+            foreach (var coord in this.staleHeatmapCoords)
+            {
+                if (this.heatmapMeshes.TryGetValue(coord, out Mesh mesh) && mesh != null)
+                    Object.DestroyImmediate(mesh);
+                this.heatmapMeshes.Remove(coord);
+            }
+        }
+
+        private readonly List<Vector2Int> staleHeatmapCoords = new(); // reused prune scratch buffer
+
+        /// <summary>Releases the lazily-created overlay material + per-coord meshes. Called from <see cref="Disable"/>.</summary>
+        private void DisposeDensityOverlay()
+        {
+            if (this.heatmapMat != null) { Object.DestroyImmediate(this.heatmapMat); this.heatmapMat = null; }
+            foreach (var kv in this.heatmapMeshes)
+                if (kv.Value != null) Object.DestroyImmediate(kv.Value);
+            this.heatmapMeshes.Clear();
+        }
+
+        /// <summary>
+        /// Tessellated unit grid (1×1) centred on origin, flat on the XZ plane, UVs 0..1 (tile density
+        /// UV space). The (<see cref="HEATMAP_GRID_CELLS"/>+1)² vertices are a template: positions are
+        /// rewritten per tile at draw time to conform to the terrain surface (see DrawDensityOverlay);
+        /// only the UVs + triangle topology are reused. The heatmap shader is Cull Off, so triangle
+        /// winding is irrelevant. internal so tests can assert its geometry.
         /// </summary>
         internal static Mesh BuildHeatmapQuad()
         {
-            var mesh = new Mesh { name = "WorldPainterDensityHeatmapQuad", hideFlags = HideFlags.HideAndDontSave };
-            mesh.vertices = new[]
+            const int cells = HEATMAP_GRID_CELLS;
+            const int n     = cells + 1; // verts per edge
+
+            var verts = new Vector3[n * n];
+            var uvs   = new Vector2[n * n];
+            for (int j = 0; j < n; ++j)
+            for (int i = 0; i < n; ++i)
             {
-                new Vector3(-0.5f, 0f, -0.5f),
-                new Vector3( 0.5f, 0f, -0.5f),
-                new Vector3( 0.5f, 0f,  0.5f),
-                new Vector3(-0.5f, 0f,  0.5f),
-            };
-            mesh.uv        = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
-            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+                float u = i / (float)cells;
+                float v = j / (float)cells;
+                verts[j * n + i] = new Vector3(u - 0.5f, 0f, v - 0.5f);
+                uvs[j * n + i]   = new Vector2(u, v);
+            }
+
+            var tris = new int[cells * cells * 6];
+            int t = 0;
+            for (int j = 0; j < cells; ++j)
+            for (int i = 0; i < cells; ++i)
+            {
+                int a = j * n + i;
+                int b = a + 1;
+                int c = a + n;
+                int d = c + 1;
+                tris[t++] = a; tris[t++] = c; tris[t++] = b;
+                tris[t++] = b; tris[t++] = c; tris[t++] = d;
+            }
+
+            var mesh = new Mesh { name = "WorldPainterDensityHeatmapGrid", hideFlags = HideFlags.HideAndDontSave };
+            if (verts.Length > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            mesh.vertices  = verts;
+            mesh.uv        = uvs;
+            mesh.triangles = tris;
             return mesh;
         }
     }

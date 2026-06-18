@@ -51,15 +51,20 @@ namespace WorldPainter.Tests
         // ── Quad geometry ─────────────────────────────────────────────────────
 
         [Test]
-        public void HeatmapQuad_HasFourVertsTwoTrisAndCornerUVs()
+        public void HeatmapQuad_IsConformingGridUnitExtentsFullUVSpan()
         {
             var mesh = WorldPainterSculptTool.BuildHeatmapQuad();
             try
             {
-                Assert.AreEqual(4, mesh.vertexCount, "Ground quad must have 4 vertices.");
-                Assert.AreEqual(6, mesh.triangles.Length, "Ground quad must have 2 triangles (6 indices).");
+                int cells = WorldPainterSculptTool.HEATMAP_GRID_CELLS;
+                int n     = cells + 1; // verts per edge
+                Assert.AreEqual(n * n, mesh.vertexCount,
+                    "Conforming overlay grid must have (HEATMAP_GRID_CELLS+1)² vertices.");
+                Assert.AreEqual(cells * cells * 6, mesh.triangles.Length,
+                    "Grid must have 2 triangles (6 indices) per cell.");
 
-                // Unit quad centred on origin, flat on XZ: extents ±0.5 in X and Z, Y == 0.
+                // Tessellated unit grid centred on origin, flat on XZ: extents ±0.5 in X and Z, Y == 0
+                // (the template is flat; per-vertex height conforming is applied at draw time).
                 var verts = mesh.vertices;
                 float minX = float.MaxValue, maxX = float.MinValue;
                 float minZ = float.MaxValue, maxZ = float.MinValue;
@@ -76,7 +81,7 @@ namespace WorldPainter.Tests
 
                 // UVs must span the full 0..1 density texture (so the whole tile RT is shown).
                 var uv = mesh.uv;
-                Assert.AreEqual(4, uv.Length, "Each vertex needs a UV.");
+                Assert.AreEqual(n * n, uv.Length, "Each vertex needs a UV.");
                 float minU = float.MaxValue, maxU = float.MinValue, minV = float.MaxValue, maxV = float.MinValue;
                 foreach (var t in uv)
                 {
