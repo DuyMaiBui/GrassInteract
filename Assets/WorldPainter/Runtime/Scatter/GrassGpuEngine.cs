@@ -598,13 +598,24 @@ namespace WorldPainter
         }
 
         /// <summary>
-        /// Scales a <see cref="Bounds"/> extents about its center by <paramref name="factor"/>.
-        /// Center is unchanged; only the half-extents grow/shrink. Stays in PAINTING space —
+        /// Inflates a <see cref="Bounds"/> extents about its center by <paramref name="factor"/>,
+        /// FLOORED AT 1 (never shrinks). Center is unchanged. Stays in PAINTING space —
         /// <c>MakeRenderParams</c> maps painting→world per frame.
         /// </summary>
+        /// <remarks>
+        /// This sizes the per-tile <see cref="Graphics.RenderMeshIndirect"/> <c>worldBounds</c> for the
+        /// render-time <c>_ScaleFactor</c>. CRITICAL: <c>_ScaleFactor</c> scales only the blade VERTEX
+        /// size (<c>scaleXZ</c>/<c>scaleY</c> in the grass VS), NOT the blade ROOT position (<c>b.posWS</c>) —
+        /// so the field's XZ footprint of blade roots is INDEPENDENT of the factor. A factor &lt; 1 must
+        /// therefore NOT shrink the bounds: a shrunken box no longer encloses the (unchanged) blade roots,
+        /// so URP's single frustum test over the whole indirect draw culls the ENTIRE tile the moment the
+        /// undersized box leaves the frustum while blades are still on-screen — the "whole tile flickers
+        /// on/off as the camera moves" bug. Flooring at 1 keeps the full footprint for factor ≤ 1 and only
+        /// grows (conservatively, for wider/taller scaled blades) for factor &gt; 1.
+        /// </remarks>
         internal static Bounds ScaleBoundsExtents(Bounds b, float factor)
         {
-            return new Bounds(b.center, b.size * factor);
+            return new Bounds(b.center, b.size * Mathf.Max(1f, factor));
         }
 
         /// <summary>

@@ -66,6 +66,23 @@ namespace WorldPainter.Tests
             Assert.AreEqual(b.size,    scaled.size,    "size unchanged at factor 1");
         }
 
+        // ── 3b. Bounds floor — factor < 1 must NOT shrink the render footprint ──
+        // Regression: _ScaleFactor scales blade SIZE, not blade ROOT positions, so the per-tile
+        // RenderMeshIndirect worldBounds must never drop below the base footprint. A shrunken box
+        // makes URP frustum-cull the WHOLE indirect draw (whole-tile flicker) once it leaves the
+        // frustum while blades are still visible. ScaleBoundsExtents therefore floors the factor at 1.
+
+        [Test]
+        public void ScaleBoundsExtents_FactorBelow1_DoesNotShrink()
+        {
+            var b      = new Bounds(new Vector3(5f, 0f, -2f), new Vector3(10f, 4f, 6f));
+            var scaled = GrassGpuEngine.ScaleBoundsExtents(b, 0.6f);
+
+            Assert.AreEqual(b.center,  scaled.center,  "center unchanged for factor < 1");
+            Assert.AreEqual(b.extents, scaled.extents, "extents must NOT shrink for factor < 1 (footprint floor)");
+            Assert.AreEqual(b.size,    scaled.size,    "size must NOT shrink for factor < 1 (footprint floor)");
+        }
+
         // ── 4. Margin lockstep (pure) — bladeCullMargin = base × factor ──────
         // Mirrors the engine formula: this.bladeCullMargin = this.baseBladeCullMargin * factor.
         // Tested through pure arithmetic because constructing a GrassGpuEngine requires a GPU device.
