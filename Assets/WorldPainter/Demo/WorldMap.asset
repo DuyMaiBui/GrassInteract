@@ -255,6 +255,7 @@ MonoBehaviour:
   propGroundSnap: 1
   propAlignToNormal: 0
   authoredInstances: {fileID: -2258378096510321762}
+  scaleFactor: 1
   overrideScaleRange: 0
   scaleRangeOverride: {x: 1, y: 1}
   generateColliders: 1
@@ -585,9 +586,10 @@ MonoBehaviour:
       m_Bits: 4294967295
   fieldBounds: {x: 100, y: 100}
   scaleRange: {x: 5, y: 6}
+  scaleFactor: 0.6
   seed: 0
   slopeRange: {x: 0, y: 90}
-  targetDensityPerSqM: 3
+  targetDensityPerSqM: 5
   rotationOffsetEuler: {x: 0, y: 0, z: 0}
   randomPitchRange: {x: 0, y: 0}
   randomRollRange: {x: 0, y: 0}
