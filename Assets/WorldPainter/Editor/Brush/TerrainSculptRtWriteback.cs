@@ -103,7 +103,7 @@ namespace WorldPainter.Editor
             {
                 if (request.hasError)
                 {
-                    Debug.LogError("[TerrainSculptRtWriteback] AsyncGPUReadback error on height RT " +
+                    WpLog.Error("[TerrainSculptRtWriteback] AsyncGPUReadback error on height RT " +
                         $"for tile {tile.tileCoord}.");
                     return;
                 }

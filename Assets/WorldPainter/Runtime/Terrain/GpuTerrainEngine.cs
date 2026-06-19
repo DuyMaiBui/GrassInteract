@@ -218,7 +218,7 @@ namespace WorldPainter
             this.patchMesh = TerrainPatchMesh.GetOrCreate();
 
             if (this.patchMesh.GetIndexCount(0) == 0)
-                Debug.LogError("[GpuTerrainEngine] Patch mesh has 0 indices — draw will render nothing.");
+                WpLog.Error("[GpuTerrainEngine] Patch mesh has 0 indices — draw will render nothing.");
 
             // Cull buffers
             int maxNodes = 512; // safe upper bound for one tile

@@ -35,7 +35,7 @@ namespace WorldPainter.Editor
         {
             if (!File.Exists(rawFilePath))
             {
-                Debug.LogError($"[TerrainTileImporter] File not found: {rawFilePath}");
+                WpLog.Error($"[TerrainTileImporter] File not found: {rawFilePath}");
                 return null;
             }
 
@@ -43,7 +43,7 @@ namespace WorldPainter.Editor
             byte[] rawBytes = File.ReadAllBytes(rawFilePath);
             if (rawBytes.Length != expectedBytes)
             {
-                Debug.LogError($"[TerrainTileImporter] File size mismatch: expected {expectedBytes} bytes " +
+                WpLog.Error($"[TerrainTileImporter] File size mismatch: expected {expectedBytes} bytes " +
                                $"for {heightRes}² R16, got {rawBytes.Length}. Path: {rawFilePath}");
                 return null;
             }

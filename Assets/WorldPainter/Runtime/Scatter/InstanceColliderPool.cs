@@ -94,7 +94,7 @@ namespace WorldPainter
             {
                 if (!this.warnedAtCap)
                 {
-                    Debug.LogWarning(
+                    WpLog.Warning(
                         $"[InstanceColliderPool] Pool at capacity ({this.hardCap}). " +
                         "Some instances will not have colliders. Raise PoolCap on the layer.");
                     this.warnedAtCap = true;

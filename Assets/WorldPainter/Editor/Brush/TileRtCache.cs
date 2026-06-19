@@ -42,7 +42,7 @@ namespace WorldPainter.Editor
 
             if (this.heightRTs.Count >= MAX_ENTRIES)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[TileRtCache] Cap ({MAX_ENTRIES}) reached; skipping coord {coord}.");
                 return false;
             }

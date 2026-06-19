@@ -151,7 +151,7 @@ namespace WorldPainter
             foreach (var p in painters)
                 if (p.isActiveAndEnabled && p.ScatterActiveTierName == "GPU") { anyGpu = true; break; }
             if (!anyGpu)
-                Debug.LogWarning($"[{nameof(GrassTrailInteractor)}] '{this.name}' is active but no " +
+                WpLog.Warning($"[{nameof(GrassTrailInteractor)}] '{this.name}' is active but no " +
                     "GPU-tier WorldPainter exists. GrassTrailInteractor is GPU-only - " +
                     "this trail will have no visual effect.", this);
         }

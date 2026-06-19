@@ -113,7 +113,7 @@ namespace WorldPainter
                     // No ground / terrain hole — fall back to field-plane Y, warn once.
                     if (!warnedNoHit)
                     {
-                        Debug.LogWarning($"[{nameof(GrassScatter)}] No ground hit under a blade; " +
+                        WpLog.Warning($"[{nameof(GrassScatter)}] No ground hit under a blade; " +
                             $"falling back to field-plane Y = {origin.y}. For raycast: ensure the ground " +
                             "has a collider on the ScatterLayer's GroundSnapMask. For terrain: candidate may " +
                             "be in a hole or outside the terrain bounds.");

@@ -115,7 +115,7 @@ namespace WorldPainter
                 {
                     if (!this.warnedOverflow)
                     {
-                        Debug.LogWarning(
+                        WpLog.Warning(
                             $"[GrassInteractorBuffer] Active interactor count exceeds MAX_INTERACTORS ({MAX_INTERACTORS}). " +
                             "Overflow entries will be dropped. Reduce the number of active GrassInteractor components.");
                         this.warnedOverflow = true;

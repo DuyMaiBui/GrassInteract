@@ -284,7 +284,7 @@ namespace WorldPainter
             Mesh[] meshes = render.LodMeshes;
             if (meshes.Length == 0)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[GrassGpuEngine] Layer '{layer.name}' has no LOD meshes (lods array is empty)." +
                     " No grass will render. Populate the layer's lods field.");
             }
@@ -1013,7 +1013,7 @@ namespace WorldPainter
                 // FIX 5: validate index count — a mesh with 0 indices causes a silent no-op draw.
                 if (mesh != null && mesh.GetIndexCount(0) == 0)
                 {
-                    Debug.LogError($"[GrassGpuEngine] LOD{lodIndex} mesh '{mesh.name}' has 0 indices — " +
+                    WpLog.Error($"[GrassGpuEngine] LOD{lodIndex} mesh '{mesh.name}' has 0 indices — " +
                                    "its indirect draw will render nothing (mesh not readable / empty submesh).");
                 }
 

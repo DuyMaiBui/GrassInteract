@@ -205,7 +205,7 @@ namespace WorldPainter
             {
                 if (!this.warnedNoAsyncReadback)
                 {
-                    Debug.LogWarning(
+                    WpLog.Warning(
                         "[InstanceVisibilityColliderDriver] AsyncGPUReadback is not supported on this " +
                         "platform. Per-instance collider culling will be skipped.");
                     this.warnedNoAsyncReadback = true;
@@ -314,7 +314,7 @@ namespace WorldPainter
                 {
                     if (!this.warnedOverCap)
                     {
-                        Debug.LogWarning(
+                        WpLog.Warning(
                             $"[InstanceVisibilityColliderDriver] Desired collider count exceeds pool cap " +
                             $"({this.poolCap}). Excess instances will not get colliders. " +
                             "Raise PoolCap to remove this limit.");

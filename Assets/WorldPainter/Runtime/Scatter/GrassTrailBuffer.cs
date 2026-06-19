@@ -171,7 +171,7 @@ namespace WorldPainter
 
             if (interactors.Count > 0 && segCount == MAX_TRAIL_SEGMENTS && !this.warnedOverflow)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[GrassTrailBuffer] >{MAX_TRAIL_SEGMENTS} trail segments active - dropping overflow.");
                 this.warnedOverflow = true;
             }

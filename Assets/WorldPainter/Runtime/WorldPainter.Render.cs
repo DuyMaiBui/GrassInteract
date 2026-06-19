@@ -201,7 +201,7 @@ namespace WorldPainter
 
             this.IsBuilt = this.engines.Count > 0;
             if (this.IsBuilt)
-                Debug.Log($"[WorldPainter] Built {this.engines.Count} tile(s).");
+                WpLog.Log($"[WorldPainter] Built {this.engines.Count} tile(s).");
         }
 
         private bool ResolveInfra()
@@ -216,7 +216,7 @@ namespace WorldPainter
 #endif
             if (this.cullCompute == null || this.patchMaterial == null)
             {
-                Debug.LogWarning("[WorldPainter] cullCompute or patchMaterial unresolved — " +
+                WpLog.Warning("[WorldPainter] cullCompute or patchMaterial unresolved — " +
                     "assign manually or ensure assets exist at expected paths.");
                 return false;
             }
@@ -233,14 +233,14 @@ namespace WorldPainter
 
             if (!tile.IsHeightValid)
             {
-                Debug.LogWarning($"[WorldPainter] Tile '{tile.name}' ({tile.tileCoord}) " +
+                WpLog.Warning($"[WorldPainter] Tile '{tile.name}' ({tile.tileCoord}) " +
                     "heightData invalid — skipping.");
                 return;
             }
 
             if (this.coordToIndex.ContainsKey(tile.tileCoord))
             {
-                Debug.LogError($"[WorldPainter] Duplicate tileCoord {tile.tileCoord} " +
+                WpLog.Error($"[WorldPainter] Duplicate tileCoord {tile.tileCoord} " +
                     "in WorldMapAsset — skipping to avoid coord map collision.");
                 return;
             }
@@ -254,10 +254,10 @@ namespace WorldPainter
             engine.BindRootSpace(this.RootBinder);
 
             bool ok = engine.SelfTest(out string msg);
-            Debug.Log($"[WorldPainter] Tile {tile.tileCoord}: {msg}");
+            WpLog.Log($"[WorldPainter] Tile {tile.tileCoord}: {msg}");
             if (!ok)
             {
-                Debug.LogError($"[WorldPainter] Tile {tile.tileCoord} SelfTest failed — skipped.");
+                WpLog.Error($"[WorldPainter] Tile {tile.tileCoord} SelfTest failed — skipped.");
                 engine.Dispose();
                 gpu.Dispose();
                 return;
@@ -280,14 +280,14 @@ namespace WorldPainter
 
             if (!tile.IsHeightValid)
             {
-                Debug.LogWarning($"[WorldPainter] Tile[{tileIndex}] '{tile.name}' " +
+                WpLog.Warning($"[WorldPainter] Tile[{tileIndex}] '{tile.name}' " +
                     "heightData invalid — skipping.");
                 return;
             }
 
             if (this.coordToIndex.ContainsKey(tile.tileCoord))
             {
-                Debug.LogError($"[WorldPainter] Duplicate tileCoord {tile.tileCoord} " +
+                WpLog.Error($"[WorldPainter] Duplicate tileCoord {tile.tileCoord} " +
                     $"on Tile[{tileIndex}] — skipping to avoid coord map collision.");
                 return;
             }
@@ -301,10 +301,10 @@ namespace WorldPainter
             engine.BindRootSpace(this.RootBinder);
 
             bool ok = engine.SelfTest(out string msg);
-            Debug.Log($"[WorldPainter] Tile[{tileIndex}] {tile.tileCoord}: {msg}");
+            WpLog.Log($"[WorldPainter] Tile[{tileIndex}] {tile.tileCoord}: {msg}");
             if (!ok)
             {
-                Debug.LogError($"[WorldPainter] Tile[{tileIndex}] SelfTest failed — skipped.");
+                WpLog.Error($"[WorldPainter] Tile[{tileIndex}] SelfTest failed — skipped.");
                 engine.Dispose();
                 gpu.Dispose();
                 return;

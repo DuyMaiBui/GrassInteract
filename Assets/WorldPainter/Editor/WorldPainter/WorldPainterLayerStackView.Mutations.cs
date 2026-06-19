@@ -120,7 +120,7 @@ namespace WorldPainter.Editor
         {
             if (map == null || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(map)))
             {
-                Debug.LogError(
+                WpLog.Error(
                     $"[WorldPainter] Cannot add a {layerKind} layer: assign and save a World Map first " +
                     "(use the 'Create World Map' button). Surface layers are stored as sub-assets " +
                     "of the map.");

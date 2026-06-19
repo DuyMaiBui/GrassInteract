@@ -373,7 +373,7 @@ namespace WorldPainter
                 this.rangeBuf.SetData(rangeOut);
             }
 
-            Debug.Log($"[ChunkedBladeBuffer] Baked: TotalBlades={totalBlades}, " +
+            WpLog.Log($"[ChunkedBladeBuffer] Baked: TotalBlades={totalBlades}, " +
                       $"Grid={gridX}×{gridZ} ({totalChunks} chunks), CellSize={cellSize}m, " +
                       $"ScaleRangeMax={maxScale:F3} (encode range [0,{this.scaleMax2:F3}])");
         }

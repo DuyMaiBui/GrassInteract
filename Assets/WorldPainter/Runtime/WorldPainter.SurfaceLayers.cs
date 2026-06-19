@@ -403,7 +403,7 @@ namespace WorldPainter
         {
             if (this.scatterCullCompute == null)
             {
-                Debug.LogError(
+                WpLog.Error(
                     $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
                     "scatterCullCompute is not assigned. Skipping.", this);
                 return;
@@ -412,7 +412,7 @@ namespace WorldPainter
             Mesh[] propMeshes = prop.Render.LodMeshes;
             if (propMeshes.Length == 0 || propMeshes[0] == null)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
                     "LOD 0 mesh is missing — assign one via the Setup panel (🔧 on the layer row) " +
                     "before painting. No props will render until then.", this);
@@ -422,7 +422,7 @@ namespace WorldPainter
             Material? mat = prop.Render.Material;
             if (mat == null)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': " +
                     "Material is not assigned — no props will render.", this);
                 return;
@@ -453,7 +453,7 @@ namespace WorldPainter
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}' engine threw " +
                     $"{ex.GetType().Name}: {ex.Message}", this);
                 DestroyPropAdapter(adapter);

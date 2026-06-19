@@ -121,7 +121,7 @@ namespace WorldPainter
                 TerrainTileAsset? asset = this.ResolveManifestEntry(entry.assetPath);
                 if (asset == null)
                 {
-                    Debug.LogWarning($"[TerrainStreamingManager] Manifest entry {entry.coord} " +
+                    WpLog.Warning($"[TerrainStreamingManager] Manifest entry {entry.coord} " +
                         $"points to '{entry.assetPath}' but asset could not be resolved. " +
                         "Pre-load baked tiles via Addressables in player builds.");
                     continue;
@@ -131,7 +131,7 @@ namespace WorldPainter
                 registered++;
             }
 
-            Debug.Log($"[TerrainStreamingManager] Registered {registered} tile(s) from manifest.");
+            WpLog.Log($"[TerrainStreamingManager] Registered {registered} tile(s) from manifest.");
         }
 
         /// <summary>
@@ -214,7 +214,7 @@ namespace WorldPainter
 
             if (this.residencySet.Count >= TerrainStreamingConfig.MAX_RESIDENT_TILES)
             {
-                Debug.LogWarning($"[TerrainStreamingManager] MAX_RESIDENT_TILES " +
+                WpLog.Warning($"[TerrainStreamingManager] MAX_RESIDENT_TILES " +
                     $"({TerrainStreamingConfig.MAX_RESIDENT_TILES}) reached; skipping tile {coord}.");
                 return;
             }

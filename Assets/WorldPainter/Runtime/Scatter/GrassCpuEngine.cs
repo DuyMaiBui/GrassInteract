@@ -63,7 +63,7 @@ namespace WorldPainter
         {
             if (this.warnedScaleFactor) return;
             this.warnedScaleFactor = true;
-            Debug.LogWarning("[GrassCpuEngine] scaleFactor is a GPU render feature; the CPU fallback ignores it.");
+            WpLog.Warning("[GrassCpuEngine] scaleFactor is a GPU render feature; the CPU fallback ignores it.");
         }
 
         /// <inheritdoc/>

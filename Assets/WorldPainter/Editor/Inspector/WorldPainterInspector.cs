@@ -420,7 +420,7 @@ namespace WorldPainter.Editor
             }
             else
             {
-                Debug.LogWarning($"[WorldPainter] USS not found: {path}");
+                WpLog.Warning($"[WorldPainter] USS not found: {path}");
             }
         }
     }

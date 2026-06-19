@@ -228,7 +228,7 @@ namespace WorldPainter
             {
                 this.tiltSim = new InstanceTiltSimulator(this.instanceBuffer, instLayer);
                 if (instLayer.Tilt.ColliderFollowsTilt)
-                    Debug.LogWarning(
+                    WpLog.Warning(
                         $"[InstancedPropEngine] Layer '{layer.name}': colliderFollowsTilt=true is not yet " +
                         "wired — colliders stay at their base orientation.");
             }
@@ -237,7 +237,7 @@ namespace WorldPainter
 
             Mesh[] meshes = layer.Render.LodMeshes;
             if (meshes.Length == 0)
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[InstancedPropEngine] Layer '{layer.name}' has no LOD meshes. No props will render.");
 
             this.mesh0 = meshes.Length > 0 ? meshes[0] : null;
@@ -684,7 +684,7 @@ namespace WorldPainter
                 bool wouldWant = instLayer.GenerateColliders || rec.generateCollider;
                 if (wouldWant && colMesh == null)
                 {
-                    Debug.LogWarning(
+                    WpLog.Warning(
                         $"[InstancedPropEngine] Record {i}: collider requested but no collider mesh " +
                         "available (no per-record override, no layer default, no lod0 mesh) — skipping.");
                 }
@@ -713,7 +713,7 @@ namespace WorldPainter
             // InstancePlacement emits exactly one instance per authored record, so this always holds for props.
             if (this.instanceBuffer!.TotalInstances != count)
             {
-                Debug.LogError(
+                WpLog.Error(
                     $"[InstancedPropEngine] 1:1 prop invariant violated: " +
                     $"instanceBuffer.TotalInstances={this.instanceBuffer.TotalInstances} != records.Length={count}. " +
                     "Collider culling disabled for this layer.");
@@ -723,7 +723,7 @@ namespace WorldPainter
             int[]? sortedToAuthored = this.instanceBuffer.SortedToAuthored;
             if (sortedToAuthored == null)
             {
-                Debug.LogError(
+                WpLog.Error(
                     "[InstancedPropEngine] sortedToAuthored is null after bake. Collider culling disabled.");
                 return;
             }
@@ -736,7 +736,7 @@ namespace WorldPainter
                     positions, rotations, scales, meshes, convexFlags, wantsCollider, materials,
                     instLayer.PoolCap,
                     instLayer.MaxCollidersPerFrame);
-                Debug.Log(
+                WpLog.Log(
                     $"[InstancedPropEngine] GPU-readback collider driver: pool cap={instLayer.PoolCap}, " +
                     $"records={count}, sortedToAuthored.Length={sortedToAuthored.Length}.");
             }
@@ -750,7 +750,7 @@ namespace WorldPainter
                         i, positions[i], rotations[i], scales[i], meshes[i], convexFlags[i], materials[i]);
                     if (mc != null) acquired++;
                 }
-                Debug.Log(
+                WpLog.Log(
                     $"[InstancedPropEngine] Collider runtime (no cull): acquired {acquired}/{count} colliders.");
             }
         }
@@ -1088,7 +1088,7 @@ namespace WorldPainter
             {
                 if (buf == null) continue;
                 if (mesh != null && mesh.GetIndexCount(0) == 0)
-                    Debug.LogError($"[InstancedPropEngine] LOD{idx} mesh '{mesh.name}' has 0 indices.");
+                    WpLog.Error($"[InstancedPropEngine] LOD{idx} mesh '{mesh.name}' has 0 indices.");
 
                 var args = new GraphicsBuffer.IndirectDrawIndexedArgs[1];
                 args[0].indexCountPerInstance = (mesh != null) ? mesh.GetIndexCount(0) : 0;

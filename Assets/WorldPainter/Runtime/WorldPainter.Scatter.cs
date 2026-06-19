@@ -138,7 +138,7 @@ namespace WorldPainter
             {
                 case ScatterTierMode.ForceCpu:
                     this.ScatterActiveTierName = "CPU";
-                    Debug.Log(
+                    WpLog.Log(
                         $"[WorldPainter.Scatter] Layer [{layerIndex}] ForceCpu override → CPU tier.",
                         this);
                     return new GrassCpuEngine();
@@ -146,7 +146,7 @@ namespace WorldPainter
                 case ScatterTierMode.ForceGpu:
                     if (this.scatterCullCompute == null || this.scatterIndirectMat == null)
                     {
-                        Debug.LogError(
+                        WpLog.Error(
                             $"[WorldPainter.Scatter] Layer [{layerIndex}] ForceGpu requested but " +
                             "scatterCullCompute or scatterIndirectMat is not assigned — falling back to CPU.",
                             this);
@@ -160,7 +160,7 @@ namespace WorldPainter
 
                 case ScatterTierMode.Auto:
                 default:
-                    Debug.Log(
+                    WpLog.Log(
                         $"[WorldPainter.Scatter] Layer [{layerIndex}] Probe: {probeReason}", this);
                     if (!gpuCapable ||
                         this.scatterCullCompute == null ||
@@ -169,7 +169,7 @@ namespace WorldPainter
                         if (gpuCapable &&
                             (this.scatterCullCompute == null || this.scatterIndirectMat == null))
                         {
-                            Debug.LogWarning(
+                            WpLog.Warning(
                                 $"[WorldPainter.Scatter] Layer [{layerIndex}] Auto: device supports GPU " +
                                 "tier but scatterCullCompute or scatterIndirectMat not assigned — CPU tier.",
                                 this);
@@ -217,7 +217,7 @@ namespace WorldPainter
 
                 if (!gpuEngine.SelfTest(out string testReason))
                 {
-                    Debug.LogWarning(
+                    WpLog.Warning(
                         $"[WorldPainter.Scatter] {source}: {testReason} → GPU self-test failed on " +
                         $"{SystemInfo.graphicsDeviceName} → CPU tier.", this);
                     gpuEngine.Dispose();
@@ -225,13 +225,13 @@ namespace WorldPainter
                     return new GrassCpuEngine();
                 }
 
-                Debug.Log($"[WorldPainter.Scatter] {source}: {testReason}", this);
+                WpLog.Log($"[WorldPainter.Scatter] {source}: {testReason}", this);
                 this.ScatterActiveTierName = "GPU";
                 return new ScatterPreBuiltEngineWrapper(gpuEngine);
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[WorldPainter.Scatter] {source}: GPU engine threw {ex.GetType().Name} on " +
                     $"{SystemInfo.graphicsDeviceName} → CPU tier.\n{ex.Message}", this);
                 this.ScatterActiveTierName = "CPU";

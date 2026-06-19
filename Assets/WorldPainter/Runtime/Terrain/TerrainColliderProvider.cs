@@ -134,7 +134,7 @@ namespace WorldPainter
                 res = (res - 1) * 2 + 1; // 33 → 65 → 129 → 257 → … → 4097
 
             if (res != requested)
-                Debug.LogWarning($"[TerrainColliderProvider] heightfieldRes {requested} is not " +
+                WpLog.Warning($"[TerrainColliderProvider] heightfieldRes {requested} is not " +
                                  $"(2^n + 1); using {res}.");
             return res;
         }

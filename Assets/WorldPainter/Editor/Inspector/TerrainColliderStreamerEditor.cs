@@ -56,7 +56,7 @@ namespace WorldPainter.Editor
                 if (GUILayout.Button("Generate Colliders (All Tiles)"))
                 {
                     int n = streamer.GenerateAllColliders();
-                    Debug.Log($"[TerrainColliderStreamer] Cooked {n} tile collider(s); " +
+                    WpLog.Log($"[TerrainColliderStreamer] Cooked {n} tile collider(s); " +
                               $"{streamer.LiveCount} live.");
                 }
                 if (GUILayout.Button("Clear Colliders"))

@@ -91,7 +91,7 @@ namespace WorldPainter
                 if (lastSlabSize > 0)
                 {
                     Vector3 lastPos = positionSlabs[lastSlabIdx][lastSlabSize - 1];
-                    UnityEngine.Debug.Log(
+                    WpLog.Log(
                         $"[InstancePlacement.Build] totalRecords={total} " +
                         $"lastPos={lastPos:F4} maxScale={maxScale:F4} " +
                         $"worldBounds.center={worldBounds.center:F4} worldBounds.size={worldBounds.size:F4}");

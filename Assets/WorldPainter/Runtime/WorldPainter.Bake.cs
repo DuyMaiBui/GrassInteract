@@ -98,7 +98,7 @@ namespace WorldPainter
             if (this.bakeManifest == null)   return;
             if (this.streamingManager == null)
             {
-                Debug.LogWarning("[WorldPainter] BakeManifest assigned but no " +
+                WpLog.Warning("[WorldPainter] BakeManifest assigned but no " +
                     "TerrainStreamingManager referenced. Assign it in the Inspector.");
                 return;
             }
@@ -106,7 +106,7 @@ namespace WorldPainter
             this.streamingManager.RegisterFromManifest(this.bakeManifest);
             this.bakeManifestRegistered = true;
 
-            Debug.Log($"[WorldPainter] Bake manifest applied: " +
+            WpLog.Log($"[WorldPainter] Bake manifest applied: " +
                 $"{this.bakeManifest.Count} tile(s) registered to TerrainStreamingManager.");
         }
 

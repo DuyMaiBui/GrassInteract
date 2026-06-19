@@ -56,7 +56,7 @@ namespace WorldPainter
             if (!this.hasLods)
             {
                 // 0-LOD graceful: log once at build, skip draws until migrated.
-                Debug.LogWarning(
+                WpLog.Warning(
                     $"[GrassRenderer] Layer '{layer.name}' has no LOD meshes in its lods array." +
                     " Assign blade meshes to the layer's lods field. No grass will render until lods is populated.");
             }

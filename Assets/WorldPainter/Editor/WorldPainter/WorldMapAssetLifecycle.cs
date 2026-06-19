@@ -809,7 +809,7 @@ namespace WorldPainter.Editor
             var shader = Shader.Find("WorldPainter/ScatterInstanced");
             if (shader == null)
             {
-                Debug.LogWarning("[WorldPainter] WorldPainter/ScatterInstanced shader missing — " +
+                WpLog.Warning("[WorldPainter] WorldPainter/ScatterInstanced shader missing — " +
                                  "PropLayer material left unassigned. Assign one manually.");
                 return null;
             }
@@ -966,7 +966,7 @@ namespace WorldPainter.Editor
 
             {
 
-                Debug.LogError(
+                WpLog.Error(
 
                     $"[WorldPainter] Grass shader '{INSTANCED_GRASS_SHADER}' not found — new layer " +
 

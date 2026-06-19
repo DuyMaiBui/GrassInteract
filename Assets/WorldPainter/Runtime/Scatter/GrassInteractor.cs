@@ -68,17 +68,17 @@ namespace WorldPainter
             this.hasValidated = true;
 
             if (!HasEnabledConsumer())
-                Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' is active but no enabled " +
+                WpLog.Warning($"[{nameof(GrassInteractor)}] '{this.name}' is active but no enabled " +
                     $"{nameof(WorldPainter)} exists in the scene - nothing " +
                     "reads this interactor, so no grass leans. Add a WorldPainter " +
                     "with at least one Grass-kind scatter layer.", this);
 
             if (this.Data.WorldRadius <= 0f)
-                Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has worldRadius=" +
+                WpLog.Warning($"[{nameof(GrassInteractor)}] '{this.name}' has worldRadius=" +
                     $"{this.Data.WorldRadius:0.###} (<= 0) - a zero-radius footprint leans nothing. Set it > 0.", this);
 
             if (this.Data.Strength <= 0f)
-                Debug.LogWarning($"[{nameof(GrassInteractor)}] '{this.name}' has strength=" +
+                WpLog.Warning($"[{nameof(GrassInteractor)}] '{this.name}' has strength=" +
                     $"{this.Data.Strength:0.###} (<= 0) - zero strength leaves no lean. Set it > 0.", this);
         }
 
