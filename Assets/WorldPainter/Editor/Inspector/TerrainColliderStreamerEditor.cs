@@ -19,6 +19,7 @@ namespace WorldPainter.Editor
             SerializedProperty gen   = this.serializedObject.FindProperty("generateColliders");
             SerializedProperty band  = this.serializedObject.FindProperty("colliderLodBand");
             SerializedProperty res   = this.serializedObject.FindProperty("heightfieldRes");
+            SerializedProperty layer = this.serializedObject.FindProperty("colliderLayer");
             SerializedProperty debug = this.serializedObject.FindProperty("debugShowColliders");
 
             EditorGUILayout.LabelField("Collision", EditorStyles.boldLabel);
@@ -28,6 +29,12 @@ namespace WorldPainter.Editor
             {
                 EditorGUILayout.PropertyField(band);
                 EditorGUILayout.PropertyField(res);
+
+                // Native single-layer dropdown — the component owns a hand-written editor, so an Odin
+                // attribute would not render here; LayerField gives the dropdown with no vendor coupling.
+                var layerLabel = new GUIContent("Collider Layer",
+                    "Unity layer assigned to cooked terrain-collider hosts (physics layer masks).");
+                layer.intValue = EditorGUILayout.LayerField(layerLabel, layer.intValue);
             }
 
             var streamer = (TerrainColliderStreamer)this.target;

@@ -65,6 +65,16 @@ namespace WorldPainter
                     this.Host.hideFlags = visible ? HideFlags.DontSave : HideFlags.HideAndDontSave;
             }
 
+            /// <summary>
+            /// Re-assign the host's Unity layer. Used by the streamer to re-stamp already-live
+            /// collider hosts when the configured collider layer changes at runtime / in the inspector.
+            /// </summary>
+            internal void SetLayer(int layer)
+            {
+                if (this.Host != null)
+                    this.Host.layer = layer;
+            }
+
             private static void Destroy(Object? o)
             {
                 if (o == null) return;
@@ -81,9 +91,11 @@ namespace WorldPainter
         /// Returns null if the tile's height data is invalid.
         /// <paramref name="hfRes"/> must be (2^n + 1) — callers should pre-validate via
         /// <see cref="NearestValidHeightfieldRes"/>.
+        /// <paramref name="layer"/> is the Unity layer assigned to the host GameObject so physics
+        /// layer masks (collision matrix / raycast masks) can include or exclude cooked terrain.
         /// </summary>
         public static Handle? Build(TerrainTileAsset tile, Transform parent, int hfRes,
-                                    bool debugVisible = false)
+                                    bool debugVisible = false, int layer = 0)
         {
             if (tile == null || !tile.IsHeightValid)
                 return null;
@@ -106,6 +118,7 @@ namespace WorldPainter
             host.hideFlags = debugVisible ? HideFlags.DontSave : HideFlags.HideAndDontSave;
             host.transform.SetParent(parent, worldPositionStays: false);
             host.transform.localPosition = new Vector3(origin.x, tile.minHeight, origin.y);
+            host.layer = layer; // put cooked terrain on the configured physics layer
 
             // Attach Terrain + TerrainCollider (the cheapest heightfield collider in Unity).
             var terrain   = host.AddComponent<Terrain>();

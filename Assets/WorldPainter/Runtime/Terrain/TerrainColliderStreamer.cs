@@ -46,6 +46,12 @@ namespace WorldPainter
         [Tooltip("Heightfield collider resolution per tile edge (must be 2^n + 1; auto-rounded up if not).")]
         [SerializeField] private int heightfieldRes = DEFAULT_HEIGHTFIELD_RES;
 
+        [Tooltip("Unity layer assigned to cooked terrain-collider host GameObjects so physics layer " +
+                 "masks (collision matrix / raycast masks) can include or exclude terrain. Applied when " +
+                 "a collider is cooked and re-applied to live hosts when changed. Pick via the inspector " +
+                 "layer dropdown.")]
+        [SerializeField] private int colliderLayer; // 0 = Default layer; set in the custom editor's LayerField
+
         [Tooltip("Debug: show cooked collider hosts in the Hierarchy (selectable, still never saved). " +
                  "Off keeps them hidden. For visualizing collision geometry use Window ▸ Analysis ▸ Physics Debugger.")]
         [SerializeField] private bool debugShowColliders;
@@ -91,6 +97,14 @@ namespace WorldPainter
         private void OnDisable()
         {
             this.EvictAll();
+        }
+
+        // Inspector edits (incl. play-mode): clamp the layer into [0,31] and re-stamp any live hosts
+        // so a layer change applies to already-cooked colliders, not just future ones.
+        private void OnValidate()
+        {
+            this.colliderLayer = Mathf.Clamp(this.colliderLayer, 0, 31);
+            this.ApplyLayerToLive();
         }
 
         private void LateUpdate()
@@ -154,7 +168,7 @@ namespace WorldPainter
                 if (tile == null) continue;
 
                 var handle = TerrainColliderProvider.Build(tile, this.transform, this.heightfieldRes,
-                                                           this.debugShowColliders);
+                                                           this.debugShowColliders, this.colliderLayer);
                 if (handle != null)
                 {
                     this.live[coord] = handle;
@@ -180,6 +194,13 @@ namespace WorldPainter
                 handle.Release();
             this.live.Clear();
             this.cookQueue.Clear();
+        }
+
+        /// <summary>Re-stamp the configured collider layer onto every live host (after a layer change).</summary>
+        private void ApplyLayerToLive()
+        {
+            foreach (var handle in this.live.Values)
+                handle.SetLayer(this.colliderLayer);
         }
 
         /// <summary>
@@ -299,7 +320,7 @@ namespace WorldPainter
                 TerrainTileAsset? tile = this.ResolveTile(coord);
                 if (tile == null) continue;
                 var handle = TerrainColliderProvider.Build(tile, this.transform, this.heightfieldRes,
-                                                           this.debugShowColliders);
+                                                           this.debugShowColliders, this.colliderLayer);
                 if (handle != null)
                 {
                     this.live[coord] = handle;
@@ -307,6 +328,21 @@ namespace WorldPainter
                 }
             }
             return cooked;
+        }
+
+        /// <summary>
+        /// Unity layer for cooked terrain-collider hosts. Setting it clamps into [0,31], immediately
+        /// re-stamps every live host, and applies to all subsequently cooked colliders — the runtime
+        /// entry point for changing the collider layer mid-play.
+        /// </summary>
+        public int ColliderLayer
+        {
+            get => this.colliderLayer;
+            set
+            {
+                this.colliderLayer = Mathf.Clamp(value, 0, 31);
+                this.ApplyLayerToLive();
+            }
         }
 
         /// <summary>Evict all live colliders and clear the pending cook queue (inspector "Clear" button).</summary>
@@ -326,6 +362,7 @@ namespace WorldPainter
         internal bool GenerateCollidersForTest { get => this.generateColliders; set => this.generateColliders = value; }
         internal int  ColliderLodBandForTest   { get => this.colliderLodBand;   set => this.colliderLodBand = value; }
         internal bool DebugShowCollidersForTest { get => this.debugShowColliders; set => this.debugShowColliders = value; }
+        internal int  ColliderLayerForTest      { get => this.colliderLayer;      set => this.colliderLayer = value; }
         internal void PurgeOrphansForTest()    => this.PurgeOrphanColliders();
 #endif
     }

@@ -103,6 +103,41 @@ namespace WorldPainter.Tests
             Object.DestroyImmediate(tile);
         }
 
+        // ── Collider host layer (physics layer mask) ──────────────────────────
+
+        [Test]
+        public void Build_StampsConfiguredLayer_OnHost()
+        {
+            var tile   = MakeFlatTile(50f, 0f, 100f);
+            var parent = new GameObject("LayerStampParent").transform;
+
+            var handle = TerrainColliderProvider.Build(tile, parent, HF_RES, debugVisible: false, layer: 8);
+
+            Assert.IsNotNull(handle, "Build should cook a collider for a valid tile.");
+            Assert.AreEqual(8, handle!.Host.layer, "Host should be on the layer passed to Build.");
+
+            handle.Release();
+            Object.DestroyImmediate(parent.gameObject);
+            Object.DestroyImmediate(tile);
+        }
+
+        [Test]
+        public void Handle_SetLayer_UpdatesHostLayer()
+        {
+            var tile   = MakeFlatTile(50f, 0f, 100f);
+            var parent = new GameObject("SetLayerParent").transform;
+            var handle = TerrainColliderProvider.Build(tile, parent, HF_RES, layer: 3);
+            Assert.AreEqual(3, handle!.Host.layer, "Host should start on the cooked layer.");
+
+            handle.SetLayer(11);
+
+            Assert.AreEqual(11, handle.Host.layer, "SetLayer should re-assign the host's Unity layer.");
+
+            handle.Release();
+            Object.DestroyImmediate(parent.gameObject);
+            Object.DestroyImmediate(tile);
+        }
+
         [Test]
         public void NearestValidHeightfieldRes_RoundsUpToPow2Plus1()
         {
