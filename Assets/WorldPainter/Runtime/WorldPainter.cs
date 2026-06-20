@@ -27,10 +27,6 @@ namespace WorldPainter
     [AddComponentMenu("WorldPainter/World Painter")]
     public sealed partial class WorldPainter : MonoBehaviour
     {
-        // ── Prop layer impostor LOD (P4) ──────────────────────────────────────
-
-        private readonly List<WorldPainterImpostorLod> propImpostorLods = new();
-
         // ── LateUpdate submit scheduler ───────────────────────────────────────
 
         private void LateUpdate()
@@ -45,6 +41,11 @@ namespace WorldPainter
                 this.playScatterBuilt = true;
             }
 
+            // Skip the entire per-frame submit chain until at least one tile is resident (and during
+            // teardown / streaming gaps) — avoids the Camera.main resolve, root-binder work, and the
+            // empty submit loops when there is nothing to draw.
+            if (!this.IsResidencyReady()) return;
+
             this.SubmitTerrain(null);
             this.StepSurfaceLayers(Time.deltaTime);
             this.SubmitSurfaceLayers(null);
@@ -52,51 +53,18 @@ namespace WorldPainter
         }
 
         /// <summary>
-        /// Drives per-prop-layer impostor LOD for unified <see cref="PropLayer"/> adapters built
-        /// in <see cref="RebuildSurfaceLayers"/>.
+        /// Per-prop-layer driving hook for the unified <see cref="PropLayer"/> path.
         ///
-        /// Lazily allocates one <see cref="WorldPainterImpostorLod"/> per prop adapter and
-        /// performs per-instance XZ-planar LOD cull. Collider / tilt / indirect draws are owned
-        /// by the frozen <see cref="InstancedPropEngine.Submit"/> (fed through the adapter).
-        ///
-        /// NOTE: impostor-LOD output is diagnostic only. Full tilt interactor driving for the
-        /// unified path is deferred — <see cref="InstancedPropEngine"/> internally casts
-        /// <see cref="ScatterLayer"/> to <see cref="PropLayerScatterLayer"/> for tilt config;
-        /// the tilt branch gracefully no-ops when the cast returns null, so rendering is correct.
+        /// Currently a no-op: prop collider / tilt / indirect draws are owned by
+        /// <see cref="InstancedPropEngine.Submit"/> (fed through the adapter), so rendering is
+        /// correct without per-frame work here. The previous body computed a per-instance
+        /// impostor count that was then discarded — a per-frame <c>Camera.main</c> lookup plus an
+        /// O(instances) scan with no observable effect — and was removed. Re-add real impostor /
+        /// tilt-interactor driving here when the unified path needs it.
         /// </summary>
         private void DriveSurfaceProps()
         {
-            if (this.surfacePropAdapters == null || this.surfacePropAdapters.Count == 0) return;
-
-            Camera? cam = Camera.main;
-            if (cam == null) return;
-            Vector3 cameraPos = cam.transform.position;
-
-            // Ensure enough impostor-lod slots for the unified prop adapters.
-            while (this.propImpostorLods.Count < this.surfacePropAdapters.Count)
-                this.propImpostorLods.Add(new WorldPainterImpostorLod());
-
-            for (int i = 0; i < this.surfacePropAdapters.Count; ++i)
-            {
-                var adapter  = this.surfacePropAdapters[i];
-                var authored = adapter.AuthoredInstances;
-                if (authored == null || authored.Count == 0) continue;
-
-                int lodSlot = i;
-                var lod     = this.propImpostorLods[lodSlot];
-
-                var records = authored.GetRuntimeRecords();
-                if (records.Length == 0) continue;
-
-                // Diagnostic impostor count — same as the legacy DrivePropLayers pattern.
-                int impostorCount = 0;
-                for (int j = 0; j < records.Length; ++j)
-                {
-                    if (lod.IsImpostor(records[j].position, cameraPos))
-                        ++impostorCount;
-                }
-                _ = impostorCount; // consumed downstream by InstancedPropEngine.Submit
-            }
+            // Intentionally empty — see summary. InstancedPropEngine.Submit owns prop driving.
         }
 
         // ── Residency / visibility early-outs ─────────────────────────────────

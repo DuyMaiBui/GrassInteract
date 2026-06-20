@@ -34,24 +34,24 @@ namespace WorldPainter
     /// One self-contained WorldPainter map container. All tiles and layers are nested as
     /// sub-assets via <c>AssetDatabase.AddObjectToAsset</c> in editor-only lifecycle code.
     ///
-    /// â”€â”€ Tile keying â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    /// Tiles are keyed by signed <see cref=”Vector2Int”/> (unbounded N/E/S/W).
+    /// ── Tile keying ──────────────────────────────────────────────────────────
+    /// Tiles are keyed by signed <see cref="Vector2Int"/> (unbounded N/E/S/W).
     /// Serialized as two parallel lists (coords + tiles); dictionary rebuilt on OnEnable/
-    /// OnAfterDeserialize. Editor lifecycle (<see cref=”WorldMapAssetLifecycle”/>) is the
+    /// OnAfterDeserialize. Editor lifecycle (<see cref="WorldMapAssetLifecycle"/>) is the
     /// ONLY add/remove path.
     ///
-    /// â”€â”€ Surface layer list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    /// <see cref=”SurfaceLayers”/> holds unified <see cref=”WorldPainterLayer”/> defs
+    /// ── Surface layer list ───────────────────────────────────────────────────
+    /// <see cref="SurfaceLayers"/> holds unified <see cref="WorldPainterLayer"/> defs
     /// (SplatLayer + GrassLayer + PropLayer). Editor lifecycle is the ONLY add/remove path.
     ///
-    /// â”€â”€ TerrainLayerSet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    /// Splat texture references are NOT nested â€” they live in a referenced
-    /// <see cref=”TerrainLayerSet”/> asset (separate file).
+    /// ── TerrainLayerSet ──────────────────────────────────────────────────────
+    /// Splat texture references are NOT nested — they live in a referenced
+    /// <see cref="TerrainLayerSet"/> asset (separate file).
     /// </summary>
     [CreateAssetMenu(menuName = "WorldPainter/World Map", fileName = "WorldMap")]
     public sealed class WorldMapAsset : ScriptableObject, ISerializationCallbackReceiver
     {
-        // â”€â”€ Inline grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Inline grid ───────────────────────────────────────────────────────
 
         /// <summary>
         /// Grid dimensions for this map. Uses the <see cref="WorldGrid"/> serializable struct
@@ -63,12 +63,12 @@ namespace WorldPainter
         /// <summary>Read-only access to the grid dimensions.</summary>
         public WorldGrid Grid => this.grid;
 
-        // â”€â”€ Tile storage (serialized as parallel lists for signed Vector2Int support) â”€â”€
+        // ── Tile storage (serialized as parallel lists for signed Vector2Int support) ──
 
         [SerializeField] private List<Vector2Int> tileCoords = new();
         [SerializeField] private List<TerrainTileAsset> tileAssets = new();
 
-        /// <summary>Runtime lookup dictionary â€” rebuilt from parallel lists on enable/deserialize.</summary>
+        /// <summary>Runtime lookup dictionary — rebuilt from parallel lists on enable/deserialize.</summary>
         [NonSerialized]
         private Dictionary<Vector2Int, TerrainTileAsset> tileDict = new();
 
@@ -78,7 +78,7 @@ namespace WorldPainter
                  "legacy 'layers' list; iterated by WorldPainter.SurfaceLayers, NOT the frozen RebuildScatter.")]
         [SerializeField] private List<WorldPainterLayer> surfaceLayers = new();
 
-        // â”€â”€ Splat texture set (referenced, not nested) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Splat texture set (referenced, not nested) ────────────────────────
 
         // (Phase 3 cleanup — legacy splatSet field removed. The TerrainPalette below replaces it.)
 
@@ -117,9 +117,9 @@ namespace WorldPainter
         /// <summary>Number of RGBA32 alphamap textures a tile needs to cover the current palette.</summary>
         public int AlphamapCountForPalette => Mathf.CeilToInt(this.terrainPalette.Count / 4f);
 
-        // â”€â”€ ISerializationCallbackReceiver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── ISerializationCallbackReceiver ────────────────────────────────────
 
-        /// <summary>Called by Unity before serialization. Dict â†’ parallel lists.</summary>
+        /// <summary>Called by Unity before serialization. Dict → parallel lists.</summary>
         public void OnBeforeSerialize()
         {
             // Lists are the canonical serialized form; no sync needed from dict on serialize
@@ -137,7 +137,7 @@ namespace WorldPainter
             this.RebuildDict();
         }
 
-        // â”€â”€ Tile lookup API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Tile lookup API ───────────────────────────────────────────────────
 
         /// <summary>Returns the tile at <paramref name="coord"/>, or null if absent.</summary>
         public TerrainTileAsset? GetTile(Vector2Int coord)
@@ -161,12 +161,12 @@ namespace WorldPainter
         /// <summary>Total number of tiles currently in this map.</summary>
         public int TileCount => this.tileCoords.Count;
 
-        // â”€â”€ Layer API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Layer API ─────────────────────────────────────────────────────────
 
         /// <summary>Read-only list of unified surface layers (splat + grass + prop).</summary>
         public IReadOnlyList<WorldPainterLayer> SurfaceLayers => this.surfaceLayers;
 
-        // â”€â”€ Neighbor query (used by P4 ghost quads) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Neighbor query (used by P4 ghost quads) ───────────────────────────
 
         private static readonly Vector2Int[] NEIGHBORS = {
             new Vector2Int(1,  0),   // East
@@ -200,7 +200,7 @@ namespace WorldPainter
             return open.Count > 0;
         }
 
-        // â”€â”€ Internal mutation API (called ONLY by WorldMapAssetLifecycle) â”€â”€â”€â”€â”€
+        // ── Internal mutation API (called ONLY by WorldMapAssetLifecycle) ─────
 
         /// <summary>
         /// Registers a newly created tile sub-asset. Called by
@@ -255,7 +255,7 @@ namespace WorldPainter
 
         // (Phase 3 cleanup — SetSplatSet removed. WorldMap.TerrainPalette is the new SSOT.)
 
-        //â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //── Private helpers ───────────────────────────────────────────────────
 
         private void RebuildDict()
         {

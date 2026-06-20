@@ -16,9 +16,11 @@ namespace WorldPainter
     /// <item>Development build: logs.</item>
     /// <item>Production / release build: nothing — calls are removed.</item>
     /// </list>
-    /// Because this strips warnings and errors too, do not route genuine
-    /// release-time diagnostics (crash reporting, analytics) through here — call
-    /// <see cref="Debug"/> directly for those.
+    /// <para>
+    /// <b>Log</b> and <b>Warning</b> are stripped from release players (verbose/dev only).
+    /// <b>Error</b> is NOT stripped — genuine release-time failures must surface in shipping
+    /// players (crash triage, field bug reports), so error calls compile into every build.
+    /// </para>
     /// </remarks>
     public static class WpLog
     {
@@ -38,12 +40,9 @@ namespace WorldPainter
         [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
         public static void Warning(object message, Object context) => Debug.LogWarning(message, context);
 
-        [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        // NOT [Conditional]: errors must survive into release players for field diagnostics.
         public static void Error(object message) => Debug.LogError(message);
 
-        [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
         public static void Error(object message, Object context) => Debug.LogError(message, context);
     }
 }
