@@ -117,7 +117,11 @@ Shader "WorldPainter/ScatterInstanced"
             // Phase 3: shadow feature toggles (shader_feature_local, all default OFF).
             #pragma shader_feature_local _RECEIVE_SHADOWS
             #pragma shader_feature_local _SHADOW_TINT
-            #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            // multi_compile so the alpha-clip-shadows variant ALWAYS ships in player builds — the
+            // engine enables this keyword at runtime by mirroring the prop material, and a
+            // shader_feature would be stripped (no static material uses it) → no effect on device.
+            // Mirrors GrassInteractIndirect's _ALPHACLIP fix.
+            #pragma multi_compile_local _ _ALPHACLIP_SHADOWS
             // Phase 3: URP shadow sampling keywords (multi_compile so shadow variants are always in build).
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
@@ -610,7 +614,8 @@ Shader "WorldPainter/ScatterInstanced"
             #pragma multi_compile _ _CASTING_PUNCTUAL_LIGHT_SHADOW
             #pragma multi_compile_local _ SCATTER_ALIGN_TO_NORMAL
             // Phase 3: alpha-clip shadow caster. OFF = solid caster (Phase 2 behavior unchanged).
-            #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            // multi_compile so the variant ships in player builds (the keyword is enabled at runtime).
+            #pragma multi_compile_local _ _ALPHACLIP_SHADOWS
             #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"

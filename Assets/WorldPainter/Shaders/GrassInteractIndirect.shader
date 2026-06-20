@@ -70,7 +70,11 @@ Shader "WorldPainter/IndirectGrass"
             "Queue"          = "Geometry"
         }
         LOD 100
-        Cull Off
+        // Cull Back (was Off): grass overdraw is the mobile (TBDR) fillrate bottleneck; rendering
+        // single-sided halves the grass forward-fragment count. LOD0/LOD1 blades become front-facing
+        // only; the LOD2 billboard always faces the camera so it is unaffected. Flip back to Off if
+        // back-side gaps are visible when the camera moves through/behind the field.
+        Cull Back
 
         // ─────────────────────────────────────────────────────────────────────
         // Shared HLSL include block (inline — no .hlsl file dependency)
@@ -105,8 +109,13 @@ Shader "WorldPainter/IndirectGrass"
             // _ALPHACLIP_SHADOWS: applies in ShadowCaster (separate so shadows can be opt-in).
             #pragma shader_feature_local _RECEIVE_SHADOWS
             #pragma shader_feature_local _SHADOW_TINT
-            #pragma shader_feature_local _ALPHACLIP
-            #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            // _ALPHACLIP is multi_compile (NOT shader_feature) so the alpha-cutout variant ALWAYS
+            // ships in player builds. The GPU tier enables it at runtime by mirroring the layer
+            // material's keyword; as a shader_feature it was stripped from the build (no static
+            // material statically uses IndirectGrass+_ALPHACLIP) → solid opaque grass on device
+            // while the editor looked correct. Essential for transparent grass cards.
+            #pragma multi_compile_local _ _ALPHACLIP
+            #pragma multi_compile_local _ _ALPHACLIP_SHADOWS
             // Phase 3: URP shadow sampling keywords (multi_compile so shadow variants are always in build).
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
@@ -626,7 +635,7 @@ Shader "WorldPainter/IndirectGrass"
             ZWrite On
             ZTest LEqual
             ColorMask 0
-            Cull Off
+            Cull Back
 
             HLSLPROGRAM
             #pragma target 4.5
@@ -636,7 +645,8 @@ Shader "WorldPainter/IndirectGrass"
             #pragma multi_compile_local _ _LOD2_BILLBOARD
             #pragma multi_compile_local _ _WIND_PERLIN
             // Phase 3: alpha-clip shadow caster. OFF = solid-quad caster (Phase 2 behavior unchanged).
-            #pragma shader_feature_local _ALPHACLIP_SHADOWS
+            // multi_compile so the variant ships in player builds (the keyword is enabled at runtime).
+            #pragma multi_compile_local _ _ALPHACLIP_SHADOWS
             #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -856,7 +866,7 @@ Shader "WorldPainter/IndirectGrass"
 
             ZWrite On
             ColorMask R
-            Cull Off
+            Cull Back
 
             HLSLPROGRAM
             #pragma target 4.5
@@ -867,7 +877,8 @@ Shader "WorldPainter/IndirectGrass"
             // _ALPHACLIP: also discard transparent fragments in the URP depth-prepass so the depth
             // buffer matches the forward silhouette (otherwise depth says "blocker" everywhere and
             // anything behind a transparent card gets z-rejected). Must mirror the forward pass.
-            #pragma shader_feature_local _ALPHACLIP
+            // multi_compile so the variant ships in player builds (the keyword is enabled at runtime).
+            #pragma multi_compile_local _ _ALPHACLIP
             #pragma multi_compile _ _WP_ROOT_TRANSFORM
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
