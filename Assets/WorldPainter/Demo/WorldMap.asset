@@ -538,12 +538,12 @@ MonoBehaviour:
     shadowCastingMode: 0
     lods:
     - mesh: {fileID: 4300000, guid: ebc1ab8e922054e6a9523999a478ab83, type: 2}
-      maxDistance: 272.56317
+      maxDistance: 25
     - mesh: {fileID: 4300000, guid: a9ecab3a45a3349678be3e65ff2e91a2, type: 2}
-      maxDistance: 402.52707
+      maxDistance: 60
     - mesh: {fileID: 4300000, guid: 93d1f7a56f88943d796fa749ed8c1b32, type: 2}
       maxDistance: 0
-    renderCullDistance: 500
+    renderCullDistance: 120
     useNormalMap: 0
     normalMap: {fileID: 0}
     normalStrength: 1
@@ -560,7 +560,7 @@ MonoBehaviour:
     useAlphaclipShadows: 0
     useAlphaclip: 0
   wind:
-    windMode: 1
+    windMode: 0
     windDirection: {x: 1, y: 0}
     windStrength: 0.5
     windFrequency: 1.5
@@ -589,7 +589,7 @@ MonoBehaviour:
   scaleFactor: 0.6
   seed: 0
   slopeRange: {x: 0, y: 90}
-  targetDensityPerSqM: 5
+  targetDensityPerSqM: 2
   rotationOffsetEuler: {x: 0, y: 0, z: 0}
   randomPitchRange: {x: 0, y: 0}
   randomRollRange: {x: 0, y: 0}
