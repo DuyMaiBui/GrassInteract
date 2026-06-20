@@ -81,23 +81,6 @@ namespace WorldPainter
             float maxScale = this.source.ScaleRange.y;
             Bounds worldBounds = BuildInstanceBounds(this.source, origin, maxScale, minX, maxX, minY, maxY, minZ, maxZ);
 
-            // ── DIAGNOSTIC (remove with matching prints) ──────────────────────
-            // Log the LAST record's position fed into the slab — should match the most-recent
-            // EmitExactlyOneAt pivot. If it doesn't, the bug is in AuthoredInstancesData.
-            if (total > 0 && positionSlabs.Length > 0)
-            {
-                int lastSlabIdx  = slabCounts.Length - 1;
-                int lastSlabSize = slabCounts[lastSlabIdx];
-                if (lastSlabSize > 0)
-                {
-                    Vector3 lastPos = positionSlabs[lastSlabIdx][lastSlabSize - 1];
-                    WpLog.Log(
-                        $"[InstancePlacement.Build] totalRecords={total} " +
-                        $"lastPos={lastPos:F4} maxScale={maxScale:F4} " +
-                        $"worldBounds.center={worldBounds.center:F4} worldBounds.size={worldBounds.size:F4}");
-                }
-            }
-
             return new GrassScatterResult(baseSlabs, slabCounts, positionSlabs, normalSlabs, total, worldBounds);
         }
 

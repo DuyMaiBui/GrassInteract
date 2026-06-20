@@ -125,6 +125,9 @@ namespace WorldPainter
         private Material? lodMat0;
         private Material? lodMat1;
         private Material? lodMat2;
+        // {lodMat0, lodMat1, lodMat2} as a reusable array — rebuilt in Build, so the per-Submit
+        // style/keyword appliers iterate it instead of allocating a 3-element array every frame.
+        private Material?[] lodMats = System.Array.Empty<Material?>();
 
         // ── Live-style donor (per-frame bridge — no rebuild needed on material edits) ──
         // Reference to the layer's authored material. Held across frames so Submit() can
@@ -324,6 +327,7 @@ namespace WorldPainter
             this.lodMat1 = new Material(this.indirectMaterialBase) { name = "GrassIndirect_LOD1" };
             this.lodMat2 = new Material(this.indirectMaterialBase) { name = "GrassIndirect_LOD2" };
             this.lodMat2.EnableKeyword("_LOD2_BILLBOARD");
+            this.lodMats = new Material?[] { this.lodMat0, this.lodMat1, this.lodMat2 };
 
             // Wind model keyword — enable _WIND_PERLIN on all 3 LOD materials when layer opts in.
             bool perlin = this.windMode == ScatterLayer.WindMode.Perlin;
@@ -393,6 +397,12 @@ namespace WorldPainter
             // so concurrent per-tile engines don't clobber each other through a shared global.
             this.SetLodFloat(ID_ScaleFactor,  this.scaleFactor);
 
+            // Invariant wind/deform uniforms — pushed ONCE here. They change only on a config edit,
+            // which routes through a full rebuild (this Build). In player builds Submit no longer
+            // re-pushes them (saves ~33 SetFloat/SetVector calls per tile per frame); the editor still
+            // re-pushes for live Inspector edits + domain-reload recovery (see Submit).
+            this.PushInvariantWindUniforms();
+
             // ── Reusable CommandBuffer ──────────────────────────────────────
             this.cullCmd = new CommandBuffer { name = "GrassGpuEngine.Cull" };
 
@@ -444,6 +454,21 @@ namespace WorldPainter
             // ── 2. Build frustum planes from the render camera ──────────────
             // Non-alloc overload writes into planeScratch — zero per-frame heap alloc.
             GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
+
+            // ── Whole-tile frustum gate ─────────────────────────────────────
+            // The per-blade cull dispatch (RecordFrameCommands below) and the 3 indirect draws run
+            // UNCONDITIONALLY every Submit — URP frustum-culls only the rasterization, never the
+            // compute dispatch — so a tile fully behind/beside the camera still pays the whole cull
+            // chain every frame. Skip the entire Submit when this tile's conservative world-space
+            // field AABB is outside the frustum. The bounds enclose every blade root + height
+            // (ScaleBoundsExtents floors at 1×), so a fully-outside box guarantees zero visible
+            // blades — no flicker. planeScratch holds WORLD-space planes (mapped to painting below).
+            Bounds worldFieldBounds = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.PaintingBoundsToWorld(this.worldBounds)
+                : this.worldBounds;
+            if (!GeometryUtility.TestPlanesAABB(this.planeScratch, worldFieldBounds))
+                return;
+
             // When the root is non-identity, blade AABBs are in painting space, so the frustum
             // planes must also be in painting space for the cull to be metric-correct.
             if (this.rootSpace != null && !this.rootSpace.IsIdentity)
@@ -483,18 +508,12 @@ namespace WorldPainter
             // through global state let a sibling scatter layer (e.g. a wind-enabled instance layer)
             // overwrite this layer's wind every frame on the deferred indirect draws. Setting them on this
             // layer's own LOD material clones keeps each layer's deform independent.
-            this.SetLodFloat (ID_GrassTime,        this.time);
-            this.SetLodVector(ID_WindDir,          new Vector4(this.windDir.x, this.windDir.y, 0f, 0f));
-            this.SetLodFloat (ID_WindStrength,     this.windStrength);
-            this.SetLodFloat (ID_WindFrequency,    this.windFrequency);
-            this.SetLodFloat (ID_WindNoiseScale,   this.windNoiseScale);
-            this.SetLodFloat (ID_WindGustScale,    this.windGustScale);
-            this.SetLodFloat (ID_WindRippleScale,  this.windRippleScale);
-            this.SetLodFloat (ID_WindGustSpeed,    this.windGustSpeed);
-            this.SetLodFloat (ID_WindRippleSpeed,  this.windRippleSpeed);
-            this.SetLodFloat (ID_WindRippleWeight, this.windRippleWeight);
-            this.SetLodFloat (ID_BendStrength,     this.bendStrength);
-            this.SetLodFloat (ID_Flatten,          this.flatten);
+            this.SetLodFloat(ID_GrassTime, this.time); // animates the wind — genuinely per-frame
+#if UNITY_EDITOR
+            // Editor-only: re-push the invariant wind/deform config each frame so live Inspector edits +
+            // domain reloads reflect without a full rebuild. Player builds set these ONCE in Build.
+            this.PushInvariantWindUniforms();
+#endif
             // _CamPosWS feeds the blade billboard yaw and interactor distance checks — all in painting
             // space. When the root is non-identity, convert the world-space camera to painting space so
             // the grass shader math (which runs in painting space) remains correct.
@@ -503,12 +522,13 @@ namespace WorldPainter
                 : camPos;
             Shader.SetGlobalVector(ID_CamPosWS, new Vector4(camPosPainting.x, camPosPainting.y, camPosPainting.z, 0f));
 
-            // Re-bridge the per-layer material style every frame so Inspector edits propagate
-            // live to the LOD clones (Texture / Color SetXxx are cheap dictionary lookups; the
-            // 3-mats × 5-props × ~ms cost is negligible compared to the cull dispatch above).
-            // Without this, edits to the layer material — BaseMap, BaseColor, TipColor, Cutoff,
-            // _ALPHACLIP toggle — only show after a full layer rebuild.
+#if UNITY_EDITOR
+            // Editor-only: re-bridge the per-layer material style each frame so live Inspector edits
+            // (BaseMap, BaseColor, TipColor, Cutoff, _ALPHACLIP toggle) propagate to the LOD clones
+            // without a rebuild. Player builds apply this ONCE in Build (:375) — the per-frame
+            // HasProperty/Get/Set ×3 mats are a pure editor affordance with no runtime value.
             this.ApplyLayerMaterialStyle(this.layerStyleDonor);
+#endif
 
             // FIX 3: upload interactors here (Submit) so it is always fresh for the draw.
             // SSOT: upload in exactly one place — not in Step.
@@ -520,18 +540,19 @@ namespace WorldPainter
             // Phase 2: upload trail segments each frame (count global set inside Upload).
             this.trailBuffer?.Upload(GrassTrailInteractor.Active, this.rootSpace);
 
-            // FIX 4: rebind buffers every Submit — guards against domain-reload / any other system
-            // resetting shader state between frames. _Blades is PER-MATERIAL (per-tile data — see
-            // Build; a global would let the last per-tile engine's Submit clobber every other tile,
-            // leaving only the last tile rendered). _Interactors stays global (shared across tiles).
+#if UNITY_EDITOR
+            // Editor-only: FIX-4 domain-reload defensive rebind. A domain reload resets material/global
+            // shader state between frames IN THE EDITOR; Build binds these once and there is NO domain
+            // reload in player builds, so the per-frame rebind is pure editor insurance. _Blades is
+            // PER-MATERIAL (per-tile); _Interactors stays global. ScaleMax2/ScaleFactor are also set in
+            // Build (:395/398), so these per-frame re-pushes are redundant in the player.
             if (this.bladeBuffer?.BladeBuffer != null)
                 this.SetLodBuffer(ID_Blades, this.bladeBuffer.BladeBuffer);
             if (this.interactorBuffer?.Buffer != null)
                 Shader.SetGlobalBuffer(ID_Interactors, this.interactorBuffer.Buffer);
-            // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
             this.SetLodFloat(ID_ScaleMax2,   this.bladeBuffer?.ScaleMax2 ?? 1f);
-            // PER-MATERIAL — never SetGlobal: each tile/layer has its own independent scaleFactor.
             this.SetLodFloat(ID_ScaleFactor, this.scaleFactor);
+#endif
 
             // ── 5. RenderMeshIndirect ×3 ─────────────────────────────────────
             // RenderParams MUST be built via the Material constructor: the object-initializer form leaves
@@ -553,6 +574,27 @@ namespace WorldPainter
         /// The object-initializer form (<c>new RenderParams { ... }</c>) leaves renderingLayerMask = 0, which
         /// makes URP skip the draw. Mirrors the CPU <see cref="GrassRenderer"/> construction.
         /// </summary>
+        /// <summary>
+        /// Pushes the invariant wind/deform uniforms onto the LOD clones. These change only on a
+        /// config edit (which triggers a full rebuild), so Build calls this once; in the editor Submit
+        /// also re-calls it each frame for live-edit + domain-reload recovery. _GrassTime/_CamPosWS are
+        /// the only genuinely per-frame uniforms and are set directly in Submit.
+        /// </summary>
+        private void PushInvariantWindUniforms()
+        {
+            this.SetLodVector(ID_WindDir,          new Vector4(this.windDir.x, this.windDir.y, 0f, 0f));
+            this.SetLodFloat (ID_WindStrength,     this.windStrength);
+            this.SetLodFloat (ID_WindFrequency,    this.windFrequency);
+            this.SetLodFloat (ID_WindNoiseScale,   this.windNoiseScale);
+            this.SetLodFloat (ID_WindGustScale,    this.windGustScale);
+            this.SetLodFloat (ID_WindRippleScale,  this.windRippleScale);
+            this.SetLodFloat (ID_WindGustSpeed,    this.windGustSpeed);
+            this.SetLodFloat (ID_WindRippleSpeed,  this.windRippleSpeed);
+            this.SetLodFloat (ID_WindRippleWeight, this.windRippleWeight);
+            this.SetLodFloat (ID_BendStrength,     this.bendStrength);
+            this.SetLodFloat (ID_Flatten,          this.flatten);
+        }
+
         /// <summary>Sets a float on all three LOD material clones (per-material, never global).</summary>
         private void SetLodFloat(int id, float v)
         {
@@ -644,7 +686,7 @@ namespace WorldPainter
                 donor.IsKeywordEnabled(KW_Alphaclip) ||
                 (donor.HasProperty(ID_Alphaclip) && donor.GetFloat(ID_Alphaclip) > 0.5f);
 
-            Material?[] mats = { this.lodMat0, this.lodMat1, this.lodMat2 };
+            Material?[] mats = this.lodMats;
             foreach (Material? mat in mats)
             {
                 if (mat == null) continue;
@@ -669,7 +711,7 @@ namespace WorldPainter
         /// </summary>
         private void ApplyPbrKeywords(ScatterRenderConfig cfg)
         {
-            Material?[] mats = { this.lodMat0, this.lodMat1, this.lodMat2 };
+            Material?[] mats = this.lodMats;
             foreach (Material? mat in mats)
             {
                 if (mat == null) continue;
@@ -736,7 +778,7 @@ namespace WorldPainter
         /// </summary>
         private void ApplyShadowKeywords(ScatterRenderConfig cfg)
         {
-            Material?[] mats = { this.lodMat0, this.lodMat1, this.lodMat2 };
+            Material?[] mats = this.lodMats;
             foreach (Material? mat in mats)
             {
                 if (mat == null) continue;

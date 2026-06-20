@@ -34,6 +34,7 @@ namespace WorldPainter
         private readonly Vector2[] currentLean; // persistent recovery state (XZ), recovers toward 0
         private readonly Vector4[] outTilt;     // quaternion (xyzw) per instance, uploaded each frame
         private GraphicsBuffer? tiltBuffer;
+        private bool hadNonZeroLean = true;     // true forces one settle pass; gates the idle fast-path
 
         private readonly float tiltStrength;
         private readonly float maxTiltDeg;
@@ -106,7 +107,13 @@ namespace WorldPainter
 
             IReadOnlyList<GrassInteractor> active = GrassInteractor.Active;
             int n = active.Count;
+
+            // Idle fast-path: no active interactors AND every lean already decayed to rest last frame →
+            // the output is all-identity and unchanged, so skip the O(count) loop + full-buffer SetData.
+            if (n == 0 && !this.hadNonZeroLean) return;
+
             float recoveryStep = this.recoveryRate * dt;
+            bool anyLean = false;
 
             for (int i = 0; i < this.count; ++i)
             {
@@ -143,6 +150,7 @@ namespace WorldPainter
                     this.outTilt[i] = new Vector4(0f, 0f, 0f, 1f);
                     continue;
                 }
+                anyLean = true;
                 Vector2 dir = cur / mag;
                 float angleDeg = Mathf.Min(mag * DEG_PER_UNIT, this.maxTiltDeg);
                 // Tilt the up-axis toward (dir.x, 0, dir.y): axis = cross(up, dir3) = (dir.y, 0, -dir.x).
@@ -151,6 +159,7 @@ namespace WorldPainter
                 this.outTilt[i] = new Vector4(q.x, q.y, q.z, q.w);
             }
 
+            this.hadNonZeroLean = anyLean;
             this.tiltBuffer.SetData(this.outTilt);
         }
 

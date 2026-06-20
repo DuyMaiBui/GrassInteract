@@ -398,6 +398,18 @@ namespace WorldPainter
             if (cullCam == null) return;
 
             GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
+
+            // ── Whole-tile frustum gate ─────────────────────────────────────
+            // Skip the entire Submit (cull dispatch + 3 indirect draws) when this layer-tile's
+            // conservative world-space AABB is outside the frustum. The cull compute + draws
+            // otherwise run unconditionally each frame even for off-screen tiles (URP culls only
+            // rasterization, not the dispatch). Mirrors GrassGpuEngine.Submit.
+            Bounds worldFieldBounds = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.PaintingBoundsToWorld(this.worldBounds)
+                : this.worldBounds;
+            if (!GeometryUtility.TestPlanesAABB(this.planeScratch, worldFieldBounds))
+                return;
+
             // Instance AABBs/positions are in PAINTING space, so the frustum planes must be
             // transformed into painting space when the root is non-identity.
             if (this.rootSpace != null && !this.rootSpace.IsIdentity)
@@ -538,6 +550,10 @@ namespace WorldPainter
             this.ApplyColliderScale();
         }
 
+        // Reusable snapshot buffer for ApplyColliderScale's active-key copy — avoids a per-call
+        // List<int> allocation (which becomes per-frame while a scale slider is dragged).
+        private readonly List<int> colliderScaleScratch = new List<int>();
+
         /// <summary>
         /// Rescales all currently active pool colliders to baseScale × scaleFactor in-place.
         /// No-op when colliders are not built (edit mode / colliders disabled).
@@ -559,7 +575,9 @@ namespace WorldPainter
             // Snapshot the active keys before the rescale loop. Acquire's "already active" branch
             // does not mutate the active dictionary today, but iterating the live KeyCollection while
             // calling Acquire is fragile-by-construction — a future evict-on-cap in Acquire would throw.
-            foreach (int authoredIdx in new List<int>(this.colliderPool.ActiveKeys))
+            this.colliderScaleScratch.Clear();
+            this.colliderScaleScratch.AddRange(this.colliderPool.ActiveKeys);
+            foreach (int authoredIdx in this.colliderScaleScratch)
             {
                 if ((uint)authoredIdx >= (uint)this.baseColliderScales.Length) continue;
                 this.colliderPool.Acquire(

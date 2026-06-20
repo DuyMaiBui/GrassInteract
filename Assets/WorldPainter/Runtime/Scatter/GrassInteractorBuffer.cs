@@ -62,6 +62,7 @@ namespace WorldPainter
         private readonly GraphicsBuffer buffer;
         private readonly InteractorGpu[] staging = new InteractorGpu[MAX_INTERACTORS];
         private bool warnedOverflow;
+        private int  previousFilled = -1; // last uploaded count; -1 forces the first upload
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -140,6 +141,13 @@ namespace WorldPainter
             }
 
             this.Count = filled;
+
+            // Idle-skip: when there are no interactors this frame AND none last frame, the GPU buffer
+            // is already in its (unread, _InteractorCount==0-gated) state — skip the redundant
+            // full-buffer SetData. Any non-zero frame, and the one transition frame back to zero, still
+            // upload so the buffer never holds stale data a future read could see.
+            if (filled == 0 && this.previousFilled == 0) return;
+            this.previousFilled = filled;
 
             // Upload the full 16-element staging array — the VS loop is bounded by _InteractorCount,
             // so unwritten tail elements are never read. This avoids a variable-length SetData overload.

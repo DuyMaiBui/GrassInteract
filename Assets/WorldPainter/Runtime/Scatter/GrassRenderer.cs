@@ -111,7 +111,11 @@ namespace WorldPainter
             float sqrDist = (worldBounds.center - lodReferencePos).sqrMagnitude;
             if (this.cullSqrDistance > 0f && sqrDist > this.cullSqrDistance)
                 return; // whole field beyond explicit cull distance
-            Mesh mesh = this.lodMeshes[this.SelectLod(sqrDist)];
+            // Clamp into the mesh array: SelectLod can return lodMaxSqrDistances.Length, which
+            // exceeds lodMeshes if distances outnumber meshes (mis-authoring) — guard the index.
+            int lod = this.SelectLod(sqrDist);
+            if (lod >= this.lodMeshes.Length) lod = this.lodMeshes.Length - 1;
+            Mesh mesh = this.lodMeshes[lod];
 
             RenderParams rp = this.renderParams;
             // worldBounds is MANDATORY for RenderMeshInstanced — the default (a zero-extent box at the origin)
