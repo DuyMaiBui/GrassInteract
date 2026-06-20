@@ -43,6 +43,26 @@ namespace WorldPainter
         }
 
         /// <summary>
+        /// Allocation-free variant: clears <paramref name="result"/> and fills it with the
+        /// desired tileCoords, so the caller can reuse a persistent set across frames instead of
+        /// allocating a new <see cref="HashSet{T}"/> every streaming tick.
+        /// </summary>
+        public static void ComputeDesiredInto(Vector3 cameraWorldPos, HashSet<Vector2Int> result)
+        {
+            ComputeDesiredInto(cameraWorldPos, TerrainStreamingConfig.RING_RADIUS, result);
+        }
+
+        /// <summary>Allocation-free variant of <see cref="ComputeDesired(Vector3, int)"/>.</summary>
+        public static void ComputeDesiredInto(Vector3 cameraWorldPos, int radius, HashSet<Vector2Int> result)
+        {
+            result.Clear();
+            Vector2Int centre = TerrainWorldGrid.WorldToTileCoord(cameraWorldPos.x, cameraWorldPos.z);
+            for (int dz = -radius; dz <= radius; ++dz)
+                for (int dx = -radius; dx <= radius; ++dx)
+                    result.Add(new Vector2Int(centre.x + dx, centre.y + dz));
+        }
+
+        /// <summary>
         /// Returns true if the given tileCoord falls within the eviction threshold
         /// (RING_RADIUS + HYSTERESIS_TILES) for the camera's current tile.
         /// A tile is kept resident as long as this returns true.

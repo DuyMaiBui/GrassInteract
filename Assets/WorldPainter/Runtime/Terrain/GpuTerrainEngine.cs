@@ -330,6 +330,20 @@ namespace WorldPainter
             Camera? cullCam = targetCamera ?? Camera.main;
             if (cullCam == null) return;
 
+            // ── Whole-tile frustum gate ─────────────────────────────────────
+            // Skip the entire submit (quadtree select + node upload + cull dispatch + forward and
+            // shadow indirect draws) when this tile's world-space AABB is fully outside the camera
+            // frustum. With many resident tiles most are off-screen each frame, yet the cull compute
+            // and draws otherwise run unconditionally (URP culls only rasterization, not the
+            // dispatch). worldBounds already includes the skirt Y-depth, so a fully-outside box has
+            // nothing visible. planeScratch holds WORLD-space planes (reused for the cull below).
+            GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
+            Bounds worldTileBounds = (this.rootSpace != null && !this.rootSpace.IsIdentity)
+                ? this.rootSpace.PaintingBoundsToWorld(this.worldBounds)
+                : this.worldBounds;
+            if (!GeometryUtility.TestPlanesAABB(this.planeScratch, worldTileBounds))
+                return;
+
             // 1. CDLOD quadtree selection (CPU) — in PAINTING space. Nodes live in painting
             // space, so the camera driving LOD selection must be transformed by the root's
             // inverse TRS (no-op when identity). Preserves the XZ-only crack invariant.
@@ -348,9 +362,9 @@ namespace WorldPainter
             if (this.visibleNodesBuf != null)
                 this.patchMaterial.SetBuffer(ID_VisibleNodeIndices, this.visibleNodesBuf);
 
-            // 4. Frustum planes — transformed into PAINTING space when the root is non-identity
-            // (node AABBs the cull compute tests are in painting space).
-            GeometryUtility.CalculateFrustumPlanes(cullCam, this.planeScratch);
+            // 4. Frustum planes → PAINTING space when the root is non-identity (node AABBs the cull
+            // compute tests are in painting space). planeScratch was already filled by the whole-tile
+            // frustum gate above, so reuse it here rather than recomputing.
             if (this.rootSpace != null && !this.rootSpace.IsIdentity)
             {
                 this.rootSpace.WorldPlanesToPainting(this.planeScratch, this.frustumPlanes);

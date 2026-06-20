@@ -61,5 +61,27 @@ namespace WorldPainter
 
             return result;
         }
+
+        /// <summary>
+        /// Allocation-free variant of <see cref="ComputeDesired(Vector3, float)"/>: clears
+        /// <paramref name="result"/> and fills it, so the caller can reuse a persistent set
+        /// across frames instead of allocating a new <see cref="HashSet{T}"/> every tick.
+        /// </summary>
+        public static void ComputeDesiredInto(Vector3 cameraWorldPos, float lodRangeMetres, HashSet<Vector2Int> result)
+        {
+            result.Clear();
+            if (lodRangeMetres <= 0f) return;
+
+            Vector2Int centre = TerrainWorldGrid.WorldToTileCoord(cameraWorldPos.x, cameraWorldPos.z);
+            int searchTiles = Mathf.CeilToInt(lodRangeMetres / TerrainWorldGrid.TILE_SIZE_M) + 1;
+
+            for (int dz = -searchTiles; dz <= searchTiles; ++dz)
+                for (int dx = -searchTiles; dx <= searchTiles; ++dx)
+                {
+                    var coord = new Vector2Int(centre.x + dx, centre.y + dz);
+                    if (NearestEdgeDistance(cameraWorldPos, coord) <= lodRangeMetres)
+                        result.Add(coord);
+                }
+        }
     }
 }

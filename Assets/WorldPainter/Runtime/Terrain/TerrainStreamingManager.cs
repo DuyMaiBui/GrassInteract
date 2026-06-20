@@ -39,6 +39,10 @@ namespace WorldPainter
         private readonly TerrainTileLoader       loader        = new TerrainTileLoader();
         private readonly List<Vector2Int>        scratchLoad   = new List<Vector2Int>(32);
         private readonly List<Vector2Int>        scratchEvict  = new List<Vector2Int>(32);
+        private readonly HashSet<Vector2Int>     desiredScratch = new HashSet<Vector2Int>();
+
+        // Cached method-group delegate — avoids a fresh delegate allocation per Enqueue call.
+        private System.Action<Vector2Int, TerrainTileAsset, int>? onTileLoaded;
 
         // Tile index (coord → asset) built from tileRegistry.
         private readonly Dictionary<Vector2Int, TerrainTileAsset> tileIndex =
@@ -165,8 +169,9 @@ namespace WorldPainter
             // in one frame, defeating the per-frame budget and reintroducing hitch risk.
             this.loader.DrainMainThreadQueue(TerrainStreamingConfig.MAX_UPLOADS_PER_FRAME);
 
-            // 2. Compute desired ring.
-            HashSet<Vector2Int> desired = TerrainResidencyRing.ComputeDesired(camPos);
+            // 2. Compute desired ring (into a reused scratch set — no per-tick HashSet alloc).
+            TerrainResidencyRing.ComputeDesiredInto(camPos, this.desiredScratch);
+            HashSet<Vector2Int> desired = this.desiredScratch;
 
             // 3. Diff → load/evict lists.
             this.residencySet.Diff(desired, this.scratchLoad, this.scratchEvict);
@@ -192,7 +197,7 @@ namespace WorldPainter
                 if (!this.tileIndex.TryGetValue(coord, out var asset))
                     continue;
 
-                this.loader.Enqueue(coord, asset, this.OnTileLoaded);
+                this.loader.Enqueue(coord, asset, this.onTileLoaded ??= this.OnTileLoaded);
                 queued++;
             }
 
@@ -226,7 +231,14 @@ namespace WorldPainter
             engine.Build(asset, gpuRes, this.lodRangesM);
 
             var resident = new TerrainTileResidencySet.ResidentTile(asset, gpuRes, engine);
-            this.residencySet.Add(coord, resident);
+            if (!this.residencySet.Add(coord, resident))
+            {
+                // Lost a double-load race — Add is the SSOT guard. Dispose the freshly-built
+                // engine + GPU resources we would otherwise leak (GraphicsBuffers, textures,
+                // a material clone). Engine first, then GPU resources — matches Evict order.
+                engine.Dispose();
+                gpuRes.Dispose();
+            }
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

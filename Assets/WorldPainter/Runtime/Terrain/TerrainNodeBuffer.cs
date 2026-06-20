@@ -29,12 +29,14 @@ namespace WorldPainter
             public Vector3 mx;
         }
 
-        // ── GPU buffers ────────────────────────────────────────────────────────
+        // ── GPU buffers (capacity-tracked, grow-only — reused across frames) ───
         private GraphicsBuffer? nodeBuf;
         private GraphicsBuffer? aabbBuf;
+        private int capacity;
 
-        // ── CPU arrays (for ValidatePartition) ────────────────────────────────
+        // ── CPU scratch arrays (length == capacity; reused across frames) ──────
         private CdlodNode[]? cpuNodes;
+        private NodeAabb[]?  cpuAabbs;
 
         // ── Public accessors ──────────────────────────────────────────────────
         public GraphicsBuffer? NodeBuffer => this.nodeBuf;
@@ -58,16 +60,18 @@ namespace WorldPainter
 
             if (count == 0)
             {
-                this.ReleaseBuffers();
+                // Keep the GPU buffers + scratch allocated for reuse; just report zero nodes.
+                // The live Submit path early-outs on nodes.Count == 0 before calling here, so
+                // this branch is only hit by tests / non-render callers.
+                this.NodeCount = 0;
                 return;
             }
 
-            this.ReleaseBuffers();
+            this.EnsureCapacity(count);
             this.NodeCount = count;
 
-            // Build CPU arrays
-            CdlodNode[] nodeArr = new CdlodNode[count];
-            NodeAabb[]  aabbArr = new NodeAabb[count];
+            CdlodNode[] nodeArr = this.cpuNodes!;
+            NodeAabb[]  aabbArr = this.cpuAabbs!;
 
             for (int i = 0; i < count; ++i)
             {
@@ -87,15 +91,35 @@ namespace WorldPainter
                 };
             }
 
-            this.cpuNodes = nodeArr;
+            // Upload only the live prefix [0, count). The buffers may be larger than count;
+            // the cull compute only ever indexes [0, count) (dispatched with nodes.Count).
+            this.nodeBuf!.SetData(nodeArr, 0, 0, count);
+            this.aabbBuf!.SetData(aabbArr, 0, 0, count);
+        }
 
-            this.nodeBuf = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured, count, CdlodNode.STRIDE);
-            this.nodeBuf.SetData(nodeArr);
+        /// <summary>
+        /// Grow-only allocation: (re)creates the GPU buffers + CPU scratch only when the
+        /// requested node count exceeds the current capacity. Steady-state frames reuse the
+        /// existing buffers and allocate nothing — restoring the zero-per-frame-alloc
+        /// discipline the rest of the renderer upholds. Released only in <see cref="Dispose"/>.
+        /// </summary>
+        private void EnsureCapacity(int count)
+        {
+            if (this.nodeBuf != null && this.aabbBuf != null &&
+                this.cpuNodes != null && this.cpuAabbs != null && count <= this.capacity)
+                return;
 
-            this.aabbBuf = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured, count, NODE_AABB_STRIDE);
-            this.aabbBuf.SetData(aabbArr);
+            int newCap = Mathf.Max(count, this.capacity > 0 ? this.capacity * 2 : count);
+
+            this.ReleaseBuffers();
+
+            this.capacity = newCap;
+            this.cpuNodes = new CdlodNode[newCap];
+            this.cpuAabbs = new NodeAabb[newCap];
+            this.nodeBuf  = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured, newCap, CdlodNode.STRIDE);
+            this.aabbBuf  = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured, newCap, NODE_AABB_STRIDE);
         }
 
         // ── Validation ────────────────────────────────────────────────────────
@@ -110,7 +134,7 @@ namespace WorldPainter
         {
             var sb = new StringBuilder();
 
-            if (this.cpuNodes == null || this.cpuNodes.Length == 0)
+            if (this.cpuNodes == null || this.NodeCount == 0)
             {
                 report = "SKIP: No nodes uploaded.";
                 return true;
@@ -119,8 +143,10 @@ namespace WorldPainter
             float uMinX = float.MaxValue, uMaxX = float.MinValue;
             float uMinZ = float.MaxValue, uMaxZ = float.MinValue;
 
-            foreach (CdlodNode n in this.cpuNodes)
+            // Iterate only the live prefix [0, NodeCount); cpuNodes may be larger (capacity).
+            for (int i = 0; i < this.NodeCount; ++i)
             {
+                CdlodNode n = this.cpuNodes[i];
                 if (n.worldOffset.x < uMinX) uMinX = n.worldOffset.x;
                 if (n.worldOffset.z < uMinZ) uMinZ = n.worldOffset.z;
                 float mx = n.worldOffset.x + n.scale;
@@ -139,7 +165,7 @@ namespace WorldPainter
                               $" does not cover tile [{tileOriginX:F1},{tileOriginX+tileSize:F1}]x" +
                               $"[{tileOriginZ:F1},{tileOriginZ+tileSize:F1}]");
             else
-                sb.AppendLine($"  [PASS] Node AABB union covers tile XZ (nodes={this.cpuNodes.Length})");
+                sb.AppendLine($"  [PASS] Node AABB union covers tile XZ (nodes={this.NodeCount})");
 
             sb.Insert(0, pass ? "PASS: " : "FAIL: ");
             report = sb.ToString().TrimEnd();
@@ -155,6 +181,8 @@ namespace WorldPainter
             if (this.nodeBuf != null) { this.nodeBuf.Release(); this.nodeBuf = null; }
             if (this.aabbBuf != null) { this.aabbBuf.Release(); this.aabbBuf = null; }
             this.cpuNodes  = null;
+            this.cpuAabbs  = null;
+            this.capacity  = 0;
             this.NodeCount = 0;
         }
     }

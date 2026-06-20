@@ -72,6 +72,10 @@ namespace WorldPainter
         private readonly Dictionary<Vector2Int, TerrainTileAsset> tileIndex =
             new Dictionary<Vector2Int, TerrainTileAsset>();
 
+        // Reusable scratch sets — keep the per-tick streaming loop allocation-free.
+        private readonly HashSet<Vector2Int> desiredScratch = new HashSet<Vector2Int>();
+        private readonly List<Vector2Int>    evictScratch   = new List<Vector2Int>();
+
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
         private void OnEnable()
@@ -136,17 +140,18 @@ namespace WorldPainter
             WorldRootBinder binder = this.worldPainter.RootBinder;
             Vector3 camPosPainting = binder.IsIdentity ? camPos : binder.WorldToPainting(camPos);
 
-            var desired = TerrainColliderRing.ComputeDesired(camPosPainting, range);
+            TerrainColliderRing.ComputeDesiredInto(camPosPainting, range, this.desiredScratch);
+            HashSet<Vector2Int> desired = this.desiredScratch;
 
             // Keep live host visibility in sync with the debug toggle (cheap; ≤ ring size).
             foreach (var handle in this.live.Values)
                 handle.SetVisible(this.debugShowColliders);
 
-            // 2. Evict tiles that left the ring.
-            var toEvict = new List<Vector2Int>();
+            // 2. Evict tiles that left the ring (into a reused scratch list — no per-tick alloc).
+            this.evictScratch.Clear();
             foreach (var coord in this.live.Keys)
-                if (!desired.Contains(coord)) toEvict.Add(coord);
-            foreach (var coord in toEvict)
+                if (!desired.Contains(coord)) this.evictScratch.Add(coord);
+            foreach (var coord in this.evictScratch)
                 this.Evict(coord);
 
             // 3. Enqueue new tiles that need colliders.
