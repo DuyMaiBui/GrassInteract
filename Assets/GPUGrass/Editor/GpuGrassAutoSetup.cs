@@ -47,7 +47,10 @@ namespace GPUGrass.Editor
             // 2) Assign the shared config — the SAME instance for every terrain (Guard 1).
             controller.Config = sharedConfig;
 
-            // 3) Per-terrain bake-data asset (each terrain keeps its own; Guard 2).
+            // 3) Per-terrain bake-data asset (each terrain keeps its own; Guard 2). It must live in the
+            //    per-scene bake folder (alongside the config). Create it there if missing, or MOVE it there
+            //    if an existing bake sits elsewhere (e.g. an old Generated/ asset) — the move preserves the
+            //    controller's reference (GUID is kept).
             if (controller.Bake == null)
             {
                 var bake = ScriptableObject.CreateInstance<GpuGrassBakeData>();
@@ -55,6 +58,18 @@ namespace GPUGrass.Editor
                     $"{folder}/{terrain.name}_GpuGrassBake.asset");
                 AssetDatabase.CreateAsset(bake, path);
                 controller.Bake = bake;
+            }
+            else
+            {
+                string current = AssetDatabase.GetAssetPath(controller.Bake);
+                if (!string.IsNullOrEmpty(current) && !current.StartsWith($"{folder}/", System.StringComparison.Ordinal))
+                {
+                    string target = AssetDatabase.GenerateUniqueAssetPath(
+                        $"{folder}/{terrain.name}_GpuGrassBake.asset");
+                    string err = AssetDatabase.MoveAsset(current, target);
+                    if (!string.IsNullOrEmpty(err))
+                        Debug.LogWarning($"[GPUGrass] Could not move bake '{current}' → '{target}': {err}");
+                }
             }
 
             controller.Terrain = terrain;
