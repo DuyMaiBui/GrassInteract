@@ -1,0 +1,119 @@
+// HiZBuild.compute
+// Builds a Hi-Z (hierarchical depth) pyramid for grass chunk occlusion culling.
+// Used by GpuGrassHiZFeature (URP renderer pass, AfterRenderingOpaques).
+//
+// Kernel 0 — CopyDepth:
+//   Reads _CameraDepthTexture (raw device depth, 0..1, reversed-Z on many platforms)
+//   and writes LINEAR view-space depth (metres, increasing away from camera) into
+//   mip 0 of the R32F pyramid RenderTexture.
+//   Base resolution is capped to half the screen (see: _HiZBaseSize) to save bandwidth.
+//   The CPU issues one CopyDepth dispatch at (ceil(baseW/8), ceil(baseH/8), 1).
+//
+// Kernel 1 — ReduceMip:
+//   Reduces one mip level to the next by taking the MAX of each 2x2 block of the
+//   parent mip. MAX = FARTHEST linear depth = conservative (never false-occlude a
+//   chunk that is actually visible). The CPU issues one ReduceMip dispatch per mip
+//   level after CopyDepth, writing into _HiZMipDst while reading from _HiZMipSrc.
+//   Dispatch size: (ceil(dstW/8), ceil(dstH/8), 1).
+//
+// Depth linearisation:
+//   Unity uses reversed-Z on most platforms (1 = near, 0 = far in the depth buffer).
+//   Linear depth is computed with the standard 'LinearEyeDepth' formula using
+//   _ZBufferParams, which is set by Unity and handles the reversed-Z convention.
+//   Comparing linear depths avoids all reversed-Z sign ambiguity in the cull shader.
+
+#pragma kernel CopyDepth
+#pragma kernel ReduceMip
+
+// ─── Bindings ────────────────────────────────────────────────────────────────
+
+// CopyDepth source: the camera's depth texture (device depth 0..1, reversed-Z on metal/vulkan).
+Texture2D<float>    _CameraDepthTexture;
+SamplerState        sampler_CameraDepthTexture;
+
+// CopyDepth destination: mip 0 of the R32F pyramid (random-write).
+// base resolution = half screen (capped). Set via RenderTexture.enableRandomWrite.
+RWTexture2D<float>  _HiZMipDst;
+
+// ReduceMip source (explicit LOD reads via Load — no sampler needed).
+Texture2D<float>    _HiZMipSrc;
+
+// Screen dimensions of _CameraDepthTexture (full screen, NOT the half-res base).
+float2 _ScreenSize;
+
+// Size of the current _HiZMipDst (destination mip) in texels.
+float2 _HiZDstSize;
+
+// Unity z-buffer params for LinearEyeDepth: x = 1-far/near, y = far/near, z = x/far, w = y/far.
+// Set automatically by Unity when rendering; available as _ZBufferParams in shaders.
+float4 _ZBufferParams;
+
+// ─── LinearEyeDepth ──────────────────────────────────────────────────────────
+// Converts raw device depth [0..1] to linear eye-space distance (metres, +Z into screen).
+// Handles reversed-Z (Unity default on Metal/Vulkan/DX12).
+// Formula: 1.0 / (_ZBufferParams.z * rawDepth + _ZBufferParams.w)
+// where _ZBufferParams = (1 - far/near, far/near, (1-far/near)/far, (far/near)/far).
+float LinearEyeDepthFromRaw(float rawDepth)
+{
+    return 1.0 / (_ZBufferParams.z * rawDepth + _ZBufferParams.w);
+}
+
+// ─── CopyDepth kernel ─────────────────────────────────────────────────────────
+// Base pyramid resolution = half screen (cap for mobile perf). Each thread writes
+// one texel of _HiZMipDst by sampling _CameraDepthTexture at the corresponding
+// full-res UV. We sample the 2x2 source block and take the MAX linear depth (farthest)
+// to be conservative from the very first mip.
+[numthreads(8, 8, 1)]
+void CopyDepth(uint3 id : SV_DispatchThreadID)
+{
+    // Guard: skip threads outside the half-res base extent.
+    if (id.x >= (uint)_HiZDstSize.x || id.y >= (uint)_HiZDstSize.y)
+        return;
+
+    // Each output texel corresponds to a 2x2 block in the full-res depth buffer.
+    // Sample all 4 corners and take max linear depth for conservative reduction.
+    float2 texelSize = 1.0 / _ScreenSize;
+    float2 baseUV = (float2(id.xy) * 2.0 + 1.0) * texelSize; // centre of 2x2 block
+
+    float2 halfPixel = texelSize * 0.5;
+    float d00 = _CameraDepthTexture.SampleLevel(sampler_CameraDepthTexture, baseUV + float2(-halfPixel.x, -halfPixel.y), 0).r;
+    float d10 = _CameraDepthTexture.SampleLevel(sampler_CameraDepthTexture, baseUV + float2( halfPixel.x, -halfPixel.y), 0).r;
+    float d01 = _CameraDepthTexture.SampleLevel(sampler_CameraDepthTexture, baseUV + float2(-halfPixel.x,  halfPixel.y), 0).r;
+    float d11 = _CameraDepthTexture.SampleLevel(sampler_CameraDepthTexture, baseUV + float2( halfPixel.x,  halfPixel.y), 0).r;
+
+    // Convert each sample to linear depth and take the maximum (farthest = conservative).
+    float lin00 = LinearEyeDepthFromRaw(d00);
+    float lin10 = LinearEyeDepthFromRaw(d10);
+    float lin01 = LinearEyeDepthFromRaw(d01);
+    float lin11 = LinearEyeDepthFromRaw(d11);
+
+    float maxLinear = max(max(lin00, lin10), max(lin01, lin11));
+
+    _HiZMipDst[id.xy] = maxLinear;
+}
+
+// ─── ReduceMip kernel ─────────────────────────────────────────────────────────
+// Reads a 2x2 block from _HiZMipSrc (parent mip, already in linear depth metres)
+// and writes the maximum (farthest = conservative) into _HiZMipDst.
+// The CPU calls Load() via explicit integer texel coords (no filtering needed).
+[numthreads(8, 8, 1)]
+void ReduceMip(uint3 id : SV_DispatchThreadID)
+{
+    // Guard: skip threads outside the destination mip extent.
+    if (id.x >= (uint)_HiZDstSize.x || id.y >= (uint)_HiZDstSize.y)
+        return;
+
+    // Map destination texel → 2x2 block in parent (source) mip.
+    int2 srcBase = int2(id.xy) * 2;
+
+    // Load 2x2 block from parent mip (already linear depth metres).
+    float d00 = _HiZMipSrc.Load(int3(srcBase + int2(0, 0), 0)).r;
+    float d10 = _HiZMipSrc.Load(int3(srcBase + int2(1, 0), 0)).r;
+    float d01 = _HiZMipSrc.Load(int3(srcBase + int2(0, 1), 0)).r;
+    float d11 = _HiZMipSrc.Load(int3(srcBase + int2(1, 1), 0)).r;
+
+    // Maximum = farthest depth = conservative (never false-occlude something visible).
+    float maxDepth = max(max(d00, d10), max(d01, d11));
+
+    _HiZMipDst[id.xy] = maxDepth;
+}

@@ -108,3 +108,9 @@ InitTestScene*.unity*
 # WorldPainter on-demand generated validation scenes/tiles (not committed)
 Assets/WorldPainter/Generated/
 Assets/WorldPainter/Generated.meta
+
+# GPUGrass generated/baked output (reproducible via Tools ▸ GPUGrass ▸ Scene Grass Setup)
+Assets/GPUGrass/Generated/
+Assets/GPUGrass/Generated.meta
+**/*_GpuGrassBake.asset
+**/*_GpuGrassBake.asset.meta

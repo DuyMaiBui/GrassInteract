@@ -1,0 +1,16 @@
+{
+    "name": "GPUGrass.Demo",
+    "rootNamespace": "GPUGrass.Demo",
+    "references": [
+        "GPUGrass"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
