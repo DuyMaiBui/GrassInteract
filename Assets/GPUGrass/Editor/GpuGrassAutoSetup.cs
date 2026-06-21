@@ -99,9 +99,11 @@ namespace GPUGrass.Editor
         /// (its vertex stage rebuilds each blade from the <c>_Blades</c>/<c>_VisibleIndices</c> buffers); a
         /// material on any other shader (e.g. URP/Lit) renders nothing. So if the config has no material —
         /// or the assigned one uses the wrong shader — a fresh indirect material is created in
-        /// <paramref name="assetFolder"/>. Idempotent once a correct material exists.
+        /// <paramref name="assetFolder"/>. Idempotent once a correct material exists. Called both at
+        /// config-creation time (<see cref="GpuGrassSceneSetup.EnsureSharedConfig"/>) and per terrain during
+        /// <see cref="SetupOnTerrain"/>.
         /// </summary>
-        private static void WireRenderAssets(GpuGrassConfig config, string assetFolder)
+        internal static void WireRenderAssets(GpuGrassConfig config, string assetFolder)
         {
             var cull   = AssetDatabase.LoadAssetAtPath<ComputeShader>(CULL_COMPUTE_PATH);
             var shader = Shader.Find(INDIRECT_SHADER_NAME);

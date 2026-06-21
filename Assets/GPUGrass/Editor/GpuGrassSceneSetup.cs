@@ -70,7 +70,7 @@ namespace GPUGrass.Editor
         /// </summary>
         public static GpuGrassConfig EnsureSharedConfig()
         {
-            EnsureSceneBakeFolder();
+            string folder = EnsureSceneBakeFolder();
             string path = GetSceneConfigPath();
 
             var existing = AssetDatabase.LoadAssetAtPath<GpuGrassConfig>(path);
@@ -78,7 +78,14 @@ namespace GPUGrass.Editor
                 return existing;
 
             var config = ScriptableObject.CreateInstance<GpuGrassConfig>();
-            AssetDatabase.CreateAsset(config, path);
+            AssetDatabase.CreateAsset(config, path); // names the object after the file → WireRenderAssets uses it
+
+            // Auto-wire render assets on creation: GrassCull compute + GPUGrass/IndirectGrass shader + a fresh
+            // material (in the per-scene bake folder). Lets a brand-new config render immediately — no need to
+            // run Setup & Bake first just to get a material. (LOD mesh is still assigned manually.)
+            GpuGrassAutoSetup.WireRenderAssets(config, folder);
+
+            EditorUtility.SetDirty(config);
             AssetDatabase.SaveAssets();
             return config;
         }
