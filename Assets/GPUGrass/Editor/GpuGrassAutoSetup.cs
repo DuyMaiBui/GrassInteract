@@ -17,7 +17,6 @@ namespace GPUGrass.Editor
     /// </summary>
     public static class GpuGrassAutoSetup
     {
-        private const string GENERATED_FOLDER = "Assets/GPUGrass/Generated";
         private const string CULL_COMPUTE_PATH = "Assets/GPUGrass/Shaders/GrassCull.compute";
         private const string INDIRECT_SHADER_NAME = "GPUGrass/IndirectGrass";
 
@@ -143,18 +142,6 @@ namespace GPUGrass.Editor
             }
 
             config.SetRenderAssets(cull, shader, material);
-        }
-
-        /// <summary>Creates <c>Assets/GPUGrass/Generated</c> if it does not already exist.</summary>
-        internal static void EnsureGeneratedFolder()
-        {
-            if (AssetDatabase.IsValidFolder(GENERATED_FOLDER))
-                return;
-
-            if (!AssetDatabase.IsValidFolder("Assets/GPUGrass"))
-                AssetDatabase.CreateFolder("Assets", "GPUGrass");
-
-            AssetDatabase.CreateFolder("Assets/GPUGrass", "Generated");
         }
     }
 }

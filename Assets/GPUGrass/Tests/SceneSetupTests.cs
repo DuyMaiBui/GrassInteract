@@ -10,13 +10,16 @@ namespace GPUGrass.Tests
     /// <summary>
     /// EditMode tests for <see cref="GpuGrassSceneSetup"/> against synthetic Terrains. Verifies that the
     /// scene-setup loop assigns one shared config to every controller, produces per-terrain distinct bakes,
-    /// skips terrains without TerrainData, and that <see cref="GpuGrassSceneSetup.EnsureSharedConfig"/> is
-    /// idempotent.
+    /// skips terrains without TerrainData, and that the per-scene bake-folder paths are deterministic.
+    ///
+    /// Cleanup is robust to the per-scene asset layout: the test config lives in an isolated temp folder,
+    /// and the assets SetupScene actually produces (material + per-terrain bakes, wherever they land) are
+    /// tracked by their real paths and deleted in TearDown — no hard-coded Generated/ assumptions.
     /// </summary>
     public sealed class SceneSetupTests
     {
         private const float SIZE = 20f, HEIGHT = 5f;
-        private const string SHARED_CONFIG_PATH = "Assets/GPUGrass/Generated/SceneGrassConfig.asset";
+        private const string TEMP_FOLDER = "Assets/GPUGrass/__SceneSetupTest__";
 
         // Per-test teardown tracking.
         private readonly List<Object> toDestroy   = new();
@@ -40,6 +43,10 @@ namespace GPUGrass.Tests
                     AssetDatabase.DeleteAsset(path);
             }
             this.assetsToDelete.Clear();
+
+            if (AssetDatabase.IsValidFolder(TEMP_FOLDER))
+                AssetDatabase.DeleteAsset(TEMP_FOLDER);
+
             AssetDatabase.Refresh();
         }
 
@@ -74,33 +81,39 @@ namespace GPUGrass.Tests
             return go.GetComponent<Terrain>();
         }
 
-        /// <summary>Creates a config asset at <paramref name="path"/> and registers it for cleanup.</summary>
-        private GpuGrassConfig CreateConfigAsset(string path)
+        /// <summary>Creates a config asset in the isolated temp folder and registers it for cleanup.</summary>
+        private GpuGrassConfig CreateConfigAsset(string assetName)
         {
-            EnsureGeneratedFolder();
+            if (!AssetDatabase.IsValidFolder(TEMP_FOLDER))
+                AssetDatabase.CreateFolder("Assets/GPUGrass", "__SceneSetupTest__");
+
+            string path = $"{TEMP_FOLDER}/{assetName}.asset";
             var cfg = ScriptableObject.CreateInstance<GpuGrassConfig>();
             AssetDatabase.CreateAsset(cfg, path);
             this.assetsToDelete.Add(path);
             return AssetDatabase.LoadAssetAtPath<GpuGrassConfig>(path)!;
         }
 
-        private static void EnsureGeneratedFolder()
+        /// <summary>
+        /// Registers the assets <see cref="GpuGrassSceneSetup.SetupScene"/> actually produced — the material
+        /// auto-wired onto the config and each terrain's bake — by their REAL paths (wherever the per-scene
+        /// layout placed them), so TearDown removes them regardless of folder convention.
+        /// </summary>
+        private void TrackOutputs(GpuGrassConfig cfg, params Terrain[] terrains)
         {
-            if (!AssetDatabase.IsValidFolder("Assets/GPUGrass"))
-                AssetDatabase.CreateFolder("Assets", "GPUGrass");
-            if (!AssetDatabase.IsValidFolder("Assets/GPUGrass/Generated"))
-                AssetDatabase.CreateFolder("Assets/GPUGrass", "Generated");
-        }
-
-        /// <summary>Registers all bake assets that SetupScene creates for a set of terrain names.</summary>
-        private void TrackGeneratedAssets(params string[] terrainNames)
-        {
-            foreach (var n in terrainNames)
+            if (cfg != null && cfg.GrassMaterial != null)
             {
-                // Possible paths for bake + any render assets (blade, mat).
-                this.assetsToDelete.Add($"Assets/GPUGrass/Generated/{n}_GpuGrassBake.asset");
-                this.assetsToDelete.Add($"Assets/GPUGrass/Generated/{n}_GpuGrassBlade.asset");
-                this.assetsToDelete.Add($"Assets/GPUGrass/Generated/{n}_GpuGrassMat.mat");
+                string m = AssetDatabase.GetAssetPath(cfg.GrassMaterial);
+                if (!string.IsNullOrEmpty(m)) this.assetsToDelete.Add(m);
+            }
+            foreach (var t in terrains)
+            {
+                var c = t.GetComponent<GpuGrassController>();
+                if (c != null && c.Bake != null)
+                {
+                    string b = AssetDatabase.GetAssetPath(c.Bake);
+                    if (!string.IsNullOrEmpty(b)) this.assetsToDelete.Add(b);
+                }
             }
         }
 
@@ -111,12 +124,11 @@ namespace GPUGrass.Tests
         {
             var t1 = this.CreateSyntheticTerrain("T_Shared_1", Vector3.zero);
             var t2 = this.CreateSyntheticTerrain("T_Shared_2", new Vector3(SIZE + 10f, 0f, 0f));
-            this.TrackGeneratedAssets(t1.name, t2.name);
 
-            string cfgPath = "Assets/GPUGrass/Generated/TestShared_Config.asset";
-            GpuGrassConfig shared = this.CreateConfigAsset(cfgPath);
+            GpuGrassConfig shared = this.CreateConfigAsset("TestShared_Config");
 
             List<GpuGrassTerrainStatus> results = GpuGrassSceneSetup.SetupScene(shared);
+            this.TrackOutputs(shared, t1, t2);
 
             Assert.AreEqual(2, results.Count, "Expected one status per terrain.");
 
@@ -137,12 +149,11 @@ namespace GPUGrass.Tests
         {
             var t1 = this.CreateSyntheticTerrain("T_Bake_1", Vector3.zero);
             var t2 = this.CreateSyntheticTerrain("T_Bake_2", new Vector3(SIZE + 10f, 0f, 0f));
-            this.TrackGeneratedAssets(t1.name, t2.name);
 
-            string cfgPath = "Assets/GPUGrass/Generated/TestBake_Config.asset";
-            GpuGrassConfig shared = this.CreateConfigAsset(cfgPath);
+            GpuGrassConfig shared = this.CreateConfigAsset("TestBake_Config");
 
             GpuGrassSceneSetup.SetupScene(shared);
+            this.TrackOutputs(shared, t1, t2);
 
             var ctrl1 = t1.GetComponent<GpuGrassController>();
             var ctrl2 = t2.GetComponent<GpuGrassController>();
@@ -164,20 +175,19 @@ namespace GPUGrass.Tests
         {
             // Create one valid terrain + one bare GO with a Terrain component but no TerrainData.
             var valid = this.CreateSyntheticTerrain("T_Valid", Vector3.zero);
-            this.TrackGeneratedAssets(valid.name);
 
             var badGo = new GameObject("T_NullData");
             badGo.AddComponent<Terrain>(); // terrainData defaults to null
             this.toDestroy.Add(badGo);
 
-            string cfgPath = "Assets/GPUGrass/Generated/TestSkip_Config.asset";
-            GpuGrassConfig shared = this.CreateConfigAsset(cfgPath);
+            GpuGrassConfig shared = this.CreateConfigAsset("TestSkip_Config");
 
             // Must not throw even though badGo.GetComponent<Terrain>().terrainData == null.
             List<GpuGrassTerrainStatus> results = null!;
             Assert.DoesNotThrow(
                 () => results = GpuGrassSceneSetup.SetupScene(shared),
                 "SetupScene must not throw when a terrain has null terrainData.");
+            this.TrackOutputs(shared, valid);
 
             // Only the valid terrain should appear in results (bad one skipped).
             Assert.AreEqual(1, results.Count,
@@ -186,24 +196,20 @@ namespace GPUGrass.Tests
         }
 
         [Test]
-        public void EnsureSharedConfig_IsIdempotent()
+        public void SceneBakeFolder_PathsAreDeterministicAndScoped()
         {
-            // Pre-delete the shared config so EnsureSharedConfig creates it fresh.
-            AssetDatabase.DeleteAsset(SHARED_CONFIG_PATH);
-            this.assetsToDelete.Add(SHARED_CONFIG_PATH);
+            // Pure path-shape contract — no side effects (does NOT create or delete the real scene config,
+            // which would be unsafe to mutate from a test).
+            string folder1 = GpuGrassSceneSetup.GetSceneBakeFolderPath();
+            string folder2 = GpuGrassSceneSetup.GetSceneBakeFolderPath();
+            Assert.AreEqual(folder1, folder2, "Bake folder path must be deterministic.");
+            StringAssert.StartsWith("Assets/GPUGrass/", folder1, "Bake folder must live under Assets/GPUGrass.");
+            StringAssert.EndsWith("Bake", folder1, "Bake folder must end with 'Bake'.");
 
-            GpuGrassConfig first  = GpuGrassSceneSetup.EnsureSharedConfig();
-            GpuGrassConfig second = GpuGrassSceneSetup.EnsureSharedConfig();
-
-            Assert.IsNotNull(first,  "EnsureSharedConfig must return a non-null config.");
-            Assert.IsNotNull(second, "Second call must also return a non-null config.");
-
-            string path1 = AssetDatabase.GetAssetPath(first);
-            string path2 = AssetDatabase.GetAssetPath(second);
-            Assert.AreEqual(path1, path2,
-                "Both calls must resolve to the same asset path (idempotent — no duplicate).");
-            Assert.AreSame(first, second,
-                "Both calls must return the same loaded asset instance.");
+            string cfg1 = GpuGrassSceneSetup.GetSceneConfigPath();
+            Assert.AreEqual(cfg1, GpuGrassSceneSetup.GetSceneConfigPath(), "Config path must be deterministic.");
+            StringAssert.StartsWith(folder1 + "/", cfg1, "Config must live inside the bake folder.");
+            StringAssert.EndsWith("_GpuGrassConfig.asset", cfg1, "Config must use the _GpuGrassConfig suffix.");
         }
     }
 }

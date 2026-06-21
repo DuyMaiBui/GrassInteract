@@ -110,10 +110,11 @@ Assets/WorldPainter/Generated/
 Assets/WorldPainter/Generated.meta
 
 # GPUGrass generated/baked output (reproducible via Tools ▸ GPUGrass ▸ Scene Grass Setup)
-Assets/GPUGrass/Generated/
-Assets/GPUGrass/Generated.meta
 # Per-scene bake folders (config + material + baked placement) — Assets/GPUGrass/<SceneName>Bake/
 Assets/GPUGrass/*Bake/
 Assets/GPUGrass/*Bake.meta
 **/*_GpuGrassBake.asset
 **/*_GpuGrassBake.asset.meta
+# Transient EditMode test temp folder (auto-cleaned by SceneSetupTests teardown)
+Assets/GPUGrass/__SceneSetupTest__/
+Assets/GPUGrass/__SceneSetupTest__.meta
