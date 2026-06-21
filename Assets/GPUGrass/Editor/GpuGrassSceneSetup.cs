@@ -1,6 +1,5 @@
 #nullable enable
 using System.Collections.Generic;
-using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -28,17 +27,17 @@ namespace GPUGrass.Editor
     /// </summary>
     public static class GpuGrassSceneSetup
     {
-        private const string FALLBACK_FOLDER = "Assets/GPUGrass/Generated";
+        private const string GPUGRASS_ROOT = "Assets/GPUGrass";
 
         /// <summary>
         /// Applies <paramref name="sharedConfig"/> to every active terrain in the scene. Skips terrains
-        /// with null <c>terrainData</c>. All generated assets land in the per-scene folder. Calls
+        /// with null <c>terrainData</c>. All generated assets land in the per-scene bake folder. Calls
         /// <see cref="AssetDatabase.SaveAssets"/> once at the end (batched). Returns one status per terrain.
         /// </summary>
         public static List<GpuGrassTerrainStatus> SetupScene(GpuGrassConfig sharedConfig)
         {
             var statuses = new List<GpuGrassTerrainStatus>();
-            string assetFolder = GetSceneAssetFolder();
+            string assetFolder = EnsureSceneBakeFolder();
 
             Terrain[] terrains = ResolveActiveTerrains();
             foreach (var terrain in terrains)
@@ -65,13 +64,14 @@ namespace GPUGrass.Editor
 
         /// <summary>
         /// Loads (or creates) the scene-shared config asset, named after the active scene
-        /// (<c>&lt;SceneName&gt;_GpuGrassConfig.asset</c>) inside the per-scene folder. Idempotent: a second
-        /// call returns the same existing asset without creating a duplicate.
+        /// (<c>&lt;SceneName&gt;_GpuGrassConfig.asset</c>) inside the per-scene bake folder
+        /// (<c>Assets/GPUGrass/&lt;SceneName&gt;Bake/</c>), creating the folder when needed. Idempotent: a
+        /// second call returns the same existing asset without creating a duplicate.
         /// </summary>
         public static GpuGrassConfig EnsureSharedConfig()
         {
-            string folder = GetSceneAssetFolder();
-            string path = $"{folder}/{GetSceneName()}_GpuGrassConfig.asset";
+            EnsureSceneBakeFolder();
+            string path = GetSceneConfigPath();
 
             var existing = AssetDatabase.LoadAssetAtPath<GpuGrassConfig>(path);
             if (existing != null)
@@ -83,7 +83,14 @@ namespace GPUGrass.Editor
             return config;
         }
 
-        // ── Per-scene asset folder (mirrors Unity baked-lighting layout) ───────
+        /// <summary>
+        /// Returns the existing shared config for the ACTIVE scene without creating anything, or
+        /// <c>null</c> if none exists yet. Used by the window to auto-assign on scene change.
+        /// </summary>
+        public static GpuGrassConfig? TryFindSceneConfig()
+            => AssetDatabase.LoadAssetAtPath<GpuGrassConfig>(GetSceneConfigPath());
+
+        // ── Per-scene bake folder (Assets/GPUGrass/<SceneName>Bake) ────────────
 
         /// <summary>The active scene's name, or "Untitled" when the scene is unsaved.</summary>
         public static string GetSceneName()
@@ -92,24 +99,26 @@ namespace GPUGrass.Editor
             return string.IsNullOrEmpty(scene.name) ? "Untitled" : scene.name;
         }
 
-        /// <summary>
-        /// Returns (creating if needed) the per-scene asset folder: <c>&lt;sceneDir&gt;/&lt;SceneName&gt;/</c>,
-        /// the same place Unity writes baked lighting. Falls back to <c>Assets/GPUGrass/Generated</c> when the
-        /// scene has never been saved (no asset path).
-        /// </summary>
-        public static string GetSceneAssetFolder()
-        {
-            Scene scene = SceneManager.GetActiveScene();
-            if (string.IsNullOrEmpty(scene.path))
-            {
-                GpuGrassAutoSetup.EnsureGeneratedFolder();
-                return FALLBACK_FOLDER;
-            }
+        /// <summary>The per-scene bake folder path (NOT created): <c>Assets/GPUGrass/&lt;SceneName&gt;Bake</c>.</summary>
+        public static string GetSceneBakeFolderPath() => $"{GPUGRASS_ROOT}/{GetSceneName()}Bake";
 
-            string dir = Path.GetDirectoryName(scene.path)!.Replace('\\', '/'); // e.g. Assets/Scenes
-            string folder = $"{dir}/{scene.name}";
+        /// <summary>The active scene's shared-config asset path (NOT created).</summary>
+        public static string GetSceneConfigPath()
+            => $"{GetSceneBakeFolderPath()}/{GetSceneName()}_GpuGrassConfig.asset";
+
+        /// <summary>
+        /// Ensures + returns the per-scene bake folder <c>Assets/GPUGrass/&lt;SceneName&gt;Bake</c> (the home
+        /// for the scene's config, material, and per-terrain bakes). Creates <c>Assets/GPUGrass</c> first if
+        /// it is somehow missing.
+        /// </summary>
+        public static string EnsureSceneBakeFolder()
+        {
+            if (!AssetDatabase.IsValidFolder(GPUGRASS_ROOT))
+                AssetDatabase.CreateFolder("Assets", "GPUGrass");
+
+            string folder = GetSceneBakeFolderPath();
             if (!AssetDatabase.IsValidFolder(folder))
-                AssetDatabase.CreateFolder(dir, scene.name);
+                AssetDatabase.CreateFolder(GPUGRASS_ROOT, $"{GetSceneName()}Bake");
             return folder;
         }
 

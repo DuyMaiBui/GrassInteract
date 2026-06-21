@@ -1,8 +1,10 @@
 #nullable enable
 using System.Text;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 
 namespace GPUGrass.Editor
@@ -89,24 +91,50 @@ namespace GPUGrass.Editor
             optFoldout.Add(this.optimizeContainer);
             body.Add(optFoldout);
 
-            // Restore the shared config across domain reloads.
-            string savedPath = EditorPrefs.GetString(PREFS_CONFIG_PATH, string.Empty);
-            if (!string.IsNullOrEmpty(savedPath))
+            // Auto-assign the active scene's config if one already exists; else fall back to the last-used
+            // config (EditorPrefs) for unsaved scenes / manual picks.
+            GpuGrassConfig? initial = GpuGrassSceneSetup.TryFindSceneConfig();
+            if (initial == null)
             {
-                var loaded = AssetDatabase.LoadAssetAtPath<GpuGrassConfig>(savedPath);
-                if (loaded != null)
-                {
-                    this.SetConfig(loaded);
-                    this.configField?.SetValueWithoutNotify(loaded);
-                }
+                string savedPath = EditorPrefs.GetString(PREFS_CONFIG_PATH, string.Empty);
+                if (!string.IsNullOrEmpty(savedPath))
+                    initial = AssetDatabase.LoadAssetAtPath<GpuGrassConfig>(savedPath);
+            }
+            if (initial != null)
+            {
+                this.SetConfig(initial);
+                this.configField?.SetValueWithoutNotify(initial);
             }
 
             this.RebuildConfigSections();
             this.lastTerrainSig = string.Empty;
             this.RefreshTerrainRows();
 
+            // Re-assign automatically when the active scene changes.
+            EditorSceneManager.activeSceneChangedInEditMode += this.OnActiveSceneChanged;
+
             // Poll for terrain changes + mesh-warning state (rebuilds only when something actually changed).
             root.schedule.Execute(this.PollRefresh).Every(500);
+        }
+
+        private void OnDisable()
+        {
+            EditorSceneManager.activeSceneChangedInEditMode -= this.OnActiveSceneChanged;
+        }
+
+        /// <summary>
+        /// When the active scene changes, auto-assign that scene's shared config if it already exists
+        /// (<c>Assets/GPUGrass/&lt;SceneName&gt;Bake/&lt;SceneName&gt;_GpuGrassConfig.asset</c>). If the new
+        /// scene has no config yet, the picker clears so it's obvious one must be created for this scene.
+        /// </summary>
+        private void OnActiveSceneChanged(Scene previous, Scene next)
+        {
+            GpuGrassConfig? cfg = GpuGrassSceneSetup.TryFindSceneConfig();
+            this.SetConfig(cfg);
+            this.configField?.SetValueWithoutNotify(cfg);
+            this.RebuildConfigSections();
+            this.lastTerrainSig = string.Empty;
+            this.RefreshTerrainRows();
         }
 
         private VisualElement BuildConfigPicker()

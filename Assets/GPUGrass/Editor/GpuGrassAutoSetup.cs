@@ -34,9 +34,9 @@ namespace GPUGrass.Editor
             if (terrain == null || terrain.terrainData == null)
                 return 0;
 
-            // Resolve the per-scene asset folder when the caller didn't supply one.
+            // Resolve the per-scene bake folder when the caller didn't supply one.
             string folder = string.IsNullOrEmpty(assetFolder)
-                ? GpuGrassSceneSetup.GetSceneAssetFolder()
+                ? GpuGrassSceneSetup.EnsureSceneBakeFolder()
                 : assetFolder!;
 
             // 1) Controller component.
