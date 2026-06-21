@@ -44,7 +44,13 @@ namespace WorldPainter
         /// Builds the renderer from a <paramref name="layer"/> (LOD meshes + distances, material, shadow mode).
         /// Layer data is snapshotted at construction so a live inspector edit cannot desync index vs threshold mid-frame.
         /// </summary>
-        public GrassRenderer(ScatterLayer layer, Vector3 origin)
+        /// <param name="materialOverride">
+        /// When non-null, this material is used for the instanced draw instead of <c>layer.Render.Material</c>.
+        /// Used by <see cref="PropCpuEngine"/> to feed a GLES3.0-safe URP/Lit material in place of the prop
+        /// layer's StructuredBuffer-driven material (which RenderMeshInstanced cannot drive). Null (default)
+        /// preserves the original grass behavior exactly.
+        /// </param>
+        public GrassRenderer(ScatterLayer layer, Vector3 origin, Material? materialOverride = null)
         {
             // Snapshot LOD data from the layer (SSOT: all render params live on the layer).
             var render = layer.Render;
@@ -70,7 +76,7 @@ namespace WorldPainter
             this.cullSqrDistance = cull * cull;
 
             this.lodMeshes = (Mesh[])meshes.Clone();
-            this.grassMaterial = render.Material;
+            this.grassMaterial = materialOverride != null ? materialOverride : render.Material;
 
             if (this.grassMaterial != null)
             {

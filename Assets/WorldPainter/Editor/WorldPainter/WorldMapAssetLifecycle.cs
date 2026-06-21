@@ -319,10 +319,14 @@ namespace WorldPainter.Editor
         /// <summary>
         /// Builds a fresh RGBA32 alphamap texture filled with <paramref name="fill"/>. Tagged
         /// linear because the weights are NOT colour data — they're per-layer mix coefficients.
+        /// Phase 5c: mipChain enabled so GPU sampling at distance uses the mip pyramid rather
+        /// than full-res texels — eliminates TBDR texture-cache thrash on distant terrain.
         /// </summary>
         private static Texture2D CreateBlankAlphamap(string texName, int size, Color32 fill)
         {
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, mipChain: false, linear: true)
+            // Phase 5c: mipChain: true — enables hardware mip filtering on the GPU.
+            // Previously false → full-res sampling at all distances = TBDR cache thrash.
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, mipChain: true, linear: true)
             {
                 name       = texName,
                 wrapMode   = TextureWrapMode.Clamp,
@@ -331,7 +335,8 @@ namespace WorldPainter.Editor
             var pixels = new Color32[size * size];
             for (int i = 0; i < pixels.Length; i++) pixels[i] = fill;
             tex.SetPixels32(pixels);
-            tex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            // Phase 5c: updateMipmaps: true — generate the mip pyramid from the filled data.
+            tex.Apply(updateMipmaps: true, makeNoLongerReadable: false);
             return tex;
         }
 

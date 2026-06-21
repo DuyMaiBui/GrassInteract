@@ -55,6 +55,24 @@ namespace WorldPainter
         // (Phase 3 cleanup — splatData / splatRes / IsSplatValid removed. Per-tile palette
         // weights live in the `alphamaps[]` Texture2D array below.)
 
+        // ── Baked normal (Phase 5b) ────────────────────────────────────────────
+        /// <summary>
+        /// RG octahedral-encoded normal, one byte per channel per texel: normalRes × normalRes × 2 bytes.
+        /// Baked alongside heightData by WorldMapBaker.BakeOneTile.  Null or empty on pre-Phase-5 tiles
+        /// (runtime falls back to 4-tap height derivation via _WP_LIVE_SCULPT keyword).
+        ///
+        /// Encoding: R = oct.x mapped [−1,1]→[0,255], G = oct.y mapped [−1,1]→[0,255].
+        /// The shader reconstructs Z from oct-fold and normalizes.  Resolution matches heightRes.
+        /// </summary>
+        [HideInInspector] [SerializeField] public byte[] normalData = System.Array.Empty<byte>();
+
+        /// <summary>Resolution of the baked normal map in texels per edge (matches heightRes).</summary>
+        public int NormalRes => this.heightRes;
+
+        /// <summary>Returns true when normalData is valid (non-empty, correct size for heightRes).</summary>
+        public bool IsNormalValid =>
+            this.normalData != null && this.normalData.Length == this.heightRes * this.heightRes * 2;
+
         // ── Validation helpers ─────────────────────────────────────────────────
 
         /// <summary>Expected byte length of heightData = heightRes² × 2.</summary>

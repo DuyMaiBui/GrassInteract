@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
 using UnityEngine.Rendering;
@@ -21,6 +22,7 @@ namespace WorldPainter.Diagnostics
     ///   • rolling best + 1%-low frame time (spikes / stutter)
     ///   • managed-heap + total memory, GC collections/frame (the stutter source)
     ///   • GPU device name + the ACTUAL render resolution (after render-scale)
+    ///   • per-frame draw calls (+ indirect draws), batches, SetPass calls, triangles, vertices
     ///   • the WorldPainter grass scatter tier — RED on CPU fallback
     ///   • any custom metric pushed via <see cref="Report"/>
     ///
@@ -45,6 +47,15 @@ namespace WorldPainter.Diagnostics
 
         // ── Bootstrap ─────────────────────────────────────────────────────────
         private static PerformanceConsole? instance;
+
+        // ── Public signal for governor / Phase 3 density controller ──────────
+        /// <summary>
+        /// Smoothed average frame time in milliseconds over the last ~0.5 s window.
+        /// SSOT for the adaptive-quality signal — consumed by RenderScaleGovernor and
+        /// (Phase 3) the adaptive grass density controller. Returns 0 before the first
+        /// full window accumulates.
+        /// </summary>
+        public static float SmoothedFrameMs => instance != null ? instance.avgMs : 0f;
 
 #if !WP_PERF_CONSOLE_OFF
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -71,6 +82,11 @@ namespace WorldPainter.Diagnostics
         private int  lastGc, gcPerFrame;
         private long monoHeap, totalAlloc;
 
+        // ── GPU render stats (ProfilerRecorder — live in the editor + development builds) ──
+        // NOTE: "Draw Calls Count" EXCLUDES Graphics.RenderMeshIndirect draws (grass/props use those),
+        // so the indirect count is surfaced separately — otherwise the grass draws look invisible here.
+        private ProfilerRecorder drawCallsRec, indirectDrawRec, setPassRec, batchesRec, vertsRec, trisRec;
+
         // ── Scatter tier (WorldPainter) ───────────────────────────────────────
         private global::WorldPainter.WorldPainter? worldPainter;
         private float  nextFindTime;
@@ -93,6 +109,30 @@ namespace WorldPainter.Diagnostics
         private bool      expanded = true;
         private GUIStyle? boxStyle, headStyle, bodyStyle, tierStyle, btnStyle;
         private Texture2D? bgTex;
+        // Reused for per-frame CalcHeight content-fit measuring (no per-frame GC on a GC-monitoring tool).
+        private readonly GUIContent calcContent = new();
+
+        private void OnEnable()
+        {
+            // Render-stat counters live under ProfilerCategory.Render. .Valid is false in non-development
+            // player builds (stats stripped) → the readers fall back to 0, so nothing throws on device.
+            this.drawCallsRec    = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Draw Calls Count");
+            this.indirectDrawRec = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Indirect Draw Calls Count");
+            this.setPassRec      = ProfilerRecorder.StartNew(ProfilerCategory.Render, "SetPass Calls Count");
+            this.batchesRec      = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Batches Count");
+            this.vertsRec        = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Vertices Count");
+            this.trisRec         = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Triangles Count");
+        }
+
+        private void OnDisable()
+        {
+            this.drawCallsRec.Dispose();
+            this.indirectDrawRec.Dispose();
+            this.setPassRec.Dispose();
+            this.batchesRec.Dispose();
+            this.vertsRec.Dispose();
+            this.trisRec.Dispose();
+        }
 
         private void Start()
         {
@@ -173,15 +213,28 @@ namespace WorldPainter.Diagnostics
             int cap = Application.targetFrameRate;
             this.capLabel = "Cap " + (cap <= 0 ? "∞" : cap.ToString());
 
+            // One metric per line — a stable, fixed set of rows so each value is easy to track
+            // frame-to-frame (no packed multi-value lines that wrap awkwardly in a narrow box).
+            long draws = Stat(this.drawCallsRec), ind = Stat(this.indirectDrawRec), batches = Stat(this.batchesRec);
+            long setpass = Stat(this.setPassRec), tris = Stat(this.trisRec), verts = Stat(this.vertsRec);
+
             this.sb.Clear();
-            this.sb.Append("best ").Append(this.bestMs.ToString("0.0"))
-                   .Append("   1%low ").Append(this.lowMs.ToString("0.0")).Append(" ms\n");
-            this.sb.Append("mem  mono ").Append(Mb(this.monoHeap));
-            if (this.totalAlloc > 0) this.sb.Append("   total ").Append(Mb(this.totalAlloc));
-            this.sb.Append('\n');
-            this.sb.Append("GC   ").Append(this.gcPerFrame > 0 ? this.gcPerFrame + " coll/frame  ⚠" : "0 (stable)").Append('\n');
-            this.sb.Append("rez  ").Append(rw).Append('x').Append(rh)
+            this.sb.Append("best     ").Append(this.bestMs.ToString("0.0")).Append(" ms\n");
+            this.sb.Append("1% low   ").Append(this.lowMs.ToString("0.0")).Append(" ms\n");
+            this.sb.Append("mem      ").Append(Mb(this.monoHeap)).Append('\n');
+            if (this.totalAlloc > 0) this.sb.Append("mem tot  ").Append(Mb(this.totalAlloc)).Append('\n');
+            this.sb.Append("GC       ").Append(this.gcPerFrame > 0 ? this.gcPerFrame + " coll/frame  ⚠" : "0 (stable)").Append('\n');
+            this.sb.Append("rez      ").Append(rw).Append('x').Append(rh)
                    .Append("  (").Append(Screen.width).Append('x').Append(Screen.height).Append(" @").Append(scale.ToString("0.00")).Append(")\n");
+            // GPU render stats — draw = standard draw calls; indirect = RenderMeshIndirect (grass/props),
+            // which the standard "Draw Calls Count" excludes.
+            this.sb.Append("draw     ").Append(draws).Append('\n');
+            this.sb.Append("indirect ").Append(ind).Append('\n');
+            this.sb.Append("batch    ").Append(batches).Append('\n');
+            this.sb.Append("setpass  ").Append(setpass).Append('\n');
+            this.sb.Append("tris     ").Append(FmtK(tris)).Append('\n');
+            this.sb.Append("vert     ").Append(FmtK(verts)).Append('\n');
+
             if (!string.IsNullOrEmpty(this.deviceText)) this.sb.Append(this.deviceText).Append('\n');
             foreach (var kv in metrics)
                 this.sb.Append(kv.Key).Append(": ").Append(kv.Value).Append('\n');
@@ -189,6 +242,15 @@ namespace WorldPainter.Diagnostics
         }
 
         private static string Mb(long bytes) => (bytes / (1024f * 1024f)).ToString("0") + " MB";
+
+        /// <summary>Last-frame value of a render counter, or 0 when the recorder is unavailable (release builds).</summary>
+        private static long Stat(ProfilerRecorder r) => r.Valid && r.Count > 0 ? r.LastValue : 0;
+
+        /// <summary>Compact count formatting: 9320 → "9.3k", 1_250_000 → "1.3M".</summary>
+        private static string FmtK(long n) =>
+            n >= 1_000_000 ? (n / 1_000_000f).ToString("0.0") + "M"
+          : n >= 1_000     ? (n / 1_000f).ToString("0.0") + "k"
+                           : n.ToString();
 
         // ── Live controls ─────────────────────────────────────────────────────
         private void CycleRenderScale()
@@ -241,14 +303,23 @@ namespace WorldPainter.Diagnostics
                 this.boxStyle.normal.background = this.bgTex;
             }
             this.headStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
-            this.bodyStyle ??= new GUIStyle(GUI.skin.label);
-            this.tierStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
+            // wordWrap: long lines (device name, rez, dens/gov metrics) wrap inside the box instead of
+            // clipping off the right edge on a wide screen. \n line breaks are still honoured.
+            this.bodyStyle ??= new GUIStyle(GUI.skin.label) { wordWrap = true };
+            this.tierStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, wordWrap = true };
             this.btnStyle  ??= new GUIStyle(GUI.skin.button) { fontStyle = FontStyle.Bold };
             this.headStyle.fontSize = fs + 3;
             this.bodyStyle.fontSize = fs;
             this.tierStyle.fontSize = fs + 1;
             this.btnStyle.fontSize  = fs;
             this.btnStyle.padding   = new RectOffset(10, 10, 8, 8);
+        }
+
+        /// <summary>Wrapped height of <paramref name="text"/> in <paramref name="style"/> at <paramref name="width"/>, GC-free.</summary>
+        private float Measure(GUIStyle style, string text, float width)
+        {
+            this.calcContent.text = text;
+            return style.CalcHeight(this.calcContent, width);
         }
 
         private void OnGUI()
@@ -260,8 +331,22 @@ namespace WorldPainter.Diagnostics
                                            : new Color(1f, 0.40f, 0.40f);
 
             float pad = Mathf.Max(8f, Screen.height * 0.012f);
-            float w   = Mathf.Clamp(Screen.width * 0.46f, 280f, 520f);
-            float h   = this.expanded ? Mathf.Min(Screen.height * 0.7f, 440f) : (this.headStyle!.fontSize + 24f);
+            // Wider cap on big screens — at 1920 wide the old 520 px cap forced long metric lines to clip.
+            float w   = Mathf.Clamp(Screen.width * 0.46f, 320f, 760f);
+
+            // Size the box to its ACTUAL content (CalcHeight at the wrapped inner width) instead of the old
+            // fixed 440 px cap. The font scales up with screen height (fs ≈ Screen.height·0.020 → 22 px at
+            // 1080p), so a hardcoded height clipped the buttons / device / metric rows on tall screens.
+            float innerW = w - this.boxStyle!.padding.horizontal;
+            const float gap = 6f; // approx GUILayout vertical spacing between stacked controls
+            float h = this.boxStyle.padding.vertical + this.Measure(this.headStyle!, this.headerText, innerW);
+            if (this.expanded)
+            {
+                h += gap + this.Measure(this.tierStyle!, this.tierText, innerW);
+                h += gap + this.Measure(this.bodyStyle!, this.bodyText, innerW);
+                h += gap + this.Measure(this.btnStyle!,  this.scaleLabel, innerW); // single Scale/Cap button row
+            }
+            h = Mathf.Min(h + 4f, Screen.height - 2f * pad); // never taller than the screen
 
             GUILayout.BeginArea(new Rect(pad, pad, w, h), this.boxStyle);
 

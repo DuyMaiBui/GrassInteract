@@ -112,7 +112,11 @@ namespace WorldPainter.Editor
         private static void ApplyAndPersist(Texture2D map, Color32[] pixels)
         {
             map.SetPixels32(pixels);
-            map.Apply(updateMipmaps: false);
+            // Phase 5c: updateMipmaps: true — regenerate the mip pyramid after each brush
+            // stroke so the GPU sees correct mipped data at all distances.  The alphamap
+            // Texture2D is always kept CPU-readable (makeNoLongerReadable: false in Create),
+            // so SetPixels32 + Apply(updateMipmaps: true) is always safe here.
+            map.Apply(updateMipmaps: true);
             EditorUtility.SetDirty(map);
         }
     }

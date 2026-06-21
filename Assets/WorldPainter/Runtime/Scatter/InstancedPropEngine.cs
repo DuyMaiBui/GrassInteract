@@ -458,7 +458,15 @@ namespace WorldPainter
             // a layer rebuild. Runs BEFORE the per-frame engine uniforms (_ScaleMax2, wind, etc.)
             // because the bulk copy would otherwise stomp them; SyncLiveMaterialStyle also re-
             // applies the snapshotted engine-owned uniforms (orient/anchor/tilt/wind gates).
+            //
+            // Phase 6b gate: SyncLiveMaterialStyle is pure editor live-edit convenience —
+            // 3 × CopyPropertiesFromMaterial per frame, dead cost in a player build.
+            // Gated behind #if UNITY_EDITOR so device builds skip this per-frame work.
+            // (Props layer currently has 0 instances so the per-frame cost is ~0 today,
+            // but the gate is correct and free — keep for when props are populated.)
+#if UNITY_EDITOR
             this.SyncLiveMaterialStyle();
+#endif
 
             // PER-MATERIAL (see Build) — never SetGlobal: a sibling layer would clobber our scale bound.
             this.SetLodFloat(ID_ScaleMax2,   this.instanceBuffer.ScaleMax);

@@ -17,6 +17,22 @@ namespace WorldPainter
     /// Thread-safety: main-thread only (called from LateUpdate / cull path).
     ///
     /// Phase 4 task 6.
+    ///
+    /// ── WIRING STATUS (Phase 6b, 2026-06-20) ─────────────────────────────────────
+    /// This class is the SSOT for the prop LOD1→LOD2 impostor switch distance constant
+    /// and the per-instance LOD selection logic. It is NOT yet wired into the render
+    /// pipeline because the props layer currently has 0 instances (0 fps to gain today).
+    ///
+    /// Wire-up trigger: when the prop layer is populated with real mesh instances AND the
+    /// impostor atlas (octahedral billboard) is baked (Phase 6b — deferred).
+    ///
+    /// To wire when props ship:
+    ///   1. Instantiate WorldPainterImpostorLod in InstancedPropEngine.Build().
+    ///   2. Call SelectLod / IsImpostor in the BladeCull / RecordFrameCommands pass to
+    ///      route instances to the correct LOD bucket (LOD0 = full mesh, LOD last = billboard).
+    ///   3. Bind the baked octahedral impostor atlas to the ScatterInstanced.shader LOD2 material.
+    ///   4. Tune DEFAULT_IMPOSTOR_DISTANCE_M against the target device's draw distance.
+    /// ─────────────────────────────────────────────────────────────────────────────
     /// </summary>
     public sealed class WorldPainterImpostorLod
     {

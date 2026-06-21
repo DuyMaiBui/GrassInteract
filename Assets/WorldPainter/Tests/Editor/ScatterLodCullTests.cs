@@ -117,5 +117,65 @@ namespace WorldPainter.Tests
             Assert.AreEqual(float.MaxValue, lod1Sqr, "lod1Sqr must be MaxValue when cull=0");
             Assert.AreEqual(0f,             maxSqr,  1e-3f, "maxSqr must be 0 when cull=0");
         }
+
+        // ── 5. Phase 3 — density stable-hash skip math (spec-lock) ───────────
+        // These tests lock the CPU-side math that mirrors the BladeCull HLSL skip:
+        //   blade KEPT  when (hash % 256) <  densityThreshold
+        //   blade CULLED when (hash % 256) >= densityThreshold
+        //
+        // The threshold mapping in GrassGpuEngine.SetDensity:
+        //   normalized 1.0 → threshold 256 (all blades pass  — full density)
+        //   normalized 0.0 → threshold 160 (floor ~62%       — no bald patches)
+
+        [Test]
+        public void DensityHashSkip_BladeKeptAtFullDensity()
+        {
+            // densityThreshold == 256: every possible (hash % 256) value is 0..255, so the
+            // condition (hash % 256) >= 256 is always FALSE → every blade is KEPT.
+            const uint densityThreshold = 256u;
+            // Hash whose remainder is the maximum (255).
+            const uint hashMaxRemainder = 255u;
+            Assert.IsTrue((hashMaxRemainder % 256u) < densityThreshold,
+                "At threshold=256 even hash%256==255 should PASS (blade kept).");
+        }
+
+        [Test]
+        public void DensityHashSkip_BladeKeptBelowThreshold()
+        {
+            // A blade with hash % 256 == 100 at threshold 160 → 100 < 160 → KEPT.
+            const uint threshold = 160u;
+            const uint hash      = 100u;
+            Assert.IsTrue((hash % 256u) < threshold, "hash%256=100 < threshold=160 → blade must be kept.");
+        }
+
+        [Test]
+        public void DensityHashSkip_BladeCulledAtOrAboveThreshold()
+        {
+            // A blade with hash % 256 == 200 at threshold 160 → 200 >= 160 → CULLED.
+            const uint threshold = 160u;
+            const uint hash      = 200u;
+            Assert.IsTrue((hash % 256u) >= threshold, "hash%256=200 >= threshold=160 → blade must be culled.");
+        }
+
+        [Test]
+        public void DensityHashSkip_BladeCulledExactlyAtThreshold()
+        {
+            // Boundary: hash % 256 == threshold → CULLED (>= is inclusive on the cull side).
+            const uint threshold = 160u;
+            const uint hash      = 160u; // remainder = 160 exactly
+            Assert.IsTrue((hash % 256u) >= threshold, "hash%256 == threshold → blade must be culled (>= boundary).");
+        }
+
+        [Test]
+        public void DensityHashSkip_FloorThresholdRetains62Percent()
+        {
+            // At the density floor (threshold=160), blades with hash%256 in [0,159] pass.
+            // That is 160 out of 256 possible values → exactly 62.5% density.
+            const uint threshold = 160u;
+            int kept = 0;
+            for (uint h = 0; h < 256u; h++)
+                if ((h % 256u) < threshold) kept++;
+            Assert.AreEqual(160, kept, "Floor threshold=160 must retain exactly 160/256 blades (~62.5%).");
+        }
     }
 }

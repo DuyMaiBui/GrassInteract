@@ -263,6 +263,9 @@ namespace WorldPainter
             public Bounds WorldBounds => this.inner.WorldBounds;
             public void SetScaleFactor(float factor) => this.inner.SetScaleFactor(factor);
             public void Dispose() => this.inner.Dispose();
+
+            // [Phase 3] Forward density to the wrapped GrassGpuEngine.
+            internal void SetDensity(float normalizedDensity) => this.inner.SetDensity(normalizedDensity);
         }
     }
 }

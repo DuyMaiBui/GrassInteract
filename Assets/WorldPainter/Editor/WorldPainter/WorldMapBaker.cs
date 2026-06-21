@@ -137,6 +137,8 @@ namespace WorldPainter.Editor
         /// Copies the source tile's data into a standalone TerrainTileAsset at
         /// <paramref name="tilePath"/>. Creates the asset if it does not exist;
         /// overwrites data if it does.
+        ///
+        /// Phase 5b: also bakes the per-tile RG oct-encoded normal map from heightData.
         /// </summary>
         private static void BakeOneTile(TerrainTileAsset sourceTile, string tilePath)
         {
@@ -151,6 +153,9 @@ namespace WorldPainter.Editor
             // Copy all data fields from the source tile.
             CopyTileData(sourceTile, baked!);
 
+            // Phase 5b: bake the normal map from the copied heightData.
+            baked!.normalData = BakeNormalData(baked);
+
             if (isNew)
             {
                 AssetDatabase.CreateAsset(baked, tilePath);
@@ -159,6 +164,72 @@ namespace WorldPainter.Editor
             {
                 EditorUtility.SetDirty(baked);
             }
+        }
+
+        /// <summary>
+        /// Phase 5b: derive an RG8 hemisphere-XZ normal map from <paramref name="tile"/>'s
+        /// heightData using the same central-difference formula as DeriveNormalWS in HLSL.
+        ///
+        /// Encoding: R = ((nx * 0.5 + 0.5) * 255), G = ((nz * 0.5 + 0.5) * 255), byte-packed.
+        /// The shader reconstructs ny = sqrt(1 - nx² - nz²) (Y-up hemisphere assumption).
+        /// This is NOT full octahedral encoding — it stores only XZ and relies on the hemisphere
+        /// constraint rather than oct-folding, which is sufficient for nearly-flat terrain normals.
+        /// Resolution = heightRes × heightRes, 2 bytes per texel (R8G8 layout, interleaved RG).
+        ///
+        /// Border texels (within 1 texel of the edge) use clamped neighbours instead of the
+        /// shared-edge neighbour sample so the baker never reads out-of-bounds.
+        /// </summary>
+        internal static byte[] BakeNormalData(TerrainTileAsset tile)
+        {
+            if (!tile.IsHeightValid)
+                return System.Array.Empty<byte>();
+
+            int res    = tile.heightRes;
+            float hMin = tile.minHeight;
+            float hMax = tile.maxHeight;
+            float hRange = hMax - hMin;
+            // World metres per texel (central-difference step size matches TerrainNormals.hlsl).
+            float worldStep = TerrainWorldGrid.TILE_SIZE_M / (res - 1);
+            float inv2Step  = 1f / (2f * worldStep);
+
+            // Helper: decode height at texel (x, z), clamped to [0, res-1].
+            float SampleHeight(int x, int z)
+            {
+                x = Mathf.Clamp(x, 0, res - 1);
+                z = Mathf.Clamp(z, 0, res - 1);
+                int idx = (z * res + x) * TerrainHeightFormat.BYTES_PER_SAMPLE;
+                ushort raw = (ushort)(tile.heightData[idx] | (tile.heightData[idx + 1] << 8));
+                return hMin + (raw / (float)TerrainHeightFormat.R16_MAX_VALUE) * hRange;
+            }
+
+            byte[] result = new byte[res * res * 2];
+            for (int z = 0; z < res; ++z)
+            {
+                for (int x = 0; x < res; ++x)
+                {
+                    float dhdx = (SampleHeight(x + 1, z) - SampleHeight(x - 1, z)) * inv2Step;
+                    float dhdz = (SampleHeight(x, z + 1) - SampleHeight(x, z - 1)) * inv2Step;
+
+                    // Cross-product: normalize(-dhdx, 1, -dhdz) — same as DeriveNormalWS.
+                    float nx = -dhdx, ny = 1f, nz = -dhdz;
+                    float len = Mathf.Sqrt(nx * nx + ny * ny + nz * nz);
+                    if (len > 1e-6f) { nx /= len; nz /= len; }
+                    else             { nx = 0f; nz = 0f; }
+
+                    // RG8 hemisphere-XZ encoding: store nx and nz remapped to [0,255].
+                    // The shader reconstructs ny = sqrt(max(0, 1 - nx² - nz²)) relying on the
+                    // Y-up hemisphere constraint (terrain normals never point downward).
+                    // This is NOT octahedral encoding — no oct-fold is applied. It is simpler
+                    // and sufficient for nearly-flat terrain where ny is always positive.
+                    byte r = (byte)Mathf.Clamp(Mathf.RoundToInt((nx * 0.5f + 0.5f) * 255f), 0, 255);
+                    byte g = (byte)Mathf.Clamp(Mathf.RoundToInt((nz * 0.5f + 0.5f) * 255f), 0, 255);
+
+                    int outIdx = (z * res + x) * 2;
+                    result[outIdx]     = r;
+                    result[outIdx + 1] = g;
+                }
+            }
+            return result;
         }
 
         /// <summary>
@@ -177,6 +248,13 @@ namespace WorldPainter.Editor
                 ? (byte[])src.heightData.Clone()
                 : Array.Empty<byte>();
             // (Phase 3 cleanup — splatData copy removed; per-tile palette weights live in alphamaps[].)
+
+            // Phase 5b: normalData is BAKED from heightData in BakeOneTile; do NOT copy the
+            // source tile's stale normal here.  BakeOneTile calls BakeNormalData(baked) after
+            // this function so dst gets a freshly derived normal consistent with the copied height.
+            // If called standalone (not via BakeOneTile), clear normal so the runtime falls back
+            // to the live derivation path rather than carrying a stale value.
+            dst.normalData = Array.Empty<byte>();
 
             // Deep-copy density channels via JsonUtility round-trip (safe for plain-data structs).
             // We cannot call AllocateDensityChannel on dst because it's internal to lifecycle.

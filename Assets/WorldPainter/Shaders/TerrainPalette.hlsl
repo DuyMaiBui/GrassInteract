@@ -14,8 +14,21 @@
 #define TERRAIN_PALETTE_INCLUDED
 
 // Must match TerrainShadingConfig.MAX_TERRAIN_LAYERS / MAX_TERRAIN_ALPHAMAPS exactly.
+// Phase 5d: layer-count multi_compile variants — compile-time layer cap per variant so the
+// shader compiler can prove how many alphamap samples are needed and eliminate dead branches.
+// GpuTerrainEngine.Build sets the keyword to match the tile's actual layer count.
+// The fallback (no keyword set) defaults to the maximum 16-layer path (safe, never crashes).
+#if defined(_TERRAIN_LAYERS_4)
+#define TERRAIN_PALETTE_MAX_LAYERS    4
+#define TERRAIN_PALETTE_MAX_ALPHAMAPS 1
+#elif defined(_TERRAIN_LAYERS_8)
+#define TERRAIN_PALETTE_MAX_LAYERS    8
+#define TERRAIN_PALETTE_MAX_ALPHAMAPS 2
+#else
+// _TERRAIN_LAYERS_16 or no keyword: full 16-layer path.
 #define TERRAIN_PALETTE_MAX_LAYERS    16
 #define TERRAIN_PALETTE_MAX_ALPHAMAPS 4
+#endif
 
 // ── Palette uniforms (bound by TerrainPaletteBinder + GpuTerrainEngine) ─────
 TEXTURE2D_ARRAY(_TerrainPaletteArray);

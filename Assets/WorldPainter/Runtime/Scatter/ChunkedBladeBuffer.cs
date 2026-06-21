@@ -143,37 +143,68 @@ namespace WorldPainter
         public ChunkRange[]? ChunkRanges => this.chunkRanges;
 
         // ─────────────────────────────────────────────────────────────────────
-        // Bake
+        // BakeArrays — pure CPU, no GPU. Editor-callable.
         // ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Bakes a scatter result into sorted, chunk-partitioned GPU buffers. Callable in edit mode.
-        /// Disposes any previously baked buffers before re-baking.
+        /// Result struct returned by <see cref="BakeArrays"/>. Groups all output arrays and metadata
+        /// so callers don't have to juggle multiple out-params.
+        /// </summary>
+        public readonly struct BakeResult
+        {
+            public readonly BladeInstance[] Blades;
+            public readonly ChunkAabb[]     Aabbs;
+            public readonly ChunkRange[]    Ranges;
+            public readonly int   GridX;
+            public readonly int   GridZ;
+            public readonly int   ChunkSize;
+            public readonly int   TotalChunks;
+            public readonly int   TotalBlades;
+            public readonly float ScaleMax2;
+            public readonly bool  Oriented;
+
+            public BakeResult(
+                BladeInstance[] blades, ChunkAabb[] aabbs, ChunkRange[] ranges,
+                int gridX, int gridZ, int chunkSize, int totalChunks, int totalBlades,
+                float scaleMax2, bool oriented)
+            {
+                this.Blades      = blades;
+                this.Aabbs       = aabbs;
+                this.Ranges      = ranges;
+                this.GridX       = gridX;
+                this.GridZ       = gridZ;
+                this.ChunkSize   = chunkSize;
+                this.TotalChunks = totalChunks;
+                this.TotalBlades = totalBlades;
+                this.ScaleMax2   = scaleMax2;
+                this.Oriented    = oriented;
+            }
+        }
+
+        /// <summary>
+        /// Pure CPU bake: converts <paramref name="scatter"/> into sorted blade/aabb/range arrays plus
+        /// grid metadata. <b>No GraphicsBuffer is created.</b> Safe to call in editor without a
+        /// GPU context. Use <see cref="UploadFromArrays"/> or <see cref="LoadFromArrays"/>
+        /// to push the result to the GPU.
         /// </summary>
         /// <param name="scatter">Scatter output from GrassScatter.Build.</param>
         /// <param name="layer">Scatter layer — reads MaxBladeHeight, BendHeadroom, and ChunkSize.</param>
         /// <param name="origin">Field world-space origin (ScatterField transform position).</param>
         /// <param name="fieldBoundsXZ">ScatterLayer.FieldBounds (world-space XZ extents).</param>
         /// <param name="scaleRangeMax">
-        /// SSOT scale encode upper-bound = ScatterLayer.ScaleRange.y. GrassScatter clamps blade scale to
-        /// this value, so encoding over [0, scaleRangeMax] uses the full 16-bit range with no headroom
-        /// waste. Pass 0 or negative to fall back to 1f.
+        /// SSOT scale encode upper-bound = ScatterLayer.ScaleRange.y. GrassScatter clamps blade scale
+        /// to this value, so encoding over [0, scaleRangeMax] uses the full 16-bit range.
+        /// Pass 0 or negative to fall back to 1f.
         /// </param>
         /// <param name="oriented">
-        /// When true (layer.IsOriented), slot2 encodes octNormal(hi16) | pitch8 | roll8 from the baked
-        /// surface normal and the per-instance rotation stored in the scatter matrix.
-        /// When false (default), slot2 = decorrelation hash (UNCHANGED — byte-stable).
+        /// When true, slot2 encodes octNormal(hi16)|pitch8|roll8. When false, slot2 = XorShift32 hash.
         /// </param>
-        /// <param name="chunkSizeOverride">
-        /// Override the cell size in metres; pass 0 to use <paramref name="config"/>.ChunkSize.
-        /// </param>
-        public void Bake(GrassScatterResult scatter, ScatterLayer layer,
+        /// <param name="chunkSizeOverride">Override the cell size; pass 0 to use layer.Bounds.ChunkSize.</param>
+        /// <returns>A <see cref="BakeResult"/> holding all arrays and grid metadata.</returns>
+        public static BakeResult BakeArrays(GrassScatterResult scatter, ScatterLayer layer,
             Vector3 origin, Vector2 fieldBoundsXZ, float scaleRangeMax,
             bool oriented = false, int chunkSizeOverride = 0)
         {
-            // Release any prior buffers.
-            this.Dispose();
-
             int cellSize = chunkSizeOverride > 0 ? chunkSizeOverride : layer.Bounds.ChunkSize;
             if (cellSize < 1) cellSize = 1;
 
@@ -182,23 +213,14 @@ namespace WorldPainter
                                     origin.z - fieldBoundsXZ.y * 0.5f);
 
             // Grid dimensions (ceil so the last partial strip is covered).
-            int gridX = Mathf.Max(1, Mathf.CeilToInt(fieldBoundsXZ.x / cellSize));
-            int gridZ = Mathf.Max(1, Mathf.CeilToInt(fieldBoundsXZ.y / cellSize));
+            int gridX       = Mathf.Max(1, Mathf.CeilToInt(fieldBoundsXZ.x / cellSize));
+            int gridZ       = Mathf.Max(1, Mathf.CeilToInt(fieldBoundsXZ.y / cellSize));
             int totalChunks = gridX * gridZ;
             int totalBlades = scatter.TotalCount;
 
-            this.GridX = gridX;
-            this.GridZ = gridZ;
-            this.ChunkSize = cellSize;
-            this.TotalChunks = totalChunks;
-            this.TotalBlades = totalBlades;
-
             // FIX 6: SSOT scale encode upper-bound = scaleRangeMax (= ScatterLayer.ScaleRange.y).
-            // GrassScatter clamps blade scale to ScaleRange.y so encoding over [0, ScaleRange.y]
-            // uses the full 16-bit precision. No ×2 multiplier — the old ×2 wasted half the range.
-            float maxScale = scaleRangeMax > 0f ? scaleRangeMax : 1f;
-            this.scaleMax2 = maxScale; // = ScaleRange.y; the _ScaleMax2 uniform name is kept for shader compat
-            float encodeScaleScale = 65535f / this.scaleMax2;
+            float maxScale        = scaleRangeMax > 0f ? scaleRangeMax : 1f;
+            float encodeScaleScale = 65535f / maxScale;
 
             // Headroom — mirror GrassScatter.BuildFieldBounds EXACTLY for AABB parity.
             float bladeReachY = layer.Bounds.MaxBladeHeight * maxScale + layer.Bounds.BendHeadroom;
@@ -211,14 +233,13 @@ namespace WorldPainter
             int flatIdx = 0;
             for (int b = 0; b < scatter.BaseSlabs.Length; ++b)
             {
-                int count = scatter.SlabCounts[b];
+                int count     = scatter.SlabCounts[b];
                 Vector3[] posSlab = scatter.BasePositionSlabs[b];
                 for (int k = 0; k < count; ++k)
                 {
                     Vector3 pos = posSlab[k];
-                    // Cell coordinate — clamp to valid range so blades at the exact far edge stay in-bounds.
-                    int cx = Mathf.Clamp((int)((pos.x - minXZ.x) / cellSize), 0, gridX - 1);
-                    int cz = Mathf.Clamp((int)((pos.z - minXZ.y) / cellSize), 0, gridZ - 1);
+                    int cx   = Mathf.Clamp((int)((pos.x - minXZ.x) / cellSize), 0, gridX - 1);
+                    int cz   = Mathf.Clamp((int)((pos.z - minXZ.y) / cellSize), 0, gridZ - 1);
                     int cell = cz * gridX + cx;
                     bladeCell[flatIdx] = cell;
                     cellCounts[cell]++;
@@ -226,16 +247,16 @@ namespace WorldPainter
                 }
             }
 
-            // ── Step 2: prefix-sum → per-cell start offsets (counting sort, pass 2) ──
-            int[] cellStart  = new int[totalChunks];
-            int   running    = 0;
+            // ── Step 2: prefix-sum → per-cell start offsets ──────────────────
+            int[] cellStart = new int[totalChunks];
+            int   running   = 0;
             for (int c = 0; c < totalChunks; ++c)
             {
                 cellStart[c] = running;
                 running += cellCounts[c];
             }
 
-            // ── Step 3: scatter blades into sorted output, build per-cell AABB ──────
+            // ── Step 3: scatter blades into sorted output; build per-cell AABB ─
             var bladeOut = new BladeInstance[totalBlades];
             var aabbOut  = new ChunkAabb[totalChunks];
             var rangeOut = new ChunkRange[totalChunks];
@@ -250,14 +271,13 @@ namespace WorldPainter
                 };
             }
 
-            // Write-cursors per cell (for in-order fill during the scatter pass).
             int[] writeCursor = new int[totalChunks];
             Array.Copy(cellStart, writeCursor, totalChunks);
 
             flatIdx = 0;
             for (int b = 0; b < scatter.BaseSlabs.Length; ++b)
             {
-                int count        = scatter.SlabCounts[b];
+                int          count   = scatter.SlabCounts[b];
                 Matrix4x4[]  matSlab = scatter.BaseSlabs[b];
                 Vector3[]    posSlab = scatter.BasePositionSlabs[b];
                 Vector3[]    nrmSlab = scatter.BaseNormalSlabs[b];
@@ -267,36 +287,26 @@ namespace WorldPainter
                     int       cell = bladeCell[flatIdx];
                     int       outI = writeCursor[cell]++;
                     Matrix4x4 m    = matSlab[k];
-                    Vector3   pos  = posSlab[k]; // ground-snapped base world position
-                    Vector3   nrm  = nrmSlab[k]; // surface normal (Vector3.up for non-oriented)
+                    Vector3   pos  = posSlab[k];
+                    Vector3   nrm  = nrmSlab[k];
 
-                    // Decompose base matrix — mirror GrassBendSimulator EXACTLY for pose parity.
-                    float yaw   = m.rotation.eulerAngles.y; // 0..360
-                    float scale = m.lossyScale.x;           // uniform scale
+                    float yaw   = m.rotation.eulerAngles.y;
+                    float scale = m.lossyScale.x;
 
-                    // Pack yaw (high 16) + scale (low 16) into one uint.
-                    uint yawQ   = (uint)Mathf.RoundToInt(Mathf.Clamp(yaw, 0f, 360f) * YAW_ENCODE_SCALE);
-                    uint scaleQ = (uint)Mathf.RoundToInt(Mathf.Clamp(scale, 0f, this.scaleMax2) * encodeScaleScale);
+                    uint yawQ   = (uint)Mathf.RoundToInt(Mathf.Clamp(yaw,   0f, 360f)  * YAW_ENCODE_SCALE);
+                    uint scaleQ = (uint)Mathf.RoundToInt(Mathf.Clamp(scale, 0f, maxScale) * encodeScaleScale);
                     uint packed = ((yawQ & 0xFFFFu) << 16) | (scaleQ & 0xFFFFu);
 
-                    // Slot2: oriented mode → octNormal(hi16) | pitch8(b8) | roll8(b0).
-                    //        legacy mode   → XorShift32 hash (byte-identical to prior behaviour).
                     uint slot2;
                     if (oriented)
                     {
-                        // Decompose the per-instance rotation to get pitch and roll.
-                        // The matrix stores align * Euler(pitch, yaw, roll) * offset.
-                        // We extract the euler angles and re-derive pitch / roll.
-                        Vector3 euler = m.rotation.eulerAngles;
-                        // eulerAngles.x = pitch, .z = roll (Unity ZXY convention maps to x=pitch, z=roll).
-                        float pitchDeg = euler.x > 180f ? euler.x - 360f : euler.x; // remap [0,360]→[-180,180]
-                        float rollDeg  = euler.z > 180f ? euler.z - 360f : euler.z;
-
+                        Vector3 euler   = m.rotation.eulerAngles;
+                        float pitchDeg  = euler.x > 180f ? euler.x - 360f : euler.x;
+                        float rollDeg   = euler.z > 180f ? euler.z - 360f : euler.z;
                         slot2 = PackOrientedSlot2(nrm, pitchDeg, rollDeg);
                     }
                     else
                     {
-                        // Per-blade deterministic random hash from flat index (unchanged — byte-stable).
                         slot2 = XorShift32((uint)(flatIdx + 1));
                     }
 
@@ -307,7 +317,6 @@ namespace WorldPainter
                         hash           = slot2,
                     };
 
-                    // Expand per-cell AABB to include this blade's base position.
                     ref ChunkAabb aabb = ref aabbOut[cell];
                     if (pos.x < aabb.min.x) aabb.min.x = pos.x;
                     if (pos.y < aabb.min.y) aabb.min.y = pos.y;
@@ -326,13 +335,11 @@ namespace WorldPainter
                 int cnt = cellCounts[c];
                 if (cnt == 0)
                 {
-                    // Sentinel already set above; range = {0, 0}.
                     rangeOut[c] = new ChunkRange { start = 0, count = 0 };
                     continue;
                 }
 
                 ref ChunkAabb aabb = ref aabbOut[c];
-                // Y: grow upward by bladeReachY (bent tips); lateralPad for XZ sway footprint.
                 aabb.max.y += bladeReachY;
                 aabb.min.x -= lateralPad;
                 aabb.max.x += lateralPad;
@@ -346,36 +353,154 @@ namespace WorldPainter
                 };
             }
 
-            // ── Step 4: store CPU arrays ──────────────────────────────────────
-            this.bladeInstances = bladeOut;
-            this.chunkAabbs     = aabbOut;
-            this.chunkRanges    = rangeOut;
+            return new BakeResult(bladeOut, aabbOut, rangeOut,
+                gridX, gridZ, cellSize, totalChunks, totalBlades, maxScale, oriented);
+        }
 
-            // ── Step 5: upload to GPU ─────────────────────────────────────────
-            if (totalBlades > 0)
+        // ─────────────────────────────────────────────────────────────────────
+        // UploadFromArrays — GPU upload from already-baked CPU arrays.
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Uploads the CPU arrays currently stored on this instance to the three
+        /// <see cref="GraphicsBuffer"/>s. Must be called after the CPU arrays are set — either via
+        /// <see cref="BakeArrays"/> or <see cref="LoadFromArrays"/>. Disposes any prior GPU buffers.
+        /// </summary>
+        public void UploadFromArrays()
+        {
+            // Release any existing GPU buffers.
+            if (this.bladeBuf != null) { this.bladeBuf.Release(); this.bladeBuf = null; }
+            if (this.aabbBuf  != null) { this.aabbBuf.Release();  this.aabbBuf  = null; }
+            if (this.rangeBuf != null) { this.rangeBuf.Release();  this.rangeBuf = null; }
+
+            int totalBlades = this.TotalBlades;
+            int totalChunks = this.TotalChunks;
+
+            if (totalBlades > 0 && this.bladeInstances != null)
             {
-                // BladeInstance stride = 20 B (float3 posWS=12, uint packedYawScale=4, uint hash=4).
                 this.bladeBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
                     totalBlades, BLADE_STRIDE);
-                this.bladeBuf.SetData(bladeOut);
+                this.bladeBuf.SetData(this.bladeInstances);
             }
 
-            if (totalChunks > 0)
+            if (totalChunks > 0 && this.chunkAabbs != null && this.chunkRanges != null)
             {
-                // ChunkAabb stride = 24 B (float3 min=12, float3 max=12).
                 this.aabbBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
                     totalChunks, AABB_STRIDE);
-                this.aabbBuf.SetData(aabbOut);
+                this.aabbBuf.SetData(this.chunkAabbs);
 
-                // ChunkRange stride = 8 B (uint start=4, uint count=4).
                 this.rangeBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
                     totalChunks, RANGE_STRIDE);
-                this.rangeBuf.SetData(rangeOut);
+                this.rangeBuf.SetData(this.chunkRanges);
             }
+        }
 
-            WpLog.Log($"[ChunkedBladeBuffer] Baked: TotalBlades={totalBlades}, " +
-                      $"Grid={gridX}×{gridZ} ({totalChunks} chunks), CellSize={cellSize}m, " +
-                      $"ScaleRangeMax={maxScale:F3} (encode range [0,{this.scaleMax2:F3}])");
+        // ─────────────────────────────────────────────────────────────────────
+        // Bake (composed path — editor fast-iteration, unchanged behavior)
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Bakes a scatter result into sorted, chunk-partitioned GPU buffers. Callable in edit mode.
+        /// Disposes any previously baked buffers before re-baking.
+        /// Composed as BakeArrays + LoadFromArrays + UploadFromArrays — preserves existing behavior.
+        /// </summary>
+        /// <param name="scatter">Scatter output from GrassScatter.Build.</param>
+        /// <param name="layer">Scatter layer — reads MaxBladeHeight, BendHeadroom, and ChunkSize.</param>
+        /// <param name="origin">Field world-space origin (ScatterField transform position).</param>
+        /// <param name="fieldBoundsXZ">ScatterLayer.FieldBounds (world-space XZ extents).</param>
+        /// <param name="scaleRangeMax">
+        /// SSOT scale encode upper-bound = ScatterLayer.ScaleRange.y. GrassScatter clamps blade scale to
+        /// this value, so encoding over [0, scaleRangeMax] uses the full 16-bit range with no headroom
+        /// waste. Pass 0 or negative to fall back to 1f.
+        /// </param>
+        /// <param name="oriented">
+        /// When true (layer.IsOriented), slot2 encodes octNormal(hi16) | pitch8 | roll8 from the baked
+        /// surface normal and the per-instance rotation stored in the scatter matrix.
+        /// When false (default), slot2 = decorrelation hash (UNCHANGED — byte-stable).
+        /// </param>
+        /// <param name="chunkSizeOverride">
+        /// Override the cell size in metres; pass 0 to use <paramref name="layer"/>.Bounds.ChunkSize.
+        /// </param>
+        public void Bake(GrassScatterResult scatter, ScatterLayer layer,
+            Vector3 origin, Vector2 fieldBoundsXZ, float scaleRangeMax,
+            bool oriented = false, int chunkSizeOverride = 0)
+        {
+            // Release any prior GPU buffers (UploadFromArrays handles its own release too,
+            // but Dispose also clears CPU arrays — we want BakeArrays to produce fresh ones).
+            this.Dispose();
+
+            BakeResult r = BakeArrays(scatter, layer, origin, fieldBoundsXZ,
+                scaleRangeMax, oriented, chunkSizeOverride);
+
+            this.LoadFromArrays(r.Blades, r.Aabbs, r.Ranges,
+                r.GridX, r.GridZ, r.ChunkSize, r.TotalChunks, r.TotalBlades,
+                r.ScaleMax2, r.Oriented);
+
+            // UploadFromArrays is called inside LoadFromArrays — no duplicate upload.
+
+            WpLog.Log($"[ChunkedBladeBuffer] Baked: TotalBlades={this.TotalBlades}, " +
+                      $"Grid={this.GridX}×{this.GridZ} ({this.TotalChunks} chunks), " +
+                      $"CellSize={this.ChunkSize}m, " +
+                      $"ScaleRangeMax={this.scaleMax2:F3} (encode range [0,{this.scaleMax2:F3}])");
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // LoadFromArrays — set CPU arrays + metadata + upload to GPU
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Sets the CPU arrays and grid metadata from caller-supplied data, then calls
+        /// <see cref="UploadFromArrays"/> to push them to the GPU.
+        /// Used by both the composed <see cref="Bake"/> path and by <see cref="LoadFromBaked"/>.
+        /// </summary>
+        public void LoadFromArrays(
+            BladeInstance[] blades, ChunkAabb[] aabbs, ChunkRange[] ranges,
+            int gridX, int gridZ, int chunkSize, int totalChunks, int totalBlades,
+            float scaleMax2, bool oriented)
+        {
+            this.GridX          = gridX;
+            this.GridZ          = gridZ;
+            this.ChunkSize      = chunkSize;
+            this.TotalChunks    = totalChunks;
+            this.TotalBlades    = totalBlades;
+            this.scaleMax2      = scaleMax2;
+            this.bladeInstances = blades;
+            this.chunkAabbs     = aabbs;
+            this.chunkRanges    = ranges;
+            // oriented is stored implicitly — currently unused at runtime (the shader uses _OrientMode
+            // set per-material in GrassGpuEngine.Build). Kept in BakedGrassData for re-bake fidelity.
+            _ = oriented; // suppress unused-var warning — parameter is structural documentation
+
+            this.UploadFromArrays();
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // LoadFromBaked — deserialize BakedGrassData + upload (3× SetData only)
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Deserializes a <see cref="BakedGrassData"/> blob sub-asset and uploads the arrays to
+        /// the GPU via <see cref="UploadFromArrays"/>. Replaces GrassScatter.Build + counting-sort
+        /// for the runtime fast path. Throws if the blob version byte ≠ 1.
+        /// </summary>
+        /// <param name="baked">Populated <see cref="BakedGrassData"/> sub-asset.</param>
+        public void LoadFromBaked(BakedGrassData baked)
+        {
+            if (baked == null) throw new ArgumentNullException(nameof(baked));
+
+            // Dispose any prior GPU buffers BEFORE unpacking to keep the window clean.
+            this.Dispose();
+
+            var (blades, aabbs, ranges) = baked.Unpack();
+
+            this.LoadFromArrays(blades, aabbs, ranges,
+                baked.GridX, baked.GridZ, baked.ChunkSize,
+                baked.TotalChunks, baked.TotalBlades,
+                baked.ScaleMax2, baked.Oriented);
+
+            WpLog.Log($"[ChunkedBladeBuffer] LoadFromBaked: TotalBlades={this.TotalBlades}, " +
+                      $"Grid={this.GridX}×{this.GridZ} ({this.TotalChunks} chunks), " +
+                      $"CellSize={this.ChunkSize}m, ScaleMax2={this.scaleMax2:F3}");
         }
 
         // ─────────────────────────────────────────────────────────────────────

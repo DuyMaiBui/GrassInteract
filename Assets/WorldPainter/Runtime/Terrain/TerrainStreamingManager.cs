@@ -48,11 +48,18 @@ namespace WorldPainter
         private readonly Dictionary<Vector2Int, TerrainTileAsset> tileIndex =
             new Dictionary<Vector2Int, TerrainTileAsset>();
 
+        // [terrain-build-diag] one-shot guard for the first-tick diagnostic log.
+        private bool loggedTickDiag;
+
         // ── Unity lifecycle ────────────────────────────────────────────────────
 
         private void OnEnable()
         {
             this.RebuildTileIndex();
+            // [terrain-build-diag] One-shot wiring report — pins setup gaps in a player logcat.
+            WpLog.Log($"[TerrainStreamingManager] OnEnable: patchMaterial={(this.patchMaterial != null ? "OK" : "NULL")}, " +
+                      $"cullCompute={(this.cullCompute != null ? "OK" : "NULL")}, " +
+                      $"registeredTiles={this.tileIndex.Count}, isPlaying={Application.isPlaying}");
 #if UNITY_EDITOR
             RenderPipelineManager.beginCameraRendering += this.OnBeginCameraRenderingEdit;
 #endif
@@ -70,8 +77,23 @@ namespace WorldPainter
         {
             if (!Application.isPlaying) return;
             Camera? cam = Camera.main;
-            if (cam == null) return;
+            if (cam == null)
+            {
+                if (!this.loggedTickDiag)
+                {
+                    this.loggedTickDiag = true;
+                    WpLog.Warning("[TerrainStreamingManager] LateUpdate: Camera.main is NULL — no " +
+                        "'MainCamera'-tagged camera in the scene → terrain never submits. Tag the gameplay camera 'MainCamera'.");
+                }
+                return;
+            }
             this.Tick(cam, cam.transform.position);
+            if (!this.loggedTickDiag)
+            {
+                this.loggedTickDiag = true;
+                WpLog.Log($"[TerrainStreamingManager] First tick OK: camera='{cam.name}', " +
+                          $"registeredTiles={this.tileIndex.Count}, residentTiles={this.residencySet.Count}.");
+            }
         }
 
 #if UNITY_EDITOR
@@ -214,7 +236,14 @@ namespace WorldPainter
 
         private void OnTileLoaded(Vector2Int coord, TerrainTileAsset asset, int generation)
         {
-            if (this.cullCompute == null || this.patchMaterial == null) return;
+            if (this.cullCompute == null || this.patchMaterial == null)
+            {
+                // [terrain-build-diag] Loud abort — was a SILENT early-return (build-invisible terrain).
+                WpLog.Warning($"[TerrainStreamingManager] OnTileLoaded {coord} ABORTED — " +
+                    $"patchMaterial={(this.patchMaterial != null ? "OK" : "NULL")}, " +
+                    $"cullCompute={(this.cullCompute != null ? "OK" : "NULL")} → terrain will not render.");
+                return;
+            }
             if (this.residencySet.Contains(coord)) return; // double-load guard
 
             if (this.residencySet.Count >= TerrainStreamingConfig.MAX_RESIDENT_TILES)

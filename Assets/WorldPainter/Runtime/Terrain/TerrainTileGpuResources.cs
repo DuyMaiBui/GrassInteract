@@ -29,11 +29,20 @@ namespace WorldPainter
 
         // ── GPU textures ──────────────────────────────────────────────────────
         private Texture2D? heightTex;
+        // Phase 5b: RG8 baked normal texture (oct-encoded XZ, Y derived in shader).
+        private Texture2D? normalTex;
 
         // ── Public accessors ──────────────────────────────────────────────────
 
         /// <summary>Height texture (R16 or RHalf) built from the tile's heightData.</summary>
         public Texture2D? HeightTexture => this.heightTex;
+
+        /// <summary>
+        /// Phase 5b: RG8 baked normal texture.  Null when the tile has no normalData
+        /// (pre-Phase-5 tiles not yet re-baked); the runtime falls back to live derivation
+        /// via the _WP_LIVE_SCULPT keyword path.
+        /// </summary>
+        public Texture2D? NormalTexture => this.normalTex;
 
         /// <summary>
         /// The height texture format actually chosen: R16 if supported, RHalf otherwise.
@@ -63,10 +72,19 @@ namespace WorldPainter
                     $"expected {tile.ExpectedHeightBytes} bytes, got {tile.heightData?.Length ?? 0}.");
 
             // Compute chosenHeightFmt BEFORE the reuse check so the format comparison is correct.
-            TextureFormat chosenHeightFmt = SystemInfo.SupportsTextureFormat(PRIMARY_HEIGHT_FORMAT)
-                ? PRIMARY_HEIGHT_FORMAT
-                : FALLBACK_HEIGHT_FORMAT;
+            // R16 is bit-exact but NOT reliably VTF-sampleable / bilinear-filterable on mobile GPUs
+            // (Adreno): SystemInfo.SupportsTextureFormat(R16) reports STORAGE support, not vertex-fetch
+            // filtering. A failed height VTF in TerrainPatch.vert yields garbage worldY → vertices
+            // collapse off-screen → INVISIBLE terrain in mobile builds (the editor on a desktop GPU is
+            // fine, which is why this only showed on-device). RHalf (R16_SFloat) is VTF-safe on all
+            // tested mobile GPUs. Use R16 only off-mobile and only when storage-supported.
+            bool useR16 = !Application.isMobilePlatform
+                && SystemInfo.SupportsTextureFormat(PRIMARY_HEIGHT_FORMAT);
+            TextureFormat chosenHeightFmt = useR16 ? PRIMARY_HEIGHT_FORMAT : FALLBACK_HEIGHT_FORMAT;
             this.HeightFormat = chosenHeightFmt;
+            // [terrain-build-diag] confirm the format actually chosen on-device.
+            WpLog.Log($"[TerrainTileGpuResources] Tile {tile.tileCoord}: heightFmt={chosenHeightFmt} " +
+                      $"(isMobile={Application.isMobilePlatform}, R16storageSupported={SystemInfo.SupportsTextureFormat(PRIMARY_HEIGHT_FORMAT)}, res={tile.heightRes})");
 
             // ── Height texture: reuse same Texture2D when res/format match ────
             // Keeping the same object preserves the material's _HeightTex binding after commit
@@ -94,6 +112,37 @@ namespace WorldPainter
                 this.heightTex!.LoadRawTextureData(this.ConvertR16ToRHalf(tile));
             this.heightTex.Apply(updateMipmaps: false, makeNoLongerReadable: false);
 
+            // Phase 5b: upload baked normal texture (RG8, oct-encoded XZ).
+            // Falls through gracefully when normalData is absent (pre-Phase-5 tiles).
+            if (tile.IsNormalValid)
+            {
+                bool reuseNormal = this.normalTex != null
+                    && this.normalTex.width  == tile.NormalRes
+                    && this.normalTex.height == tile.NormalRes;
+
+                if (!reuseNormal)
+                {
+                    if (this.normalTex != null) { SafeDestroy(this.normalTex); this.normalTex = null; }
+                    // RG16 (= RG8 aliased as 2-byte per texel) — use TextureFormat.RG16 for exact layout.
+                    // Mip chain enabled: the baked normal benefits from mip filtering at distance.
+                    this.normalTex = new Texture2D(tile.NormalRes, tile.NormalRes,
+                        TextureFormat.RG16, mipChain: true, linear: true)
+                    {
+                        name       = $"TerrainNormal_{tile.tileCoord.x}_{tile.tileCoord.y}",
+                        wrapMode   = TextureWrapMode.Clamp,
+                        filterMode = FilterMode.Bilinear,
+                    };
+                }
+                this.normalTex!.LoadRawTextureData(tile.normalData);
+                this.normalTex.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            }
+            else if (this.normalTex != null)
+            {
+                // Tile lost its normal data (e.g. re-bake cleared it) — release the stale texture.
+                SafeDestroy(this.normalTex);
+                this.normalTex = null;
+            }
+
             this.IsUploaded = true;
         }
 
@@ -109,6 +158,12 @@ namespace WorldPainter
             {
                 SafeDestroy(this.heightTex);
                 this.heightTex = null;
+            }
+            // Phase 5b: release baked normal texture.
+            if (this.normalTex != null)
+            {
+                SafeDestroy(this.normalTex);
+                this.normalTex = null;
             }
             this.IsUploaded = false;
         }

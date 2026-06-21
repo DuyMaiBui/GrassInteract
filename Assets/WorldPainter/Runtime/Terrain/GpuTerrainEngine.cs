@@ -51,6 +51,9 @@ namespace WorldPainter
         private static readonly int ID_MinHeight          = Shader.PropertyToID("_MinHeight");
         private static readonly int ID_MaxHeight          = Shader.PropertyToID("_MaxHeight");
         private static readonly int ID_HeightTex          = Shader.PropertyToID("_HeightTex");
+        // Phase 5b: baked normal texture + live-sculpt keyword.
+        private static readonly int ID_BakedNormalTex     = Shader.PropertyToID("_BakedNormalTex");
+        private const string KEYWORD_LIVE_SCULPT          = "_WP_LIVE_SCULPT";
         // B1 fix: tile-local UV uniforms so non-(0,0) tiles sample the correct texel region.
         // Also resolves MINOR-2: TILE_SIZE_M is no longer a hardcoded literal in the shader.
         private static readonly int ID_TileOriginWS       = Shader.PropertyToID("_TileOriginWS");
@@ -106,6 +109,12 @@ namespace WorldPainter
         // ── State ─────────────────────────────────────────────────────────────
         private bool isBuilt;
 
+        // [terrain-build-diag] one-shot guard for the Submit-path diagnostic log.
+        private bool loggedSubmitDiag;
+
+        // [terrain-build-diag] one-shot guard for the post-cull indirect-args readback.
+        private bool loggedDrawDiag;
+
         // ── Construction ──────────────────────────────────────────────────────
 
         public GpuTerrainEngine(ComputeShader computeShader, Material patchMaterial)
@@ -134,18 +143,36 @@ namespace WorldPainter
         /// <summary>
         /// Bind the working RenderTexture as _HeightTex for instant VTF preview.
         /// Decode parity: RT stores normalized [0,1]; SampleHeightVTF produces same range.
+        ///
+        /// Phase 5b: also forces _WP_LIVE_SCULPT so the normal is re-derived from the live
+        /// height RT rather than the now-stale baked normal texture during a stroke.
         /// </summary>
         internal void BeginSculptPreview(RenderTexture rt)
         {
             if (this.patchMaterial != null)
+            {
                 this.patchMaterial.SetTexture(ID_HeightTex, rt);
+                // Phase 5b: force live derivation during sculpting — baked normal is stale.
+                this.patchMaterial.EnableKeyword(KEYWORD_LIVE_SCULPT);
+            }
         }
 
-        /// <summary>Rebind the committed Texture2D to restore normal rendering after stroke.</summary>
+        /// <summary>
+        /// Rebind the committed Texture2D to restore normal rendering after stroke.
+        ///
+        /// Phase 5b: restore the baked-normal keyword state — re-enable baked fetch if a
+        /// baked normal is available; leave _WP_LIVE_SCULPT on if there is none.
+        /// </summary>
         internal void EndSculptPreview()
         {
-            if (this.patchMaterial != null && this.gpuResources?.HeightTexture != null)
+            if (this.patchMaterial == null) return;
+            if (this.gpuResources?.HeightTexture != null)
                 this.patchMaterial.SetTexture(ID_HeightTex, this.gpuResources.HeightTexture);
+            // Phase 5b: restore keyword to match whether a baked normal is available.
+            if (this.gpuResources?.NormalTexture != null)
+                this.patchMaterial.DisableKeyword(KEYWORD_LIVE_SCULPT);
+            else
+                this.patchMaterial.EnableKeyword(KEYWORD_LIVE_SCULPT);
         }
 
         /// <summary>
@@ -254,6 +281,21 @@ namespace WorldPainter
             if (gpuRes.HeightTexture != null)
                 this.patchMaterial.SetTexture(ID_HeightTex, gpuRes.HeightTexture);
 
+            // Phase 5b: bind baked normal texture and set keyword.
+            // When the normal texture is available, enable the baked-fetch path in the shader.
+            // When absent (pre-Phase-5 tiles), enable _WP_LIVE_SCULPT so the shader falls back
+            // to the 4-tap height derivation path.  Editor sculpting also forces _WP_LIVE_SCULPT
+            // (see BeginSculptPreview) so live painting still works regardless.
+            if (gpuRes.NormalTexture != null)
+            {
+                this.patchMaterial.SetTexture(ID_BakedNormalTex, gpuRes.NormalTexture);
+                this.patchMaterial.DisableKeyword(KEYWORD_LIVE_SCULPT);
+            }
+            else
+            {
+                this.patchMaterial.EnableKeyword(KEYWORD_LIVE_SCULPT);
+            }
+
             // Phase 2a — per-tile alphamaps (one RGBA32 per 4 palette layers). Bound here
             // so the tile material clone carries its own per-tile binding; the map-level
             // palette array is set by BindPalette (shared across tiles).
@@ -273,12 +315,20 @@ namespace WorldPainter
             this.isBuilt = true;
         }
 
+        // ── Layer-count keyword names (Phase 5d) ──────────────────────────────
+        private const string KEYWORD_LAYERS_4  = "_TERRAIN_LAYERS_4";
+        private const string KEYWORD_LAYERS_8  = "_TERRAIN_LAYERS_8";
+        private const string KEYWORD_LAYERS_16 = "_TERRAIN_LAYERS_16";
+
         // ── Terrain palette binding (Phase 2a) ────────────────────────────────
 
         /// <summary>
         /// Binds the map-level TerrainLayer palette array + per-layer tilings onto this
         /// tile's material clone. Call AFTER <see cref="Build"/>. The array is owned by
         /// <see cref="TerrainPaletteBinder"/>; this engine only references it.
+        ///
+        /// Phase 5d: also sets the layer-count variant keyword on the material so the shader
+        /// compiler can eliminate dead alphamap samples for tiles with few layers.
         /// </summary>
         internal void BindPalette(TerrainPaletteBinder binder)
         {
@@ -287,6 +337,20 @@ namespace WorldPainter
                 this.patchMaterial.SetTexture(ID_TerrainPaletteArray, binder.Array);
             this.patchMaterial.SetInt(ID_TerrainPaletteCount, binder.ActiveCount);
             this.patchMaterial.SetVectorArray(ID_TerrainPaletteTilings, binder.Tilings);
+
+            // Phase 5d: set layer-count keyword so the shader loop cap matches the actual tile.
+            // Keyword is EXCLUSIVE — enable the correct bucket, disable the others.
+            // Buckets: ≤4 layers → _TERRAIN_LAYERS_4, ≤8 → _TERRAIN_LAYERS_8, else _TERRAIN_LAYERS_16.
+            int layerCount = binder.ActiveCount;
+            this.patchMaterial.DisableKeyword(KEYWORD_LAYERS_4);
+            this.patchMaterial.DisableKeyword(KEYWORD_LAYERS_8);
+            this.patchMaterial.DisableKeyword(KEYWORD_LAYERS_16);
+            if (layerCount <= 4)
+                this.patchMaterial.EnableKeyword(KEYWORD_LAYERS_4);
+            else if (layerCount <= 8)
+                this.patchMaterial.EnableKeyword(KEYWORD_LAYERS_8);
+            else
+                this.patchMaterial.EnableKeyword(KEYWORD_LAYERS_16);
         }
 
         /// <summary>
@@ -299,6 +363,12 @@ namespace WorldPainter
         /// Pushes <paramref name="tile"/>.alphamaps[] onto <paramref name="material"/>.
         /// Slots beyond the tile's count are bound to <c>Texture2D.blackTexture</c> so the
         /// shader can safely read them when the loop body short-circuits on count.
+        ///
+        /// Phase 5c: generates mips on any alphamap that was created pre-Phase-5 (mipmapCount==1).
+        /// New assets are created with mipChain:true in WorldMapAssetLifecycle.CreateBlankAlphamap,
+        /// but existing serialized assets may still have the old mipChain:false state.  Generating
+        /// mips at bind time is a one-off O(N_texels) CPU cost per cold Build; subsequent rebuilds
+        /// skip it (mipmapCount already >1 after the first Apply).
         /// </summary>
         private static void BindTileAlphamaps(Material material, TerrainTileAsset tile)
         {
@@ -308,9 +378,21 @@ namespace WorldPainter
             var alphamaps = tile.Alphamaps;
             for (int i = 0; i < ID_TerrainAlphamap.Length; i++)
             {
-                Texture tex = (i < count && alphamaps[i] != null)
-                    ? (Texture)alphamaps[i]
-                    : Texture2D.blackTexture;
+                Texture tex;
+                if (i < count && alphamaps[i] != null)
+                {
+                    var map = alphamaps[i];
+                    // Phase 5c: back-compat mip generation for pre-Phase-5 assets.
+                    // isReadable guards against assets imported with makeNoLongerReadable:true
+                    // (shouldn't happen for alphamaps, but guarded for safety).
+                    if (map.mipmapCount <= 1 && map.isReadable)
+                        map.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+                    tex = map;
+                }
+                else
+                {
+                    tex = Texture2D.blackTexture;
+                }
                 material.SetTexture(ID_TerrainAlphamap[i], tex);
             }
         }
@@ -328,7 +410,15 @@ namespace WorldPainter
                 return;
 
             Camera? cullCam = targetCamera ?? Camera.main;
-            if (cullCam == null) return;
+            if (cullCam == null)
+            {
+                if (!this.loggedSubmitDiag)
+                {
+                    this.loggedSubmitDiag = true;
+                    WpLog.Warning("[GpuTerrainEngine] Submit BAIL: cullCam null (targetCamera null AND no Camera.main) → terrain not drawn.");
+                }
+                return;
+            }
 
             // ── Whole-tile frustum gate ─────────────────────────────────────
             // Skip the entire submit (quadtree select + node upload + cull dispatch + forward and
@@ -341,7 +431,15 @@ namespace WorldPainter
             Bounds worldTileBounds = (this.rootSpace != null && !this.rootSpace.IsIdentity)
                 ? this.rootSpace.PaintingBoundsToWorld(this.worldBounds)
                 : this.worldBounds;
-            if (!GeometryUtility.TestPlanesAABB(this.planeScratch, worldTileBounds))
+            bool inFrustum = GeometryUtility.TestPlanesAABB(this.planeScratch, worldTileBounds);
+            if (!this.loggedSubmitDiag)
+            {
+                this.loggedSubmitDiag = true;
+                WpLog.Log($"[GpuTerrainEngine] Submit diag: cullCam='{cullCam.name}', targetCamNull={(targetCamera == null)}, " +
+                          $"inFrustum={inFrustum}, bounds(center={worldTileBounds.center}, size={worldTileBounds.size}), " +
+                          $"camPos={cameraPos}, rootIdentity={(this.rootSpace == null || this.rootSpace.IsIdentity)}");
+            }
+            if (!inFrustum)
                 return;
 
             // 1. CDLOD quadtree selection (CPU) — in PAINTING space. Nodes live in painting
@@ -350,7 +448,11 @@ namespace WorldPainter
             Vector3 selectPos = (this.rootSpace != null && !this.rootSpace.IsIdentity)
                 ? this.rootSpace.WorldToPainting(cameraPos) : cameraPos;
             IReadOnlyList<CdlodNode> nodes = this.quadtree.Select(selectPos);
-            if (nodes.Count == 0) return;
+            if (nodes.Count == 0)
+            {
+                WpLog.Warning($"[GpuTerrainEngine] Submit: 0 nodes selected at selectPos={selectPos} → tile not drawn.");
+                return;
+            }
 
             // 2. Upload nodes + AABBs to GPU
             if (this.tileAsset == null) return;
@@ -383,6 +485,19 @@ namespace WorldPainter
             this.cullCmd.Clear();
             this.RecordCullCommands(cullCam, nodes.Count);
             Graphics.ExecuteCommandBuffer(this.cullCmd);
+
+            // [terrain-build-diag] One-shot readback of post-cull indirect args. instanceCount =
+            // visible patches the GPU NodeCull produced. 0 ⇒ cull rejected every node on-device
+            // (the invisible cause); >0 ⇒ the draw runs but the shader/mesh yields nothing visible.
+            if (!this.loggedDrawDiag && this.indirectArgsBuf != null)
+            {
+                this.loggedDrawDiag = true;
+                var dbgArgs = new GraphicsBuffer.IndirectDrawIndexedArgs[1];
+                this.indirectArgsBuf.GetData(dbgArgs);
+                WpLog.Log($"[GpuTerrainEngine] Indirect args after cull: instanceCount={dbgArgs[0].instanceCount}, " +
+                          $"indexCountPerInstance={dbgArgs[0].indexCountPerInstance}, selectedNodes={nodes.Count}, " +
+                          $"patchMeshIdx={(this.patchMesh != null ? this.patchMesh.GetIndexCount(0).ToString() : "null")}");
+            }
 
             // 6. RenderMeshIndirect — SSOT submit discipline
             if (this.indirectArgsBuf != null)

@@ -28,6 +28,10 @@ Shader "WorldPainter/TerrainPatch"
         // Skirt depth (m): how far skirt-border vertices drop to cover inter-tile LOD-seam
         // cracks. Bound per-tile by GpuTerrainEngine (tile height range); this is the fallback.
         _SkirtDepth ("Skirt Depth (m)", Float) = 8
+
+        // Phase 5b: baked RG normal texture (oct-encoded XZ). Bound per-tile by GpuTerrainEngine
+        // when a baked normal is available. Absent → _WP_LIVE_SCULPT keyword active → 4-tap fallback.
+        [NoScaleOffset] _BakedNormalTex ("Baked Normal (RG oct XZ)", 2D) = "grey" {}
     }
 
     SubShader
@@ -67,6 +71,19 @@ Shader "WorldPainter/TerrainPatch"
             // Anti-tiling stochastic albedo path (paired with [Toggle] _StochasticTiling).
             // multi_compile (not shader_feature) so the variant survives runtime/quality-tier toggling.
             #pragma multi_compile _ _TERRAIN_STOCHASTIC
+
+            // Phase 5d: layer-count variants — cheaper palette loop for tiles with few layers.
+            // GpuTerrainEngine.Build sets the active keyword based on the tile's layer count so
+            // the dead alphamap samples and unrolled loop are compiled out in the cheaper variants.
+            // Bucket thresholds: ≤4 layers → _TERRAIN_LAYERS_4, ≤8 → _TERRAIN_LAYERS_8, else _TERRAIN_LAYERS_16.
+            // multi_compile (not shader_feature) so all three variants ship in the build and the
+            // keyword can be toggled at runtime without stripping.
+            #pragma multi_compile _TERRAIN_LAYERS_4 _TERRAIN_LAYERS_8 _TERRAIN_LAYERS_16
+
+            // Phase 5b: live-sculpt path — derive normals from 4 height taps rather than baked texture.
+            // GpuTerrainEngine enables this during BeginSculptPreview and on pre-Phase-5 tiles.
+            // multi_compile so both variants always ship (keyword is set per-material at runtime).
+            #pragma multi_compile _ _WP_LIVE_SCULPT
 
             // WorldPainter root-transform (painting space → world). Global keyword set by
             // WorldRootBinder; OFF variant is byte-identical to the pre-feature shader.
@@ -187,11 +204,12 @@ Shader "WorldPainter/TerrainPatch"
             // ── Fragment shader (Phase 2 shading body) ───────────────────────
             float4 frag(Varyings IN) : SV_Target
             {
-                // ── Normal: derived from heightmap central-difference ─────────
-                // TerrainNormals.hlsl: DeriveNormalWS uses SampleHeightVTF + _NormalEpsilon.
-                // It returns a PAINTING-space normal; map to world via the inverse-transpose
-                // normal matrix so lighting is correct under non-uniform root scale. No-op when off.
-                float3 normalWS = WP_PaintingToWorldNormal(DeriveNormalWS(IN.tileUV));
+                // ── Normal: baked fetch (default) or 4-tap derivation (_WP_LIVE_SCULPT) ─
+                // Phase 5b: SampleNormalWS dispatches on _WP_LIVE_SCULPT:
+                //   OFF → single fetch from _BakedNormalTex (Phase 5b, runtime default).
+                //   ON  → original 4-tap DeriveNormalWS (editor sculpting / pre-Phase-5 tiles).
+                // Returns a PAINTING-space normal; mapped to world below.
+                float3 normalWS = WP_PaintingToWorldNormal(SampleNormalWS(IN.tileUV));
 
                 // ── Albedo: TerrainPalette-blended texture array ──────────────
                 // TerrainPalette.hlsl: BlendTerrainPalette samples N alphamaps

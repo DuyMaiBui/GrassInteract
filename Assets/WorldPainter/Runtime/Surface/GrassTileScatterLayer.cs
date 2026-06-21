@@ -52,11 +52,18 @@ namespace WorldPainter
 
         // ── Abstract placement data (shared, also satisfies IDensityPlacementSource) ──
 
-        public override Vector2 FieldBounds         => this.explicitFieldBounds;
-        public override Vector2 ScaleRange          => this.layer.ScaleRange;
-        public override float   ScaleFactor         => this.layer.ScaleFactor;
-        public override Vector3 RotationOffsetEuler => this.layer.RotationOffsetEuler;
-        public override bool    IsOriented          => this.layer.IsOriented;
+        public override Vector2        FieldBounds         => this.explicitFieldBounds;
+        public override Vector2        ScaleRange          => this.layer.ScaleRange;
+        public override float          ScaleFactor         => this.layer.ScaleFactor;
+        public override Vector3        RotationOffsetEuler => this.layer.RotationOffsetEuler;
+        public override bool           IsOriented          => this.layer.IsOriented;
+
+        /// <summary>
+        /// Forwards the parent <see cref="GrassLayer"/>'s baked scatter blob.
+        /// When non-null, <see cref="GrassGpuEngine"/> skips the live scatter and uploads
+        /// the blob directly (3× SetData).
+        /// </summary>
+        public override BakedGrassData? BakedGrass => this.layer.BakedGrass;
 
         public override IScatterPlacement CreatePlacement() => new DensityPlacement(this);
 

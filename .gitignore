@@ -118,3 +118,7 @@ Assets/GPUGrass/*Bake.meta
 # Transient EditMode test temp folder (auto-cleaned by SceneSetupTests teardown)
 Assets/GPUGrass/__SceneSetupTest__/
 Assets/GPUGrass/__SceneSetupTest__.meta
+
+# macOS
+.DS_Store
+**/.DS_Store

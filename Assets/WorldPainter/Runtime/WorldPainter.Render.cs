@@ -344,10 +344,15 @@ namespace WorldPainter
             // OnBeginCameraRenderingEdit paths, so the whole pipeline live-follows the root.
             this.RootBinder.PushGlobals();
 
-            Vector3 camPos = cam != null ? cam.transform.position :
-                             (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
+            // Resolve the render camera up-front: in play mode SubmitTerrain is called with cam==null,
+            // so fall back to Camera.main and pass the RESOLVED camera to every engine. Both the
+            // frustum cull AND RenderParams.camera need a real camera — passing the raw null rendered
+            // with RenderParams.camera==null ("all cameras"), which did not surface terrain in the
+            // built player even though the editor edit-mode path (real camera) worked.
+            Camera? renderCam = cam != null ? cam : Camera.main;
+            Vector3 camPos = renderCam != null ? renderCam.transform.position : Vector3.zero;
             foreach (var engine in this.engines)
-                engine.Submit(cam, camPos);
+                engine.Submit(renderCam, camPos);
         }
     }
 }

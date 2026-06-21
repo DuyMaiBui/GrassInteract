@@ -74,6 +74,24 @@ namespace WorldPainter
                  "Created/assigned by the editor lifecycle; empty = layer has no tiles yet (valid, renders nothing).")]
         [SerializeField] private TileDensityTexture[] densityTiles = Array.Empty<TileDensityTexture>();
 
+        // ── Baked scatter blob (Phase 4) ──────────────────────────────────────
+
+        [Tooltip("Pre-baked scatter blob (set by WorldGrassBaker). " +
+                 "When non-null, runtime Build skips GrassScatter + counting-sort " +
+                 "and uploads this blob directly (3× SetData). " +
+                 "Clear this field to revert to the live scatter path (editor fast-iteration).")]
+        [SerializeField] private BakedGrassData? bakedGrass;
+
+        /// <summary>
+        /// Pre-baked scatter blob. Non-null means the runtime fast path (3× SetData);
+        /// null means the live scatter path (editor fast-iteration, default).
+        /// Assigned by <c>WorldGrassBaker</c>. Editor lifecycle only.
+        /// </summary>
+        public BakedGrassData? BakedGrass => this.bakedGrass;
+
+        /// <summary>Sets the baked scatter blob. Editor lifecycle only (WorldGrassBaker).</summary>
+        internal void EditorSetBakedGrass(BakedGrassData? baked) => this.bakedGrass = baked;
+
         // ── Identity ───────────────────────────────────────────────────────────
 
         public override LayerKind Kind => LayerKind.Grass;

@@ -39,7 +39,7 @@ Shader "WorldPainter/InstancedGrass"
             Tags { "LightMode" = "UniversalForward" }
 
             HLSLPROGRAM
-            #pragma target 4.5
+            #pragma target 3.5  // GLES3.0 floor: instancing-only path (no StructuredBuffer) — CPU grass tier must compile here
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
@@ -118,7 +118,7 @@ Shader "WorldPainter/InstancedGrass"
             Cull Off
 
             HLSLPROGRAM
-            #pragma target 4.5
+            #pragma target 3.5  // GLES3.0 floor: instancing-only path (no StructuredBuffer) — CPU grass tier must compile here
             #pragma vertex shadowVert
             #pragma fragment shadowFrag
             #pragma multi_compile_instancing
@@ -213,7 +213,7 @@ Shader "WorldPainter/InstancedGrass"
             Cull Off
 
             HLSLPROGRAM
-            #pragma target 4.5
+            #pragma target 3.5  // GLES3.0 floor: instancing-only path (no StructuredBuffer) — CPU grass tier must compile here
             #pragma vertex depthVert
             #pragma fragment depthFrag
             #pragma multi_compile_instancing

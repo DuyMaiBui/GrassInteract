@@ -68,6 +68,36 @@ StructuredBuffer<uint>          visibleChunksRead;  // read-only view of the vis
 float                           lod0MaxSqrDist;     // <= this → LOD 0
 float                           lod1MaxSqrDist;     // <= this → LOD 1; else → LOD 2
 
+// ── [PHASE 3 — Adaptive density] ─────────────────────────────────────────────
+// densityThreshold: 0..256 range. A blade is KEPT when (b.hash % 256) < densityThreshold.
+//   256 = full density (all blades pass).
+//   160 = ~62 % density (floor — field never goes bald; enforced on CPU side, see GrassDensityController).
+//   0   = theoretical zero density (never set in practice due to the CPU floor).
+// The skip uses the blade's stable per-blade hash so the SAME blades are dropped every frame
+// → no shimmer, deterministic thinning.
+uint                            densityThreshold;   // 0..256; 256 = full density
+// ── [END PHASE 3 bindings] ────────────────────────────────────────────────────
+
+// ── [PHASE 5a — LOD2 far-field density falloff] ──────────────────────────────
+// Thins out far-field (LOD2) blades by a distance-ramped keep-fraction that is
+// COMPOSED ON TOP of the Phase 3 flat density skip.  The effective keep fraction
+// for LOD2 blades is:
+//
+//   keepFraction = lerp(1.0, LOD2_DENSITY_FAR_FRACTION, normalizedDist)
+//
+// where normalizedDist = saturate((sqrDist - lod1MaxSqrDist) /
+//                                 (maxCullSqrDistance - lod1MaxSqrDist))
+// so the ramp is 0 at the LOD1→LOD2 boundary and 1 at the overall cull radius.
+//
+// The check reuses the blade's existing `b.hash` (same per-blade stable value used by
+// Phase 3) — just with a smaller modulus (1024) for a finer step.  DRY: no new hash.
+// LOD2_DENSITY_FAR_FRACTION = 0.4 ≈ keep 40% at maximum cull distance.
+//
+// LOD0 and LOD1 blades are UNAFFECTED — only blades that actually go to visibleLod2
+// pass through the LOD2 branch and may be skipped here.
+#define LOD2_DENSITY_FAR_FRACTION 0.4
+// ── [END PHASE 5a bindings] ──────────────────────────────────────────────────
+
 // Per-blade frustum-cull margin (metres). The per-blade test below uses only the blade ROOT point,
 // which has zero vertical extent — so a blade whose root is just outside a plane but whose HEAD/tip is
 // still visible would be wrongly culled. Treat each blade as a sphere of radius bladeCullMargin at its
@@ -196,6 +226,18 @@ void BladeCull(uint3 groupId   : SV_GroupID,
         BladeInstance b = blades[globalIdx];
         float3 posWS = b.posWS;
 
+        // ── [PHASE 3] Adaptive density stable-hash skip ───────────────────
+        // Skip when (b.hash % 256) >= densityThreshold. Placed BEFORE the
+        // frustum test so culled blades incur zero further work (cheapest early-out).
+        // densityThreshold == 256 → all blades pass (full density, no overhead).
+        // The floor is enforced on the CPU side (GrassDensityController) so this
+        // never drops below ~62% density; no need for a GPU-side floor guard.
+        // Phase 5 will add LOD distance-ramped falloff AFTER this skip — do not
+        // merge the two knobs here; leave this block self-contained.
+        if ((b.hash % 256u) >= densityThreshold)
+            continue;
+        // ── [END PHASE 3 density skip] ────────────────────────────────────
+
         // ── Per-blade frustum test (point vs 6 planes) ────────────────────
         // GeometryUtility convention: dot(n, p) + w >= 0 → inside.
         bool inFrustum = true;
@@ -225,10 +267,42 @@ void BladeCull(uint3 groupId   : SV_GroupID,
 
         // Bucket into LOD 0, 1, or 2 by squared distance.
         if (sqrDist <= lod0MaxSqrDist)
+        {
             visibleLod0.Append(globalIdx);
+        }
         else if (sqrDist <= lod1MaxSqrDist)
+        {
             visibleLod1.Append(globalIdx);
+        }
         else
+        {
+            // ── [PHASE 5a] LOD2 distance-ramped density falloff ───────────────
+            // Only blades in the LOD2 bucket (far field) are subject to the
+            // additional distance-ramped thinning.  LOD0/LOD1 blades ALWAYS reach
+            // their Append unconditionally (unchanged from Phase 3 baseline).
+            //
+            // Compute how far into the LOD2 zone this blade sits: 0.0 at the
+            // LOD1→LOD2 boundary, 1.0 at the overall cull radius.
+            float lod2RangeInvSqr = (maxCullSqrDistance > lod1MaxSqrDist + 1e-3)
+                ? 1.0 / (maxCullSqrDistance - lod1MaxSqrDist) : 0.0;
+            float normalizedDist = saturate((sqrDist - lod1MaxSqrDist) * lod2RangeInvSqr);
+
+            // Distance-ramped keep-fraction: lerp(1.0, LOD2_DENSITY_FAR_FRACTION, t).
+            // At t=0 (LOD boundary): keepFraction = 1.0 → all blades pass.
+            // At t=1 (cull radius):  keepFraction ≈ 0.4 → 40% of blades pass.
+            float keepFraction = lerp(1.0, LOD2_DENSITY_FAR_FRACTION, normalizedDist);
+
+            // Reuse the blade's stable hash (same field as Phase 3) with a 1024-step
+            // modulus for a finer-grained stochastic skip.  Same-blades-every-frame
+            // → no shimmer.  maxCullSqrDistance <= 0 guard: when cull is disabled
+            // the range is undefined, so fall through (lod2RangeInvSqr will be 0
+            // → normalizedDist=0 → keepFraction=1.0 → all pass).
+            uint lod2Hash = b.hash % 1024u;
+            if (lod2Hash >= (uint)(keepFraction * 1024.0))
+                continue; // skip this far-field blade
+            // ── [END PHASE 5a LOD2 falloff] ──────────────────────────────────
+
             visibleLod2.Append(globalIdx);
+        }
     }
 }

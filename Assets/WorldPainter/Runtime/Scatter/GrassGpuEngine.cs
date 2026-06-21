@@ -88,6 +88,21 @@ namespace WorldPainter
         private const string KW_ShadowTint                 = "_SHADOW_TINT";
         private const string KW_AlphaclipShadows           = "_ALPHACLIP_SHADOWS";
 
+        // Phase 3 (adaptive density): GrassCull.compute BladeCull uniform names.
+        // Not Shader.PropertyToID — compute params are set by string name on the ComputeShader.
+        private const string CULL_PARAM_DENSITY_THRESHOLD = "densityThreshold";
+        // maxCullSqrDistance is already an existing ChunkCull binding set by name in RecordFrameCommands;
+        // Phase 3 also drives it dynamically from GrassDensityController (same string constant, shared).
+
+        // ── [Phase 3] Density state ───────────────────────────────────────────
+        // Current density threshold pushed to BladeCull each frame. 256 = full density (no skip).
+        // Written by SetDensity; read by RecordFrameCommands. uint for the compute shader, but
+        // stored as int because CommandBuffer.SetComputeIntParam takes int.
+        private int densityThreshold = 256;
+        // Current dynamic cull distance (squared). 0 = use the layer's built-in maxSqrDistance (no-op).
+        // Written by SetDensity; read by RecordFrameCommands.
+        private float dynamicMaxSqrDistance = 0f;
+
         // ── Injected ─────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
         private readonly Material indirectMaterialBase; // source material to clone per-LOD
@@ -218,18 +233,32 @@ namespace WorldPainter
         {
             this.Dispose();
 
-            // ── Scatter + bake ──────────────────────────────────────────────
-            GrassScatterResult scatter = GrassScatter.Build(layer, origin, pool, sampler);
-            this.worldBounds = scatter.WorldBounds;
-
-            // Terrain-driven bounds: terrain size when bound, else the layer's manual FieldBounds.
-            Vector2 effectiveBounds = sampler is TerrainSurfaceSampler tss ? tss.TerrainSizeXZ : layer.FieldBounds;
+            // ── Scatter + bake OR baked-blob fast path ───────────────────────
             this.bladeBuffer = new ChunkedBladeBuffer();
-            this.bladeBuffer.Bake(scatter, layer, origin, effectiveBounds, layer.ScaleRange.y,
-                oriented: layer.IsOriented);
 
-            // Return the scatter slabs now — the GPU path doesn't need them again.
-            GrassScatter.ReturnSlabs(scatter, pool);
+            if (layer.BakedGrass != null)
+            {
+                // Fast path: skip GrassScatter.Build + counting-sort.
+                // Upload the pre-baked blob directly (3× SetData) — eliminates the 150–600 ms
+                // main-thread scatter hitch on startup and density-controller buffer reloads.
+                this.bladeBuffer.LoadFromBaked(layer.BakedGrass);
+                // Derive worldBounds from the blob's stored bounds (set by WorldGrassBaker at bake time).
+                this.worldBounds = layer.BakedGrass.WorldBounds;
+            }
+            else
+            {
+                // Live path: editor fast-iteration / first-run fallback (BakedGrass == null).
+                GrassScatterResult scatter = GrassScatter.Build(layer, origin, pool, sampler);
+                this.worldBounds = scatter.WorldBounds;
+
+                // Terrain-driven bounds: terrain size when bound, else the layer's manual FieldBounds.
+                Vector2 effectiveBounds = sampler is TerrainSurfaceSampler tss ? tss.TerrainSizeXZ : layer.FieldBounds;
+                this.bladeBuffer.Bake(scatter, layer, origin, effectiveBounds, layer.ScaleRange.y,
+                    oriented: layer.IsOriented);
+
+                // Return the scatter slabs now — the GPU path doesn't need them again.
+                GrassScatter.ReturnSlabs(scatter, pool);
+            }
 
             // ── Config snapshot (render/wind params from layer config structs) ────
             var wind = layer.Wind;
@@ -639,6 +668,52 @@ namespace WorldPainter
             this.SetLodFloat(ID_ScaleFactor, this.scaleFactor);
         }
 
+        // ── [Phase 3] SetDensity API ──────────────────────────────────────────
+
+        /// <summary>
+        /// Sets the adaptive grass density for this engine. Called each frame by
+        /// <see cref="GrassDensityController"/>.
+        ///
+        /// <paramref name="normalized01"/> maps 0→1:
+        ///   1.0 = full density (densityThreshold = 256 — all blades pass the BladeCull skip).
+        ///   0.0 = minimum density (densityThreshold = DENSITY_FLOOR_THRESHOLD ≈ 160/256 ≈ 62%).
+        ///
+        /// The CPU-enforced floor prevents the field ever going bald even at maximum load.
+        /// Dynamic cull distance scales in tandem: full density = built-in maxSqrDistance;
+        /// minimum density = the near-cull floor (pulls in the far field where thinning is
+        /// least noticeable, contributing additional GPU savings without visual bald patches).
+        ///
+        /// This method is a pure state write — uniforms are pushed in the next
+        /// <see cref="RecordFrameCommands"/> call, so there is zero GPU work here.
+        /// Calling it when not built is a no-op (guard via isBuilt).
+        /// </summary>
+        /// <param name="normalized01">Density 0 (minimum) … 1 (full). Clamped to [0,1].</param>
+        public void SetDensity(float normalized01)
+        {
+            if (!this.isBuilt) return;
+
+            float t = Mathf.Clamp01(normalized01);
+
+            // Map normalized density to BladeCull threshold.
+            // Floor: 160/256 ≈ 62% — field never goes bald. Ceiling: 256 = full density.
+            const int DENSITY_FLOOR_THRESHOLD = 160;
+            const int DENSITY_FULL_THRESHOLD  = 256;
+            this.densityThreshold = Mathf.RoundToInt(
+                Mathf.Lerp(DENSITY_FLOOR_THRESHOLD, DENSITY_FULL_THRESHOLD, t));
+
+            // Dynamic cull distance: pull the far field in under load, restore under headroom.
+            // At full density (t=1): use the layer's built-in maxSqrDistance (dynamic=0 = no-op).
+            // At minimum density (t=0): pull to 70% of built-in distance (30% less far field).
+            //   Squared: 0.7*0.7 = 0.49 of the original sqrDistance.
+            // The ChunkCull kernel already applies its own maxCullSqrDistance first, so pulling
+            // the BladeCull distance in from there is always a tightening, never an expansion.
+            const float DYNAMIC_CULL_RATIO_MIN = 0.49f; // (0.7)² at minimum density
+            float sqrRatio = Mathf.Lerp(DYNAMIC_CULL_RATIO_MIN, 1.0f, t);
+            // dynamicMaxSqrDistance == 0 triggers "use built-in" in RecordFrameCommands.
+            // For t==1 (full density) we want exactly that, so keep 0 to avoid floating drift.
+            this.dynamicMaxSqrDistance = (t >= 0.999f) ? 0f : this.maxSqrDistance * sqrRatio;
+        }
+
         /// <summary>
         /// Inflates a <see cref="Bounds"/> extents about its center by <paramref name="factor"/>,
         /// FLOORED AT 1 (never shrinks). Center is unchanged. Stays in PAINTING space —
@@ -1028,6 +1103,22 @@ namespace WorldPainter
             cmd.SetComputeBufferParam(this.computeShader, k, "visibleLod0",       this.visibleLod0Buf);
             cmd.SetComputeBufferParam(this.computeShader, k, "visibleLod1",       this.visibleLod1Buf);
             cmd.SetComputeBufferParam(this.computeShader, k, "visibleLod2",       this.visibleLod2Buf);
+
+            // ── [Phase 3] Adaptive density uniforms ──────────────────────────
+            // densityThreshold: 0..256; 256 = full density (no skip). Set as int — the HLSL
+            // uniform is declared uint but SetComputeIntParam is the only non-alloc API available.
+            // Bit-pattern is identical for values 0..256 so no cast hazard.
+            cmd.SetComputeIntParam(this.computeShader, CULL_PARAM_DENSITY_THRESHOLD, this.densityThreshold);
+            // Dynamic cull distance: 0 means "use the layer's built-in maxSqrDistance" (no tightening).
+            // GrassDensityController writes a positive value under load to pull in the far field.
+            // ChunkCull's maxCullSqrDistance is already set above (Pass A); we ALSO set it here for
+            // BladeCull because the HLSL uniform is shared across kernels (same cbuffer slot) — so
+            // overriding it here for BladeCull is safe: ChunkCull already ran before this dispatch.
+            float effectiveCullSqr = this.dynamicMaxSqrDistance > 0f
+                ? this.dynamicMaxSqrDistance
+                : maxSqrDistance;
+            cmd.SetComputeFloatParam(this.computeShader, "maxCullSqrDistance", effectiveCullSqr);
+            // ── [END Phase 3 density uniforms] ────────────────────────────────
 
             cmd.DispatchCompute(this.computeShader, k, this.dispatchArgsBuf, 0u);
 

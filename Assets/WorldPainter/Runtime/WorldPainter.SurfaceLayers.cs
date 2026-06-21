@@ -259,6 +259,26 @@ namespace WorldPainter
             }
         }
 
+        // ── [Phase 3] Adaptive density fan-out ───────────────────────────────
+        /// <summary>
+        /// Pushes a normalized density value [0,1] to every active GrassGpuEngine.
+        /// Called each frame by <see cref="Diagnostics.GrassDensityController"/>.
+        /// GrassCpuEngine instances ignore the call (they have no BladeCull compute step).
+        /// </summary>
+        /// <param name="normalizedDensity">0 = minimum density (floor), 1 = full density.</param>
+        internal void SetAllGrassDensity(float normalizedDensity)
+        {
+            for (int i = 0; i < this.surfaceEngines.Count; ++i)
+            {
+                // surfaceEngines stores ScatterPreBuiltEngineWrapper instances (GPU path) or
+                // GrassCpuEngine instances (CPU path). Cast to the wrapper to reach SetDensity;
+                // GrassCpuEngine is quietly skipped (no BladeCull compute step to drive).
+                if (this.surfaceEngines[i] is ScatterPreBuiltEngineWrapper wrapper)
+                    wrapper.SetDensity(normalizedDensity);
+            }
+        }
+        // ── [END Phase 3] ─────────────────────────────────────────────────────
+
         /// <summary>
         /// Pushes a live render-time scale factor to the prop engine belonging to
         /// <paramref name="layer"/>. No re-scatter is triggered.
@@ -441,11 +461,29 @@ namespace WorldPainter
 
             try
             {
-                var engine = new InstancedPropEngine(this.scatterCullCompute, mat);
-                // Bind the root space BEFORE Build: Build → BuildColliderRuntime reads rootSpace to
-                // parent the collider pool under the root. Binding after Build leaves the prop
-                // colliders detached from the rendered props under a non-identity root.
-                engine.BindRootSpace(this.RootBinder);
+                // Tier gate (mirrors the grass CPU/GPU split): on GLES3.0 / no-compute devices the
+                // InstancedPropEngine's RenderMeshIndirect + compute-cull path renders NOTHING (and fails
+                // silently), so fall back to the CPU instanced prop tier. Bind the root space BEFORE Build:
+                // the GPU engine's BuildColliderRuntime reads rootSpace to parent the collider pool under
+                // the root, and the CPU engine bakes the root transform into its matrices at Build.
+                IGrassEngine engine;
+                if (GrassTierProbe.TryGpu(out string propProbe))
+                {
+                    var gpuEngine = new InstancedPropEngine(this.scatterCullCompute, mat);
+                    gpuEngine.BindRootSpace(this.RootBinder);
+                    engine = gpuEngine;
+                }
+                else
+                {
+                    WpLog.Log(
+                        $"[WorldPainter.SurfaceLayers] PropLayer [{layerIndex}] '{prop.name}': {propProbe} " +
+                        "→ CPU prop tier (RenderMeshInstanced). Interactive tilt + pooled colliders are " +
+                        "GPU-tier features not active on this device.", this);
+                    var cpuEngine = new PropCpuEngine();
+                    cpuEngine.BindRootSpace(this.RootBinder);
+                    engine = cpuEngine;
+                }
+
                 engine.Build(adapter, origin, this.scatterPool!, sampler);
 
                 this.surfacePropEngines.Add(engine);

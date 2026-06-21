@@ -70,6 +70,14 @@ namespace WorldPainter
         /// <summary>Render-time uniform scale multiplier. Default 1 = inert. Engines bind _ScaleFactor per-material each frame.</summary>
         public virtual float ScaleFactor => 1f;
 
+        /// <summary>
+        /// Optional pre-baked grass blob. When non-null, <see cref="GrassGpuEngine"/> uploads
+        /// the blob directly (3× SetData) and skips <c>GrassScatter.Build</c> + counting-sort.
+        /// Default null = live scatter path (editor fast-iteration).
+        /// Concrete subclasses that support per-layer or per-tile bake override this.
+        /// </summary>
+        public virtual BakedGrassData? BakedGrass => null;
+
         /// <summary>Uniform rotation offset applied to every instance. Passed to shader.</summary>
         public abstract Vector3 RotationOffsetEuler { get; }
 

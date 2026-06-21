@@ -438,12 +438,19 @@ Shader "WorldPainter/IndirectGrass"
                 float4 positionCS : SV_POSITION;
                 float2 uv         : TEXCOORD0;
                 float  heightT    : TEXCOORD1;
-                // Phase 2: world-space position and TBN for PBR/normal-map.
-                // Always interpolated; only consumed in the _PBR / _NORMALMAP branches.
-                // Blade TBN: tangent = blade width axis (rot col 0), normal = blade face normal (rot col 2).
+                // Phase 5e: gate world-space position/TBN interpolators behind the features that
+                // actually consume them.  On the default stylized path (no PBR, no normal map, no
+                // shadows) NONE of these are needed — stripping them saves 3 × float3 = 36 B of
+                // per-fragment bandwidth on a fragment-bound TBDR frame (+0.5-1.5 fps).
+                // ⚠️ COMPILE FOOTGUN: the frag also reads i.normalWS unconditionally at line ~516.
+                //    That read MUST live inside the same guard — see the frag body below.
+                //    Fallback when stripped: a constant world-up normal (0,1,0) is injected in frag
+                //    so that any future path that accidentally reaches the read gets a safe value.
+                #if defined(_PBR) || defined(_NORMALMAP) || defined(_RECEIVE_SHADOWS)
                 float3 positionWS : TEXCOORD2;
                 float3 normalWS   : TEXCOORD3;
                 float3 tangentWS  : TEXCOORD4;
+                #endif
             };
 
             // Helper: reconstruct the blade's world-space face normal and width-tangent from the
@@ -493,12 +500,17 @@ Shader "WorldPainter/IndirectGrass"
                 o.positionCS = TransformWorldToHClip(posWSWorld);
                 o.uv         = uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 o.heightT    = saturate(uv.y);
+                // Phase 5e: only compute and write the world-space interpolators when a feature
+                // that actually reads them is active.  On the default stylized path (none of the
+                // three keywords) this entire block is compiled out — no TBN reconstruction cost,
+                // no interpolator bandwidth.
+                #if defined(_PBR) || defined(_NORMALMAP) || defined(_RECEIVE_SHADOWS)
                 o.positionWS = posWSWorld;
-
                 float3 nWS, tWS;
                 GRASS_BladeWorldTBN(b, nWS, tWS);
                 o.normalWS  = WP_PaintingToWorldNormal(nWS);
                 o.tangentWS = WP_PaintingToWorldDir(tWS);
+                #endif
                 return o;
             }
 
@@ -513,7 +525,18 @@ Shader "WorldPainter/IndirectGrass"
                 half3 baseAlbedo = lerp(_BaseColor.rgb, _TipColor.rgb, i.heightT) * tex.rgb;
 
                 // ── Normal map perturbation (runs before PBR or stylized branch) ──
+                // Phase 5e COMPILE FOOTGUN FIX: i.normalWS only exists in the Varyings struct when
+                // _PBR || _NORMALMAP || _RECEIVE_SHADOWS is defined (see the struct guard above).
+                // Reading i.normalWS outside that guard references a stripped member → compile error.
+                // Gate the read under the SAME combined condition; provide a constant world-up
+                // fallback (float3(0,1,0)) for the rare case the guard is OFF but the normalWS
+                // variable is still referenced later (it isn't on the stripped path, but the fallback
+                // makes it safe to add future reads without re-hitting this footgun).
+                #if defined(_PBR) || defined(_NORMALMAP) || defined(_RECEIVE_SHADOWS)
                 float3 normalWS = normalize(i.normalWS);
+                #else
+                float3 normalWS = float3(0.0, 1.0, 0.0); // world-up fallback — interpolator stripped
+                #endif
                 #if defined(_NORMALMAP)
                 {
                     float3 tangentWS   = normalize(i.tangentWS);
