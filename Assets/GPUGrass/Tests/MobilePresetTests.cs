@@ -97,5 +97,37 @@ namespace GPUGrass.Tests
             Assert.IsFalse(this.config!.GrassMaterial!.IsKeywordEnabled("_WIND_PERLIN"),
                 "_WIND_PERLIN is ~16x the ALU cost of the default sin() wind — must stay off on mobile.");
         }
+
+        [Test]
+        public void WireRenderAssets_SyncsConfigAlphaClipOntoMaterial()
+        {
+            // Config alpha-clip ON → WireRenderAssets (run via the preset) must set the _Alphaclip float,
+            // the _Cutoff, AND enable the _ALPHACLIP keyword. Float-without-keyword is the exact footgun that
+            // made cutout grass render as solid quads — the keyword drives the #if defined(_ALPHACLIP) clip.
+            this.config!.SetAlphaClip(true, 0.4f);
+            // Persist BEFORE the preset: WireRenderAssets' material CreateAsset triggers a config reimport
+            // that would revert an in-memory-only flag to its on-disk default (the same reimport-revert
+            // footgun ApplyMobilePreset itself dodges). Real authoring saves via the Inspector — mirror that.
+            EditorUtility.SetDirty(this.config);
+            AssetDatabase.SaveAssets();
+            this.window!.ApplyMobilePreset(this.config);
+
+            Material mat = this.config.GrassMaterial!;
+            Assert.IsTrue(mat.IsKeywordEnabled("_ALPHACLIP"),
+                "Config AlphaClip=on must enable the _ALPHACLIP keyword (float alone is a no-op — clip compiles out).");
+            Assert.AreEqual(1f, mat.GetFloat("_Alphaclip"), 1e-3f, "_Alphaclip float must be 1 when config AlphaClip is on.");
+            Assert.AreEqual(0.4f, mat.GetFloat("_Cutoff"), 1e-3f, "_Cutoff must mirror the config's AlphaCutoff.");
+        }
+
+        [Test]
+        public void WireRenderAssets_DisablesAlphaClipKeywordWhenConfigOff()
+        {
+            // Default config AlphaClip=off → keyword must be OFF (opaque blades). Guards against a stale
+            // keyword surviving on a regenerated/reused material.
+            this.window!.ApplyMobilePreset(this.config!);
+
+            Assert.IsFalse(this.config!.GrassMaterial!.IsKeywordEnabled("_ALPHACLIP"),
+                "Config AlphaClip=off must leave the _ALPHACLIP keyword disabled.");
+        }
     }
 }

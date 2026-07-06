@@ -60,6 +60,17 @@ namespace GPUGrass
         [SerializeField] private Material? grassMaterial;
         [SerializeField] private ShadowCastingMode shadowCastingMode = ShadowCastingMode.Off;
         [SerializeField] private bool receiveShadows;
+        [Tooltip("Optional base map applied to the grass material by Auto-Setup. For see-through blade cards, " +
+                 "assign a texture whose ALPHA channel carves the blade silhouette and enable Alpha Clip below. " +
+                 "Leave empty for solid procedural-mesh blades.")]
+        [SerializeField] private Texture2D? baseMap;
+        [Tooltip("Alpha-clip cutout: discards fragments where baseMap.a < Alpha Cutoff (transparent blade " +
+                 "cards). Needs a baseMap with a real alpha channel — off = solid opaque blades. Auto-Setup " +
+                 "keeps the material's _ALPHACLIP keyword in sync with this flag.")]
+        [SerializeField] private bool alphaClip;
+        [Range(0f, 1f)]
+        [Tooltip("Alpha-clip threshold — only used when Alpha Clip is on.")]
+        [SerializeField] private float alphaCutoff = 0.4f;
 
         [Header("Render assets (wired by Auto-Setup — serialized so they ship in player builds)")]
         [Tooltip("GPUGrass GrassCull compute shader (ChunkCull/WriteArgsB/BladeCullCount/WriteLodOffsets/BladeCullScatter kernels).")]
@@ -124,6 +135,9 @@ namespace GPUGrass
         public Material? GrassMaterial => this.grassMaterial;
         public ShadowCastingMode ShadowCastingMode => this.shadowCastingMode;
         public bool ReceiveShadows => this.receiveShadows;
+        public Texture2D? BaseMap => this.baseMap;
+        public bool AlphaClip => this.alphaClip;
+        public float AlphaCutoff => this.alphaCutoff;
         public ComputeShader? CullCompute => this.cullCompute;
         public Shader? IndirectShader => this.indirectShader;
 
@@ -163,6 +177,15 @@ namespace GPUGrass
             this.receiveShadows = receive;
         }
         public void SetTierMode(GrassTierMode mode) => this.tierMode = mode;
+        /// <summary>Assigns the grass material base map (Auto-Setup / authoring). SSOT for the material's _BaseMap.</summary>
+        public void SetBaseMap(Texture2D? map) => this.baseMap = map;
+        /// <summary>Enables/disables alpha-clip cutout and its threshold (Auto-Setup / authoring). SSOT for the
+        /// material's _Alphaclip float, _ALPHACLIP keyword, and _Cutoff.</summary>
+        public void SetAlphaClip(bool enabled, float cutoff)
+        {
+            this.alphaClip = enabled;
+            this.alphaCutoff = Mathf.Clamp01(cutoff);
+        }
 
         // ── Wind accessors ─────────────────────────────────────────────────────
         public Vector2 WindDirection => this.windDirection;

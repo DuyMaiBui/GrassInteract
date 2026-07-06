@@ -381,8 +381,8 @@ namespace GPUGrass.Editor
             // its on-disk YAML — reverting any in-memory field writes made before it. So set the config
             // fields AFTER this, last, where nothing can reload over them.
             // Opaque-shader guardrail (Guard 6): reuse the SAME self-heal helper GpuGrassAutoSetup uses at
-            // setup time — idempotent, only touches the material when it's missing/on the wrong shader, logs a
-            // warning when it corrects one, never switches to alpha-clip.
+            // setup time — idempotent, only creates the material when it's missing/on the wrong shader, and
+            // syncs the material's base map + alpha-clip (_ALPHACLIP keyword) from the config SSOT.
             string folder = GpuGrassSceneSetup.EnsureSceneBakeFolder();
             GpuGrassAutoSetup.WireRenderAssets(config, folder);
 

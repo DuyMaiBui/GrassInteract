@@ -142,6 +142,45 @@ namespace GPUGrass.Editor
             }
 
             config.SetRenderAssets(cull, shader, material);
+
+            // Push the config's authored base map + alpha-clip onto the material so the visible material can
+            // never drift from the SSOT and the authoring survives a re-bake / fresh checkout (the material
+            // itself lives in the gitignored per-scene bake folder — the config is the durable source).
+            if (material != null)
+                ApplyMaterialAuthoring(config, material);
+        }
+
+        private static readonly int ID_BaseMap          = Shader.PropertyToID("_BaseMap");
+        private static readonly int ID_Alphaclip        = Shader.PropertyToID("_Alphaclip");
+        private static readonly int ID_AlphaclipShadows = Shader.PropertyToID("_AlphaclipShadows");
+        private static readonly int ID_Cutoff           = Shader.PropertyToID("_Cutoff");
+        private const string KW_Alphaclip        = "_ALPHACLIP";
+        private const string KW_AlphaclipShadows = "_ALPHACLIP_SHADOWS";
+
+        /// <summary>
+        /// Applies the config's base map + alpha-clip to the grass material. <c>_Alphaclip</c> is a
+        /// <c>[Toggle(_ALPHACLIP)]</c> property whose FLOAT and KEYWORD are decoupled — the clip lives behind
+        /// <c>#if defined(_ALPHACLIP)</c>, so BOTH must be set or cutout grass compiles down to solid quads.
+        /// This is the single write path that keeps the material consistent with the config SSOT.
+        /// </summary>
+        internal static void ApplyMaterialAuthoring(GpuGrassConfig config, Material material)
+        {
+            material.SetTexture(ID_BaseMap, config.BaseMap);
+            bool clip = config.AlphaClip;
+            material.SetFloat(ID_Alphaclip, clip ? 1f : 0f);
+            material.SetFloat(ID_AlphaclipShadows, clip ? 1f : 0f);
+            material.SetFloat(ID_Cutoff, config.AlphaCutoff);
+            if (clip)
+            {
+                material.EnableKeyword(KW_Alphaclip);
+                material.EnableKeyword(KW_AlphaclipShadows);
+            }
+            else
+            {
+                material.DisableKeyword(KW_Alphaclip);
+                material.DisableKeyword(KW_AlphaclipShadows);
+            }
+            EditorUtility.SetDirty(material);
         }
     }
 }
