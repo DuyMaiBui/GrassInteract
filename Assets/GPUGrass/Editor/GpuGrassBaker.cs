@@ -71,7 +71,8 @@ namespace GPUGrass.Editor
                 bounds.Expand(new Vector3(reach, reach * 2f, reach));
             }
 
-            bake.SetData(positions.ToArray(), yaws.ToArray(), scales.ToArray(), bounds, sourceTag);
+            bake.SetData(positions.ToArray(), yaws.ToArray(), scales.ToArray(), bounds, sourceTag,
+                GpuGrassBakeSignature.From(config));
             return positions.Count;
         }
 

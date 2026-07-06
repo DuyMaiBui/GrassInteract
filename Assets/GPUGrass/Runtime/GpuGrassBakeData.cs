@@ -22,6 +22,9 @@ namespace GPUGrass
         [SerializeField] private Bounds worldBounds;
         [SerializeField] private int sourceDetailLayer = -1;
         [SerializeField] private int instanceCount;
+        // Placement-param snapshot this data was baked from — lets the editor detect a stale bake after a
+        // config change (render-only tunables are excluded). HideInInspector: managed metadata, not authored.
+        [SerializeField, HideInInspector] private GpuGrassBakeSignature bakedSignature;
 
         /// <summary>World-space blade root positions.</summary>
         public Vector3[] Positions => this.positions;
@@ -41,8 +44,12 @@ namespace GPUGrass
         /// <summary>Total baked blade count.</summary>
         public int InstanceCount => this.instanceCount;
 
+        /// <summary>The placement-param snapshot this data was baked from (see <see cref="GpuGrassBakeSignature"/>).</summary>
+        public GpuGrassBakeSignature BakedSignature => this.bakedSignature;
+
         /// <summary>Replaces all baked data. Called by the bake step (Pass 2).</summary>
-        public void SetData(Vector3[] positions, float[] yaws, float[] scales, Bounds bounds, int sourceDetailLayer)
+        public void SetData(Vector3[] positions, float[] yaws, float[] scales, Bounds bounds,
+            int sourceDetailLayer, GpuGrassBakeSignature signature)
         {
             this.positions = positions ?? Array.Empty<Vector3>();
             this.yaws = yaws ?? Array.Empty<float>();
@@ -50,6 +57,7 @@ namespace GPUGrass
             this.worldBounds = bounds;
             this.sourceDetailLayer = sourceDetailLayer;
             this.instanceCount = this.positions.Length;
+            this.bakedSignature = signature;
         }
     }
 }
