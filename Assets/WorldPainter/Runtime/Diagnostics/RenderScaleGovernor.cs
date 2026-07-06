@@ -52,6 +52,14 @@ namespace WorldPainter.Diagnostics
         /// <summary>Step size per adjustment.</summary>
         private const float SCALE_STEP = 0.05f;
 
+        /// <summary>
+        /// Master pin (project requirement — "don't change render scale"): when true, render scale is held
+        /// at native (<see cref="SCALE_CEIL"/> = 1.0) and the dynamic-resolution controller never lowers it.
+        /// Flip to false to restore adaptive dynamic resolution. Declared static-readonly (not const) so the
+        /// fixed value does not flag the adaptive branches as unreachable code.
+        /// </summary>
+        private static readonly bool PIN_TO_NATIVE_SCALE = true;
+
         /// <summary>PI proportional gain. Tuned so a 3ms error → ~1 step.</summary>
         private const float KP = 0.04f;
 
@@ -111,6 +119,17 @@ namespace WorldPainter.Diagnostics
         // ── Lifecycle ─────────────────────────────────────────────────────────
         private void Awake()
         {
+            if (PIN_TO_NATIVE_SCALE)
+            {
+                // Pinned to native: force scale 1.0 and hold. No dynamic-resolution adaptation, and no FSR
+                // upscale pass (there is nothing to upscale at native resolution). DensityScalar resolves to
+                // 1.0 (full density) at ceil, keeping the Phase 3 grass-density SSOT at full.
+                SetRenderScale(SCALE_CEIL);
+                CurrentRenderScale = SCALE_CEIL;
+                this.UpdateDensityScalar();
+                return;
+            }
+
             // Sync current scale from the active pipeline asset.
             CurrentRenderScale = GetRenderScale();
             this.UpdateDensityScalar();
@@ -121,6 +140,9 @@ namespace WorldPainter.Diagnostics
 
         private void LateUpdate()
         {
+            // Pinned to native resolution — the dynamic-resolution controller is disabled.
+            if (PIN_TO_NATIVE_SCALE) return;
+
             if (this.manualOverride)
             {
                 this.ReportToConsole("manual");
@@ -182,6 +204,7 @@ namespace WorldPainter.Diagnostics
         public static void SetManualScale(float scale)
         {
             if (instance == null) return;
+            if (PIN_TO_NATIVE_SCALE) return; // render scale is pinned to native — ignore debug overrides
             instance.manualOverride = true;
             instance.manualScale    = Mathf.Clamp(scale, SCALE_FLOOR, SCALE_CEIL);
             SetRenderScale(instance.manualScale);

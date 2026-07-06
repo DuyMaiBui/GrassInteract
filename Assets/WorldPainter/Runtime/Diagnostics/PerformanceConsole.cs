@@ -42,7 +42,6 @@ namespace WorldPainter.Diagnostics
         private const float WINDOW_SEC  = 0.5f;
         private const int   MAX_SAMPLES = 256;
 
-        private static readonly float[] SCALE_STEPS = { 1.00f, 0.85f, 0.70f, 0.55f };
         private static readonly int[]   CAP_STEPS   = { 60, 45, 30, 0 };
 
         // ── Bootstrap ─────────────────────────────────────────────────────────
@@ -95,7 +94,6 @@ namespace WorldPainter.Diagnostics
 
         // ── Render-scale reflection (no hard URP C# dependency) ────────────────
         private static PropertyInfo? renderScaleProp;
-        private int    scaleIdx;
         private string scaleLabel = "Scale 1.00";
         private string capLabel   = "Cap 60";
         private string deviceText = "";
@@ -137,10 +135,6 @@ namespace WorldPainter.Diagnostics
         private void Start()
         {
             this.deviceText = SystemInfo.graphicsDeviceName + " · " + SystemInfo.graphicsDeviceType;
-            // Sync the scale index to whatever the active pipeline currently uses.
-            float cur = GetRenderScale();
-            for (int i = 0; i < SCALE_STEPS.Length; i++)
-                if (Mathf.Abs(SCALE_STEPS[i] - cur) < 0.03f) { this.scaleIdx = i; break; }
         }
 
         private void Update()
@@ -253,11 +247,9 @@ namespace WorldPainter.Diagnostics
                            : n.ToString();
 
         // ── Live controls ─────────────────────────────────────────────────────
-        private void CycleRenderScale()
-        {
-            this.scaleIdx = (this.scaleIdx + 1) % SCALE_STEPS.Length;
-            SetRenderScale(SCALE_STEPS[this.scaleIdx]);
-        }
+        // Render scale is PINNED to native 1.0 (see RenderScaleGovernor.PIN_TO_NATIVE_SCALE); the manual
+        // cycle is disabled. Tapping the button just re-asserts native so nothing lowers the resolution.
+        private void CycleRenderScale() => SetRenderScale(1f);
 
         private void CycleCap()
         {
