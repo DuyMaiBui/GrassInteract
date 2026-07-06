@@ -2,8 +2,10 @@
 //
 // Reads per-blade data from StructuredBuffers (_Blades, _VisibleIndices) to reconstruct
 // each blade's world-space TRS, then applies wind sway + lean-away deform fully in the VS.
-// Drawn via Graphics.RenderMeshIndirect: SV_InstanceID indexes _VisibleIndices[instanceID]
-// to get the global blade index, then _Blades[bladeIdx] for the BladeInstance record.
+// Drawn via Graphics.RenderMeshIndirect: SV_InstanceID + this material's _LodOffsets[_LodIndex] base
+// offset indexes _VisibleIndices[offset+instanceID] (mobile #5+#6 — ONE packed buffer shared by all 3 LOD
+// materials, 2-bit LOD tag in the high bits masked off) to get the global blade index, then
+// _Blades[bladeIdx] for the BladeInstance record.
 //
 // Packed format: packedYawScale high16 = yaw quantised 0..65535 over 0..360°
 //                              low16  = scale quantised 0..65535 over 0..scaleMax2
@@ -173,7 +175,11 @@ Shader "GPUGrass/IndirectGrass"
             };
 
             StructuredBuffer<BladeInstance>      _Blades;
-            StructuredBuffer<uint>               _VisibleIndices; // per-LOD, bound via material.SetBuffer
+            // Mobile #5+#6: _VisibleIndices is now ONE packed buffer shared by all 3 LOD materials (2-bit
+            // LOD tag in the high bits of each index). _LodOffsets[_LodIndex] is this material's partition
+            // base offset into that shared buffer (bound via material.SetBuffer, same object for all 3 LODs).
+            StructuredBuffer<uint>               _VisibleIndices;
+            StructuredBuffer<uint>               _LodOffsets;
             StructuredBuffer<GrassInteractorGpu> _Interactors;    // Phase 6; count=0 in Phase 5
 
             // TRAIL DEFORM BEGIN
@@ -206,6 +212,10 @@ Shader "GPUGrass/IndirectGrass"
             float  _Flatten;
             int    _InteractorCount;
             float3 _CamPosWS;
+            // Mobile #3: 0=LOD0, 1=LOD1, 2=LOD2 — constant per material clone. Selects this material's
+            // partition in _LodOffsets, and gates touch-bend (interactor/trail) to LOD0 only (far blades
+            // don't need touch response — see ReconstructBladeVertexWS).
+            float  _LodIndex;
 
             static const float GRASS_TWO_PI     = 6.2831853;
             static const float DEG_PER_METRE    = 55.0;
@@ -326,9 +336,11 @@ Shader "GPUGrass/IndirectGrass"
                     windXZ = _WindDir * wave;
                 }
 
-                // Interactor lean-away contribution (independent gate).
+                // Interactor lean-away contribution (independent gate). Mobile #3: LOD1/LOD2 (far blades)
+                // skip touch-bend entirely — only LOD0 pays the interactor loop cost.
                 float2 bendXZ = float2(0, 0);
-                if (_InteractorsEnabled >= 0.5)
+                bool isLod0 = _LodIndex < 0.5;
+                if (_InteractorsEnabled >= 0.5 && isLod0)
                 {
                     for (int i = 0; i < _InteractorCount; ++i)
                     {
@@ -342,7 +354,8 @@ Shader "GPUGrass/IndirectGrass"
                     }
                 }
 
-                // TRAIL DEFORM BEGIN
+                // TRAIL DEFORM BEGIN — Mobile #3: LOD1/LOD2 skip the trail loop entirely (same reasoning).
+                if (isLod0)
                 {
                     float2 bladeXZ = b.posWS.xz;
                     int n = _GrassTrailSegmentCount;
@@ -485,7 +498,11 @@ Shader "GPUGrass/IndirectGrass"
             Varyings vert(float4 posOS : POSITION, float2 uv : TEXCOORD0, uint instanceID : SV_InstanceID)
             {
                 Varyings o = (Varyings)0;
-                uint bladeIdx   = _VisibleIndices[instanceID];
+                // Mobile #5+#6: this material's partition starts at _LodOffsets[_LodIndex] inside the
+                // single shared _VisibleIndices buffer. Mask off the top 2 (LOD-tag) bits to get the index.
+                uint lodOffset  = _LodOffsets[(uint)_LodIndex];
+                uint packed     = _VisibleIndices[lodOffset + instanceID];
+                uint bladeIdx   = packed & 0x3FFFFFFFu;
                 BladeInstance b = _Blades[bladeIdx];
 
                 #ifdef _LOD2_BILLBOARD
@@ -691,7 +708,9 @@ Shader "GPUGrass/IndirectGrass"
             // TRAIL DEFORM END
 
             StructuredBuffer<BladeInstance>      _Blades;
+            // Mobile #5+#6: shared packed buffer + per-material partition offset (see Forward pass).
             StructuredBuffer<uint>               _VisibleIndices;
+            StructuredBuffer<uint>               _LodOffsets;
             StructuredBuffer<GrassInteractorGpu> _Interactors;
 
             float  _ScaleMax2; float _ScaleFactor; float _GrassTime; float2 _WindDir; float _WindStrength;
@@ -700,6 +719,7 @@ Shader "GPUGrass/IndirectGrass"
             int    _InteractorCount; float3 _CamPosWS;
             float  _OrientMode; float4 _RotationOffsetEuler;
             float  _WindEnabled; float _InteractorsEnabled;
+            float  _LodIndex; // selects this material's _LodOffsets partition (touch-bend itself is fully skipped below — Guard 4)
             float3 _LightDirection; float3 _LightPosition;
             // Phase 3: shadow bias + alpha-clip uniforms (declared globally; 0 = no-op so today's caster is unchanged).
             float  _ShadowDepthBias;
@@ -755,8 +775,9 @@ Shader "GPUGrass/IndirectGrass"
             }
 
             // Per-vertex bend (bendT = uv.y, 0 at base, 1 at tip): replaces the rigid leanMat in
-            // the forward pass. Mirrors ReconstructBladeVertexWS so shadow silhouettes match the
-            // visible blade exactly under wind/interactor lean.
+            // the forward pass. Wind-only — mobile #3: the interactor (≤16) and trail-segment (≤128)
+            // loops are SKIPPED in ShadowCaster (Guard 4 — trail/touch bend is imperceptible in the shadow
+            // silhouette; only the wind-deformed silhouette is needed here). Forward pass keeps full deform.
             float3 ReconstructWS(BladeInstance b, float3 lp, float bendT, bool bb)
             {
                 uint hi=(b.packedYawScale>>16)&0xFFFFu, lo=b.packedYawScale&0xFFFFu;
@@ -773,34 +794,8 @@ Shader "GPUGrass/IndirectGrass"
                         wt=_WindDir*sin(_GrassTime*_WindFrequency+ph)*_WindStrength;
                     #endif
                 }
+                // Mobile #3: bx (interactor+trail bend) stays zero in this pass — no loops run.
                 float2 bx=float2(0,0);
-                if(_InteractorsEnabled>=0.5){
-                    for(int i=0;i<_InteractorCount;++i){
-                        GrassInteractorGpu ip=_Interactors[i];
-                        float2 d=b.posWS.xz-ip.posWS.xz; float dl=length(d);
-                        if(ip.radius<=0||dl>=ip.radius)continue;
-                        bx+=(dl>1e-4?d/dl:0)*(1-dl/ip.radius)*ip.strength*_BendStrength;
-                    }
-                }
-                // TRAIL DEFORM BEGIN
-                {
-                    float2 bladeXZ=b.posWS.xz; int n=_GrassTrailSegmentCount;
-                    [loop]
-                    for(int j=0;j<n;++j){
-                        GrassTrailSegmentGpu s=_GrassTrailSegments[j];
-                        float2 ab=s.PosB.xz-s.PosA.xz; float abLenSq=max(dot(ab,ab),1e-6);
-                        float t=saturate(dot(bladeXZ-s.PosA.xz,ab)/abLenSq);
-                        float2 c=s.PosA.xz+ab*t; float2 r=bladeXZ-c; float dd=length(r);
-                        if(dd>s.Radius)continue;
-                        float dn=dd/s.Radius;
-                        float plateau=(dn<=s.CenterPct)?1.0:1.0-smoothstep(s.CenterPct,1.0,dn);
-                        float angleDeg=degrees(s.MaxBendRad)*plateau*s.Alpha*s.Strength;
-                        float pushMetres=angleDeg/DEG_PER_METRE;
-                        float2 dir2=(dd>1e-4)?(r/dd):float2(1,0);
-                        bx+=dir2*pushMetres;
-                    }
-                }
-                // TRAIL DEFORM END
                 float bm=length(bx);
                 if(_Flatten>0&&_BendStrength>1e-5) sy2=sxz*(1-_Flatten*saturate(bm/_BendStrength));
                 // Per-vertex Rodrigues rotation — see forward pass for rationale. Preserves blade
@@ -833,7 +828,8 @@ Shader "GPUGrass/IndirectGrass"
             SV shadowVert(float4 posOS : POSITION, float3 nrmOS : NORMAL, float2 uv : TEXCOORD0, uint iid : SV_InstanceID)
             {
                 SV o=(SV)0;
-                BladeInstance b=_Blades[_VisibleIndices[iid]];
+                uint lodOffset = _LodOffsets[(uint)_LodIndex];
+                BladeInstance b=_Blades[_VisibleIndices[lodOffset + iid] & 0x3FFFFFFFu];
                 #ifdef _LOD2_BILLBOARD
                     float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),true);
                 #else
@@ -929,7 +925,9 @@ Shader "GPUGrass/IndirectGrass"
             // TRAIL DEFORM END
 
             StructuredBuffer<BladeInstance>      _Blades;
+            // Mobile #5+#6: shared packed buffer + per-material partition offset (see Forward pass).
             StructuredBuffer<uint>               _VisibleIndices;
+            StructuredBuffer<uint>               _LodOffsets;
             StructuredBuffer<GrassInteractorGpu> _Interactors;
 
             float  _ScaleMax2; float _ScaleFactor; float _GrassTime; float2 _WindDir; float _WindStrength;
@@ -938,6 +936,7 @@ Shader "GPUGrass/IndirectGrass"
             int    _InteractorCount; float3 _CamPosWS;
             float  _OrientMode; float4 _RotationOffsetEuler;
             float  _WindEnabled; float _InteractorsEnabled;
+            float  _LodIndex; // selects this material's _LodOffsets partition (touch-bend itself is fully skipped below — Guard 4)
 
             static const float GRASS_TWO_PI=6.2831853, DEG_PER_METRE=55.0, MAX_LEAN_DEGREES=90.0, DEG_TO_RAD=0.01745329; // TRAIL DEFORM: MAX_LEAN_DEGREES lifted 80→90
 
@@ -963,7 +962,9 @@ Shader "GPUGrass/IndirectGrass"
             float3x3 GD_BaseRot(BladeInstance b,float yaw){float3 oe=_RotationOffsetEuler.xyz;if(_OrientMode>=0.5){uint s2=b.hash;float ox=(float)((s2>>24)&0xFFu)/255.0*2.0-1.0,oy=(float)((s2>>16)&0xFFu)/255.0*2.0-1.0,ip=(float)((s2>>8)&0xFFu)/255.0*180.0-90.0,ir=(float)(s2&0xFFu)/255.0*180.0-90.0;return mul(GD_AlignMat(GD_OctDec(ox,oy)),mul(GD_EulerMat(ip,yaw,ir),GD_EulerMat(oe.x,oe.y,oe.z)));}return mul(GD_EulerMat(0,yaw,0),GD_EulerMat(oe.x,oe.y,oe.z));}
 
             // Per-vertex bend mirror for the DepthOnly pass — same per-vertex sweep as the
-            // forward/shadow paths so the depth-prepass silhouette tracks the visible blade.
+            // forward/shadow paths so the depth-prepass silhouette tracks the visible blade. Wind-only —
+            // mobile #3: the interactor (≤16) and trail-segment (≤128) loops are SKIPPED in DepthOnly
+            // (Guard 4 — trail/touch bend is imperceptible in the depth silhouette). Forward keeps full deform.
             float3 ReconstructWS(BladeInstance b, float3 lp, float bendT, bool bb)
             {
                 uint hi=(b.packedYawScale>>16)&0xFFFFu, lo=b.packedYawScale&0xFFFFu;
@@ -980,34 +981,8 @@ Shader "GPUGrass/IndirectGrass"
                         wt=_WindDir*sin(_GrassTime*_WindFrequency+ph)*_WindStrength;
                     #endif
                 }
+                // Mobile #3: bx (interactor+trail bend) stays zero in this pass — no loops run.
                 float2 bx=float2(0,0);
-                if(_InteractorsEnabled>=0.5){
-                    for(int i=0;i<_InteractorCount;++i){
-                        GrassInteractorGpu ip=_Interactors[i];
-                        float2 d=b.posWS.xz-ip.posWS.xz; float dl=length(d);
-                        if(ip.radius<=0||dl>=ip.radius)continue;
-                        bx+=(dl>1e-4?d/dl:0)*(1-dl/ip.radius)*ip.strength*_BendStrength;
-                    }
-                }
-                // TRAIL DEFORM BEGIN
-                {
-                    float2 bladeXZ=b.posWS.xz; int n=_GrassTrailSegmentCount;
-                    [loop]
-                    for(int j=0;j<n;++j){
-                        GrassTrailSegmentGpu s=_GrassTrailSegments[j];
-                        float2 ab=s.PosB.xz-s.PosA.xz; float abLenSq=max(dot(ab,ab),1e-6);
-                        float t=saturate(dot(bladeXZ-s.PosA.xz,ab)/abLenSq);
-                        float2 c=s.PosA.xz+ab*t; float2 r=bladeXZ-c; float dd=length(r);
-                        if(dd>s.Radius)continue;
-                        float dn=dd/s.Radius;
-                        float plateau=(dn<=s.CenterPct)?1.0:1.0-smoothstep(s.CenterPct,1.0,dn);
-                        float angleDeg=degrees(s.MaxBendRad)*plateau*s.Alpha*s.Strength;
-                        float pushMetres=angleDeg/DEG_PER_METRE;
-                        float2 dir2=(dd>1e-4)?(r/dd):float2(1,0);
-                        bx+=dir2*pushMetres;
-                    }
-                }
-                // TRAIL DEFORM END
                 float bm=length(bx);
                 if(_Flatten>0&&_BendStrength>1e-5) sy2=sxz*(1-_Flatten*saturate(bm/_BendStrength));
                 // Per-vertex Rodrigues rotation — see forward pass for rationale.
@@ -1037,7 +1012,8 @@ Shader "GPUGrass/IndirectGrass"
             DV depthVert(float4 posOS : POSITION, float2 uv : TEXCOORD0, uint iid : SV_InstanceID)
             {
                 DV o=(DV)0;
-                BladeInstance b=_Blades[_VisibleIndices[iid]];
+                uint lodOffset = _LodOffsets[(uint)_LodIndex];
+                BladeInstance b=_Blades[_VisibleIndices[lodOffset + iid] & 0x3FFFFFFFu];
                 #ifdef _LOD2_BILLBOARD
                     float3 posWS=ReconstructWS(b,posOS.xyz,saturate(uv.y),true);
                 #else

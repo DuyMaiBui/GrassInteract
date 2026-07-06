@@ -7,8 +7,9 @@ namespace GPUGrass
 {
     /// <summary>
     /// The GPU-driven indirect render tier for GPUGrass — the standalone, WorldPainter-free extraction of
-    /// <c>GrassGpuEngine</c>. Builds a chunked blade buffer from the editor bake, runs a two-pass GPU cull
-    /// (compute: ChunkCull → WriteArgsB → BladeCull), then issues one
+    /// <c>GrassGpuEngine</c>. Builds a chunked blade buffer from the editor bake, runs a multi-pass GPU cull
+    /// (compute: ChunkCull → WriteArgsB → BladeCullCount → WriteLodOffsets → BladeCullScatter — see
+    /// <see cref="RecordFrameCommands"/> and GrassCull.compute), then issues one
     /// <see cref="Graphics.RenderMeshIndirect"/> per LOD. Wind + interactor/trail bend are fully GPU-side
     /// (the VS reconstructs each blade's TRS and deform); the CPU only advances a time accumulator and
     /// uploads the interactor/trail registries each frame.
@@ -20,7 +21,6 @@ namespace GPUGrass
     /// </summary>
     internal sealed class GpuGrassRenderer : IGpuGrassRenderer
     {
-        private const int ARGS_INSTANCE_COUNT_OFFSET = 4; // byte offset of instanceCount in IndirectDrawIndexedArgs
         private const int CHUNK_SIZE = 16;                // world-space XZ cell size for the cull grid (m)
         private const int FULL_DENSITY_THRESHOLD = 256;   // BladeCull keeps blade when (hash%256) < this
 
@@ -39,12 +39,18 @@ namespace GPUGrass
         private static readonly int ID_Flatten             = Shader.PropertyToID("_Flatten");
         private static readonly int ID_CamPosWS            = Shader.PropertyToID("_CamPosWS");
         private static readonly int ID_VisibleIndices      = Shader.PropertyToID("_VisibleIndices");
+        private static readonly int ID_LodOffsets          = Shader.PropertyToID("_LodOffsets");
+        private static readonly int ID_LodIndex            = Shader.PropertyToID("_LodIndex");
         private static readonly int ID_OrientMode          = Shader.PropertyToID("_OrientMode");
         private static readonly int ID_RotationOffsetEuler = Shader.PropertyToID("_RotationOffsetEuler");
         private static readonly int ID_WindEnabled         = Shader.PropertyToID("_WindEnabled");
         private static readonly int ID_InteractorsEnabled  = Shader.PropertyToID("_InteractorsEnabled");
         private const string KW_ReceiveShadows             = "_RECEIVE_SHADOWS";
         private const string KW_Lod2Billboard              = "_LOD2_BILLBOARD";
+        private const string KW_Alphaclip                  = "_ALPHACLIP";
+        private const string KW_AlphaclipShadows           = "_ALPHACLIP_SHADOWS";
+        private static readonly int ID_Alphaclip           = Shader.PropertyToID("_Alphaclip");
+        private static readonly int ID_AlphaclipShadows    = Shader.PropertyToID("_AlphaclipShadows");
 
         // ── Injected ──────────────────────────────────────────────────────────
         private readonly ComputeShader computeShader;
@@ -53,17 +59,23 @@ namespace GPUGrass
         // ── Kernel indices ────────────────────────────────────────────────────
         private readonly int kernelCull;
         private readonly int kernelArgs;
-        private readonly int kernelBlade;
+        private readonly int kernelBladeCount;
+        private readonly int kernelWriteLodOffsets;
+        private readonly int kernelBladeScatter;
 
         // ── Per-frame cull buffers (Pass A) ───────────────────────────────────
         private GraphicsBuffer? visibleChunksBuf;
         private GraphicsBuffer? visibleCountBuf;
         private GraphicsBuffer? dispatchArgsBuf;
 
-        // ── Per-LOD visible-index buffers (Pass B) ────────────────────────────
-        private GraphicsBuffer? visibleLod0Buf;
-        private GraphicsBuffer? visibleLod1Buf;
-        private GraphicsBuffer? visibleLod2Buf;
+        // ── Merged per-LOD visible-index buffer (Pass B, mobile #5+#6) ────────
+        // ONE packed buffer (2-bit LOD tag in the high bits of each uint index) replaces the three
+        // bladeCap-sized append buffers — 4 B/blade scratch instead of 12 B/blade. lodCounts/lodOffsets/
+        // lodCursor are tiny (3 uints each) — see GrassCull.compute for the count→offset→scatter pipeline.
+        private GraphicsBuffer? visibleBladesBuf;
+        private GraphicsBuffer? lodCountsBuf;
+        private GraphicsBuffer? lodOffsetsBuf;
+        private GraphicsBuffer? lodCursorBuf;
 
         // ── Per-LOD indirect draw args ────────────────────────────────────────
         private GraphicsBuffer? argsLod0Buf;
@@ -122,9 +134,11 @@ namespace GPUGrass
         {
             this.computeShader        = computeShader  ?? throw new ArgumentNullException(nameof(computeShader));
             this.indirectMaterialBase = indirectMaterial ?? throw new ArgumentNullException(nameof(indirectMaterial));
-            this.kernelCull  = computeShader.FindKernel("ChunkCull");
-            this.kernelArgs  = computeShader.FindKernel("WriteArgsB");
-            this.kernelBlade = computeShader.FindKernel("BladeCull");
+            this.kernelCull            = computeShader.FindKernel("ChunkCull");
+            this.kernelArgs            = computeShader.FindKernel("WriteArgsB");
+            this.kernelBladeCount      = computeShader.FindKernel("BladeCullCount");
+            this.kernelWriteLodOffsets = computeShader.FindKernel("WriteLodOffsets");
+            this.kernelBladeScatter    = computeShader.FindKernel("BladeCullScatter");
         }
 
         // ── IGpuGrassRenderer : Build ─────────────────────────────────────────
@@ -194,17 +208,35 @@ namespace GPUGrass
             int chunkCap = Mathf.Max(1, this.bladeBuffer.TotalChunks);
             int bladeCap = Mathf.Max(1, this.bladeBuffer.TotalBlades);
 
+            // The merged visible-index buffer packs a 2-bit LOD tag into the top bits of each blade index
+            // (GpuGrassLodTag / GrassCull.compute BladeCullScatter), leaving 30 bits for the index. Past that
+            // the pack silently masks the index into the tag bits → wrong-mesh/position blades with no error.
+            // Practically unreachable (2^30 blades ≈ a 21 GB blade buffer), but fail LOUD, not silently.
+            if (this.bladeBuffer.TotalBlades > GpuGrassLodTag.INDEX_MASK)
+                Debug.LogError($"[GpuGrassRenderer] Bake has {this.bladeBuffer.TotalBlades} blades, exceeding the " +
+                               $"{GpuGrassLodTag.INDEX_MASK} (2^30-1) LOD-tag index limit — packed indices will corrupt. " +
+                               "Reduce density or split the terrain.");
+
             this.visibleChunksBuf = new GraphicsBuffer(GraphicsBuffer.Target.Append, chunkCap, sizeof(uint));
             this.visibleCountBuf  = new GraphicsBuffer(GraphicsBuffer.Target.Raw, 1, sizeof(uint));
             this.dispatchArgsBuf  = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, 3, sizeof(uint));
-            this.visibleLod0Buf   = new GraphicsBuffer(GraphicsBuffer.Target.Append, bladeCap, sizeof(uint));
-            this.visibleLod1Buf   = new GraphicsBuffer(GraphicsBuffer.Target.Append, bladeCap, sizeof(uint));
-            this.visibleLod2Buf   = new GraphicsBuffer(GraphicsBuffer.Target.Append, bladeCap, sizeof(uint));
+
+            // Merged per-LOD visible-index buffer (mobile #5+#6): ONE bladeCap-sized buffer (4 B/blade)
+            // instead of three (12 B/blade) — the sum of all three LOD partitions can never exceed
+            // TotalBlades, so a single shared allocation always covers every distribution.
+            this.visibleBladesBuf = new GraphicsBuffer(GraphicsBuffer.Target.Structured, bladeCap, sizeof(uint));
+            this.lodCountsBuf   = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint));
+            this.lodOffsetsBuf  = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint));
+            this.lodCursorBuf   = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint));
 
             int argsStride = GraphicsBuffer.IndirectDrawIndexedArgs.size;
-            this.argsLod0Buf = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, 1, argsStride);
-            this.argsLod1Buf = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, 1, argsStride);
-            this.argsLod2Buf = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, 1, argsStride);
+            // IndirectArguments | Structured: still consumed by RenderMeshIndirect as draw-args, but ALSO
+            // compute-writable (WriteLodOffsets writes instanceCount directly — no per-LOD hidden Append
+            // counter exists anymore to CopyCounterValue from).
+            const GraphicsBuffer.Target argsTarget = GraphicsBuffer.Target.IndirectArguments | GraphicsBuffer.Target.Structured;
+            this.argsLod0Buf = new GraphicsBuffer(argsTarget, argsStride / sizeof(uint), sizeof(uint));
+            this.argsLod1Buf = new GraphicsBuffer(argsTarget, argsStride / sizeof(uint), sizeof(uint));
+            this.argsLod2Buf = new GraphicsBuffer(argsTarget, argsStride / sizeof(uint), sizeof(uint));
             this.InitLodArgsFromMeshes();
 
             // ── Registries ───────────────────────────────────────────────────
@@ -219,21 +251,34 @@ namespace GPUGrass
             this.lodMat2.EnableKeyword(KW_Lod2Billboard);
             this.lodMats = new Material?[] { this.lodMat0, this.lodMat1, this.lodMat2 };
 
-            if (this.visibleLod0Buf != null) this.lodMat0.SetBuffer(ID_VisibleIndices, this.visibleLod0Buf);
-            if (this.visibleLod1Buf != null) this.lodMat1.SetBuffer(ID_VisibleIndices, this.visibleLod1Buf);
-            if (this.visibleLod2Buf != null) this.lodMat2.SetBuffer(ID_VisibleIndices, this.visibleLod2Buf);
+            // _VisibleIndices is now the SAME shared packed buffer for all 3 LOD materials — each material's
+            // _LodIndex constant (set below) tells the vertex shader which _LodOffsets[] entry is its
+            // partition's base offset into that shared buffer.
+            if (this.visibleBladesBuf != null) this.SetLodBuffer(ID_VisibleIndices, this.visibleBladesBuf);
+            if (this.lodOffsetsBuf != null)    this.SetLodBuffer(ID_LodOffsets, this.lodOffsetsBuf);
 
             // Per-material static uniforms (legacy yaw-only orient, no authored offset).
             float interactorsFlag = this.interactorsEnabled ? 1f : 0f;
-            foreach (Material? m in this.lodMats)
+            // Alpha-clip is a [Toggle(_ALPHACLIP)] property: its FLOAT and its KEYWORD are decoupled. The
+            // clones from `new Material(base)` inherit only whatever keyword the base had enabled — but any
+            // path that set the float via SetFloat (mobile preset, authoring, re-import) leaves the keyword
+            // OFF, so the `#if defined(_ALPHACLIP)` clip compiles out and cutout grass renders as solid quads.
+            // Make the float the SSOT: sync the keyword onto every draw clone from the base material's float.
+            bool alphaClip        = this.indirectMaterialBase.GetFloat(ID_Alphaclip)        > 0.5f;
+            bool alphaClipShadows = this.indirectMaterialBase.GetFloat(ID_AlphaclipShadows) > 0.5f;
+            for (int i = 0; i < this.lodMats.Length; i++)
             {
+                Material? m = this.lodMats[i];
                 if (m == null) continue;
                 m.SetFloat(ID_OrientMode, 0f);
                 m.SetVector(ID_RotationOffsetEuler, Vector4.zero);
                 m.SetFloat(ID_WindEnabled, 1f);
                 m.SetFloat(ID_InteractorsEnabled, interactorsFlag);
+                m.SetFloat(ID_LodIndex, i); // 0/1/2 — selects this material's partition in _LodOffsets
                 if (this.receiveShadows) m.EnableKeyword(KW_ReceiveShadows);
                 else                     m.DisableKeyword(KW_ReceiveShadows);
+                if (alphaClip) m.EnableKeyword(KW_Alphaclip);               else m.DisableKeyword(KW_Alphaclip);
+                if (alphaClipShadows) m.EnableKeyword(KW_AlphaclipShadows); else m.DisableKeyword(KW_AlphaclipShadows);
             }
 
             // _Blades is PER-MATERIAL (per-field) — must NOT be a shared global (a second field's Submit
@@ -380,27 +425,30 @@ namespace GPUGrass
         }
 
         /// <summary>
-        /// Records the two-pass cull: reset append counters → ChunkCull → CopyCount → WriteArgsB →
-        /// BladeCull (indirect) → CopyCount×3 into the per-LOD draw args. Density is fixed at full
-        /// (<see cref="FULL_DENSITY_THRESHOLD"/>) — GPUGrass has no adaptive-density controller.
+        /// Records the multi-pass cull: reset append counter → ChunkCull → CopyCount → WriteArgsB (also
+        /// zeroes lodCounts) → BladeCullCount (indirect, counts per-LOD survivors) → WriteLodOffsets
+        /// (prefix-sum → per-LOD base offsets + seeds the scatter cursor + writes indirect instanceCounts)
+        /// → BladeCullScatter (indirect, SAME dispatch as Count — writes packed indices into their LOD's
+        /// partition of the single shared visibleBlades buffer). Mobile #5+#6 — see GrassCull.compute.
+        /// Density is fixed at full (<see cref="FULL_DENSITY_THRESHOLD"/>) — GPUGrass has no
+        /// adaptive-density controller.
         /// </summary>
         private void RecordFrameCommands(CommandBuffer cmd, Camera cam)
         {
             if (this.bladeBuffer?.AabbBuffer == null || this.bladeBuffer.BladeBuffer == null ||
                 this.bladeBuffer.RangeBuffer == null ||
                 this.visibleChunksBuf == null || this.visibleCountBuf == null || this.dispatchArgsBuf == null ||
-                this.visibleLod0Buf == null || this.visibleLod1Buf == null || this.visibleLod2Buf == null ||
+                this.visibleBladesBuf == null || this.lodCountsBuf == null || this.lodOffsetsBuf == null ||
+                this.lodCursorBuf == null ||
                 this.argsLod0Buf == null || this.argsLod1Buf == null || this.argsLod2Buf == null)
                 return;
 
             int chunkCount = this.bladeBuffer.TotalChunks;
             Vector3 camPos = cam.transform.position;
 
-            // Reset ALL append counters before any dispatch.
+            // Reset the chunk-append counter before any dispatch. lodCounts is zeroed inside WriteArgsB
+            // (below) instead of here — it needs no separate reset call.
             this.visibleChunksBuf.SetCounterValue(0);
-            this.visibleLod0Buf.SetCounterValue(0);
-            this.visibleLod1Buf.SetCounterValue(0);
-            this.visibleLod2Buf.SetCounterValue(0);
 
             // ── Pass A: ChunkCull ────────────────────────────────────────────
             cmd.SetComputeBufferParam(this.computeShader, this.kernelCull, "chunkAabbs", this.bladeBuffer.AabbBuffer);
@@ -442,31 +490,50 @@ namespace GPUGrass
             cmd.DispatchCompute(this.computeShader, this.kernelCull, cullGroups, 1, 1);
             cmd.CopyCounterValue(this.visibleChunksBuf, this.visibleCountBuf, 0);
 
-            // WriteArgsB: visibleCount → [groupsX,1,1] for the indirect BladeCull dispatch.
+            // WriteArgsB: visibleCount → [groupsX,1,1] for the indirect BladeCullCount/Scatter dispatches;
+            // also zeroes lodCounts before BladeCullCount accumulates into it this frame.
             cmd.SetComputeBufferParam(this.computeShader, this.kernelArgs, "visibleCount", this.visibleCountBuf);
             cmd.SetComputeBufferParam(this.computeShader, this.kernelArgs, "dispatchArgsB", this.dispatchArgsBuf);
+            cmd.SetComputeBufferParam(this.computeShader, this.kernelArgs, "lodCounts", this.lodCountsBuf);
             cmd.DispatchCompute(this.computeShader, this.kernelArgs, 1, 1, 1);
 
-            // ── Pass B: BladeCull (one group per visible chunk) ──────────────
-            int k = this.kernelBlade;
-            cmd.SetComputeBufferParam(this.computeShader, k, "blades", this.bladeBuffer.BladeBuffer);
-            cmd.SetComputeBufferParam(this.computeShader, k, "chunkRanges", this.bladeBuffer.RangeBuffer);
-            cmd.SetComputeBufferParam(this.computeShader, k, "visibleChunksRead", this.visibleChunksBuf);
-            cmd.SetComputeBufferParam(this.computeShader, k, "visibleCount", this.visibleCountBuf);
+            // ── Pass B1: BladeCullCount (one group per visible chunk) — counts per-LOD survivors ──
+            int kCount = this.kernelBladeCount;
+            cmd.SetComputeBufferParam(this.computeShader, kCount, "blades", this.bladeBuffer.BladeBuffer);
+            cmd.SetComputeBufferParam(this.computeShader, kCount, "chunkRanges", this.bladeBuffer.RangeBuffer);
+            cmd.SetComputeBufferParam(this.computeShader, kCount, "visibleChunksRead", this.visibleChunksBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kCount, "visibleCount", this.visibleCountBuf);
             cmd.SetComputeFloatParam(this.computeShader, "lod0MaxSqrDist", this.lod0MaxSqrDist);
             cmd.SetComputeFloatParam(this.computeShader, "lod1MaxSqrDist", this.lod1MaxSqrDist);
             cmd.SetComputeFloatParam(this.computeShader, "bladeCullMargin", this.bladeCullMargin);
             cmd.SetComputeIntParam(this.computeShader, "densityThreshold", this.densityThreshold);
-            cmd.SetComputeBufferParam(this.computeShader, k, "visibleLod0", this.visibleLod0Buf);
-            cmd.SetComputeBufferParam(this.computeShader, k, "visibleLod1", this.visibleLod1Buf);
-            cmd.SetComputeBufferParam(this.computeShader, k, "visibleLod2", this.visibleLod2Buf);
+            cmd.SetComputeBufferParam(this.computeShader, kCount, "lodCounts", this.lodCountsBuf);
 
-            cmd.DispatchCompute(this.computeShader, k, this.dispatchArgsBuf, 0u);
+            cmd.DispatchCompute(this.computeShader, kCount, this.dispatchArgsBuf, 0u);
 
-            // CopyCount → instanceCount field of each LOD's indirect draw args.
-            cmd.CopyCounterValue(this.visibleLod0Buf, this.argsLod0Buf, ARGS_INSTANCE_COUNT_OFFSET);
-            cmd.CopyCounterValue(this.visibleLod1Buf, this.argsLod1Buf, ARGS_INSTANCE_COUNT_OFFSET);
-            cmd.CopyCounterValue(this.visibleLod2Buf, this.argsLod2Buf, ARGS_INSTANCE_COUNT_OFFSET);
+            // ── Pass B2: WriteLodOffsets (single-thread) — prefix-sum offsets, seed scatter cursor, ──
+            // ── write each LOD's instanceCount into its indirect draw-args buffer. ──────────────────
+            int kOffsets = this.kernelWriteLodOffsets;
+            cmd.SetComputeBufferParam(this.computeShader, kOffsets, "lodCounts", this.lodCountsBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kOffsets, "lodOffsets", this.lodOffsetsBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kOffsets, "lodCursor", this.lodCursorBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kOffsets, "argsLod0", this.argsLod0Buf);
+            cmd.SetComputeBufferParam(this.computeShader, kOffsets, "argsLod1", this.argsLod1Buf);
+            cmd.SetComputeBufferParam(this.computeShader, kOffsets, "argsLod2", this.argsLod2Buf);
+            cmd.DispatchCompute(this.computeShader, kOffsets, 1, 1, 1);
+
+            // ── Pass B3: BladeCullScatter — SAME indirect dispatch args as BladeCullCount (identical ──
+            // ── chunk/thread assignment, so counts and writes always agree). Scatter-writes packed ────
+            // ── (lod<<30 | index) into visibleBlades. ───────────────────────────────────────────────
+            int kScatter = this.kernelBladeScatter;
+            cmd.SetComputeBufferParam(this.computeShader, kScatter, "blades", this.bladeBuffer.BladeBuffer);
+            cmd.SetComputeBufferParam(this.computeShader, kScatter, "chunkRanges", this.bladeBuffer.RangeBuffer);
+            cmd.SetComputeBufferParam(this.computeShader, kScatter, "visibleChunksRead", this.visibleChunksBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kScatter, "visibleCount", this.visibleCountBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kScatter, "lodCursor", this.lodCursorBuf);
+            cmd.SetComputeBufferParam(this.computeShader, kScatter, "visibleBlades", this.visibleBladesBuf);
+
+            cmd.DispatchCompute(this.computeShader, kScatter, this.dispatchArgsBuf, 0u);
         }
 
         private void InitLodArgsFromMeshes()
@@ -484,12 +551,16 @@ namespace GPUGrass
                 if (mesh != null && mesh.GetIndexCount(0) == 0)
                     Debug.LogError($"[GpuGrassRenderer] LOD mesh '{mesh.name}' has 0 indices — its draw renders nothing.");
 
-                var args = new GraphicsBuffer.IndirectDrawIndexedArgs[1];
-                args[0].indexCountPerInstance = (mesh != null) ? mesh.GetIndexCount(0) : 0;
-                args[0].instanceCount         = 0;
-                args[0].startIndex            = (mesh != null) ? mesh.GetIndexStart(0) : 0;
-                args[0].baseVertexIndex       = (mesh != null) ? (uint)mesh.GetBaseVertex(0) : 0;
-                args[0].startInstance         = 0;
+                // Written as a raw uint[5] (not the IndirectDrawIndexedArgs struct) because the buffer is
+                // now declared with stride=sizeof(uint) (IndirectArguments|Structured, so WriteLodOffsets
+                // can compute-write instanceCount directly) — layout: [0]=indexCountPerInstance
+                // [1]=instanceCount [2]=startIndex [3]=baseVertexIndex [4]=startInstance.
+                var args = new uint[5];
+                args[0] = (mesh != null) ? mesh.GetIndexCount(0) : 0;
+                args[1] = 0; // instanceCount — written per-frame by WriteLodOffsets
+                args[2] = (mesh != null) ? mesh.GetIndexStart(0) : 0;
+                args[3] = (mesh != null) ? (uint)mesh.GetBaseVertex(0) : 0;
+                args[4] = 0;
                 buf.SetData(args);
             }
         }
@@ -518,9 +589,10 @@ namespace GPUGrass
             this.visibleChunksBuf?.Release(); this.visibleChunksBuf = null;
             this.visibleCountBuf?.Release();  this.visibleCountBuf  = null;
             this.dispatchArgsBuf?.Release();  this.dispatchArgsBuf  = null;
-            this.visibleLod0Buf?.Release(); this.visibleLod0Buf = null;
-            this.visibleLod1Buf?.Release(); this.visibleLod1Buf = null;
-            this.visibleLod2Buf?.Release(); this.visibleLod2Buf = null;
+            this.visibleBladesBuf?.Release(); this.visibleBladesBuf = null;
+            this.lodCountsBuf?.Release();  this.lodCountsBuf  = null;
+            this.lodOffsetsBuf?.Release(); this.lodOffsetsBuf = null;
+            this.lodCursorBuf?.Release();  this.lodCursorBuf  = null;
             this.argsLod0Buf?.Release(); this.argsLod0Buf = null;
             this.argsLod1Buf?.Release(); this.argsLod1Buf = null;
             this.argsLod2Buf?.Release(); this.argsLod2Buf = null;

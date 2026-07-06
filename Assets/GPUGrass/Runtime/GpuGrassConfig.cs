@@ -62,7 +62,7 @@ namespace GPUGrass
         [SerializeField] private bool receiveShadows;
 
         [Header("Render assets (wired by Auto-Setup — serialized so they ship in player builds)")]
-        [Tooltip("GPUGrass GrassCull compute shader (ChunkCull/WriteArgsB/BladeCull kernels).")]
+        [Tooltip("GPUGrass GrassCull compute shader (ChunkCull/WriteArgsB/BladeCullCount/WriteLodOffsets/BladeCullScatter kernels).")]
         [SerializeField] private ComputeShader? cullCompute;
         [Tooltip("GPUGrass/IndirectGrass shader. Used to build a base material when grassMaterial is unset.")]
         [SerializeField] private Shader? indirectShader;
@@ -92,8 +92,11 @@ namespace GPUGrass
 
         [Header("Occlusion (Hi-Z)")]
         [Tooltip("GPU Hi-Z occlusion cull: skips grass chunks hidden behind terrain/geometry. " +
-                 "Auto-disabled when no camera depth texture is available.")]
-        [SerializeField] private bool enableOcclusionCulling = true;
+                 "Auto-disabled when no camera depth texture is available. Default OFF: on a mostly-flat " +
+                 "mobile field the per-frame depth resolve + pyramid build is pure overhead versus frustum + " +
+                 "distance + LOD2 thinning, which already remove most off-screen/far grass far cheaper. Opt " +
+                 "back in for hilly / heavily-occluded terrain (see docs/GPUGrass.md §8.2 #1).")]
+        [SerializeField] private bool enableOcclusionCulling = false;
 
         [Header("Device tier policy")]
         [SerializeField] private GrassTierMode tierMode = GrassTierMode.Auto;
@@ -145,6 +148,21 @@ namespace GPUGrass
         /// <c>LodMeshes.Length - 1</c>; an empty array routes every blade to LOD0 (single-mesh fields).
         /// </summary>
         public void SetLodMaxDistances(float[] distances) => this.lodMaxDistances = distances ?? Array.Empty<float>();
+
+        // ── Perf / tier mutators (editor tooling, e.g. the Mobile Preset) ───────
+        // Direct field setters so editor tooling never round-trips through a string-keyed SerializedObject
+        // (a mistyped/absent property there fails silently). These are the SSOT write path — unit-testable.
+        public void SetRenderCullDistance(float metres) => this.renderCullDistance = Mathf.Max(0f, metres);
+        public void SetTargetDensityPerSqM(float density) => this.targetDensityPerSqM = Mathf.Max(0f, density);
+        public void SetMinDensity(float floor01) => this.minDensity = Mathf.Clamp01(floor01);
+        public void SetAdaptiveDensity(bool enabled) => this.enableAdaptiveDensity = enabled;
+        public void SetOcclusionCulling(bool enabled) => this.enableOcclusionCulling = enabled;
+        public void SetShadows(ShadowCastingMode casting, bool receive)
+        {
+            this.shadowCastingMode = casting;
+            this.receiveShadows = receive;
+        }
+        public void SetTierMode(GrassTierMode mode) => this.tierMode = mode;
 
         // ── Wind accessors ─────────────────────────────────────────────────────
         public Vector2 WindDirection => this.windDirection;

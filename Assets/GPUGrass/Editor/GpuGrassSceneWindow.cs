@@ -4,6 +4,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 
@@ -365,39 +366,53 @@ namespace GPUGrass.Editor
             this.RefreshTerrainRows();
         }
 
-        private void ApplyMobilePreset(GpuGrassConfig config)
+        /// <summary>
+        /// Applies the locked aggressive mobile defaults (docs/GPUGrass.md §8.2 #4) — occlusion OFF (#1),
+        /// tight LOD/cull/density, shadows off, tier Auto — then re-asserts the opaque-shader guardrail
+        /// (#2-preset, Guard 6): the indirect renderer requires a material on <c>GPUGrass/IndirectGrass</c>;
+        /// any other shader (e.g. URP/Lit) silently renders nothing. Values are aggressive DEFAULTS, not hard
+        /// caps — still play-tunable afterward. Internal (not private) so <c>MobilePresetTests</c> can call it
+        /// directly without a live editor window.
+        /// </summary>
+        internal void ApplyMobilePreset(GpuGrassConfig config)
         {
-            var so = new SerializedObject(config);
-            SetBool(so, "enableOcclusionCulling", true);
-            SetBool(so, "enableAdaptiveDensity",  true);
-            SetFloat(so, "renderCullDistance",    70f);
-            SetInt(so, "tierMode",                (int)GrassTierMode.Auto);
-            so.ApplyModifiedProperties();
+            // Do the AssetDatabase-MUTATING guardrail FIRST. WireRenderAssets' material self-heal calls
+            // AssetDatabase.CreateAsset/CreateFolder, which can trigger a reimport that reloads `config` from
+            // its on-disk YAML — reverting any in-memory field writes made before it. So set the config
+            // fields AFTER this, last, where nothing can reload over them.
+            // Opaque-shader guardrail (Guard 6): reuse the SAME self-heal helper GpuGrassAutoSetup uses at
+            // setup time — idempotent, only touches the material when it's missing/on the wrong shader, logs a
+            // warning when it corrects one, never switches to alpha-clip.
+            string folder = GpuGrassSceneSetup.EnsureSceneBakeFolder();
+            GpuGrassAutoSetup.WireRenderAssets(config, folder);
 
+            // _WIND_PERLIN is ~16 sin/hash ops vs ~1 for the default sin() wind — keep it off on mobile.
+            if (config.GrassMaterial != null)
+            {
+                config.GrassMaterial.DisableKeyword("_WIND_PERLIN");
+                EditorUtility.SetDirty(config.GrassMaterial);
+            }
+
+            // Direct SSOT setters, LAST (after every AssetDatabase op above) — a string-keyed SerializedObject
+            // silently no-ops on a mistyped/absent property, which previously left these at their defaults.
+            config.SetOcclusionCulling(false);
+            config.SetAdaptiveDensity(true);
+            config.SetLodMaxDistances(new[] { 8f, 20f });
+            config.SetRenderCullDistance(60f);
+            config.SetTargetDensityPerSqM(0.5f);
+            config.SetMinDensity(0.4f);
+            config.SetShadows(ShadowCastingMode.Off, receive: false);
+            config.SetTierMode(GrassTierMode.Auto);
+
+            // Persist immediately so the in-memory values are flushed to disk before anything else can reload.
             EditorUtility.SetDirty(config);
             AssetDatabase.SaveAssets();
             this.RebuildAllControllers();
 
-            Debug.Log("[GPUGrass] Mobile preset applied: occlusion on, renderCullDistance=70, " +
-                      "adaptive density on, tier=Auto.");
-        }
-
-        private static void SetBool(SerializedObject so, string field, bool v)
-        {
-            var p = so.FindProperty(field);
-            if (p != null) p.boolValue = v;
-        }
-
-        private static void SetFloat(SerializedObject so, string field, float v)
-        {
-            var p = so.FindProperty(field);
-            if (p != null) p.floatValue = v;
-        }
-
-        private static void SetInt(SerializedObject so, string field, int v)
-        {
-            var p = so.FindProperty(field);
-            if (p != null) p.intValue = v;
+            Debug.Log("[GPUGrass] Mobile preset applied: occlusion OFF, adaptive density ON, " +
+                      "LOD switches {8,20}, renderCullDistance=60, targetDensity=0.5, minDensity=0.4, " +
+                      "shadows off (cast+receive), _WIND_PERLIN off, material verified on " +
+                      "GPUGrass/IndirectGrass, tier=Auto.");
         }
     }
 }

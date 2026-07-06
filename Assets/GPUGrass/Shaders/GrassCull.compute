@@ -1,16 +1,32 @@
 // GrassCull.compute
 // Phase 3: Compute A — chunk culling kernel.
 // Phase 4: Compute B — per-blade cull + LOD bucketing kernel.
+// Mobile optimization #5+#6: Compute B split into a count pass + a scatter pass so every LOD's visible
+//   blade indices land in ONE shared packed buffer (2-bit LOD tag in the high bits of each uint) instead of
+//   three separate bladeCap-sized append buffers. Cuts scratch 12 B/blade -> 4 B/blade and drops the
+//   per-kernel SSBO binding count. See docs/GPUGrass.md §8.2 #5, #6.
 //
-// Kernel index 0: ChunkCull   — culls N chunks against frustum + distance; appends visible IDs.
-// Kernel index 1: WriteArgsB  — reads the CopyCount result and writes DispatchIndirect args for B.
-// Kernel index 2: BladeCull   — dispatched indirectly (one group per visible chunk); per-blade
-//                               frustum + distance test; buckets surviving global blade indices
-//                               into visibleLod0 / visibleLod1 / visibleLod2.
+// Kernel index 0: ChunkCull        — culls N chunks against frustum + distance (+Hi-Z); appends visible IDs.
+// Kernel index 1: WriteArgsB       — reads the CopyCount result, writes DispatchIndirect args for B, and
+//                                    zeroes the per-LOD count buffer for the upcoming count pass.
+// Kernel index 2: BladeCullCount   — dispatched indirectly (one group per visible chunk); classifies every
+//                                    surviving blade into LOD 0/1/2 and atomically COUNTS per-LOD totals
+//                                    (no data written yet — this pass only determines partition sizes).
+// Kernel index 3: WriteLodOffsets  — single-thread; turns the 3 per-LOD counts into a prefix-sum base offset
+//                                    per LOD (written to lodOffsets, read by the shader's vertex stage),
+//                                    seeds lodCursor with the same offsets for the scatter pass, and writes
+//                                    each LOD's count into its own indirect draw-args instanceCount field.
+// Kernel index 4: BladeCullScatter — SAME indirect dispatch as BladeCullCount (identical chunk assignment,
+//                                    so counts and writes always agree); re-classifies each blade (pure,
+//                                    deterministic — same result as the count pass) and scatter-writes its
+//                                    packed (lod<<30 | index) into its LOD's contiguous partition of the
+//                                    single shared visibleBlades buffer.
 
 #pragma kernel ChunkCull
 #pragma kernel WriteArgsB
-#pragma kernel BladeCull
+#pragma kernel BladeCullCount
+#pragma kernel WriteLodOffsets
+#pragma kernel BladeCullScatter
 
 // ─── Structs ────────────────────────────────────────────────────────────────
 // ChunkAabb layout must match the C# blittable struct EXACTLY:
@@ -83,15 +99,43 @@ int                             hiZMipCount;        // number of mip levels
 ByteAddressBuffer               visibleCount;       // [0] = count written by CopyCount
 RWStructuredBuffer<uint>        dispatchArgsB;      // [0]=groupsX [1]=1 [2]=1 for DispatchIndirect
 
-// ─── BladeCull bindings ──────────────────────────────────────────────────────
+// ─── Per-LOD partition bindings (mobile #5+#6 — shared by the count/offset/scatter kernels) ────────────
+// lodCounts: [0]=LOD0 count [1]=LOD1 count [2]=LOD2 count. Zeroed by WriteArgsB, accumulated by
+//   BladeCullCount (InterlockedAdd), consumed by WriteLodOffsets.
+// lodOffsets: prefix-sum BASE offset per LOD into visibleBlades. Written ONCE by WriteLodOffsets; read by
+//   the shader's vertex stage (bound there as _LodOffsets) — never mutated after this frame's dispatch.
+// lodCursor: working copy seeded from lodOffsets by WriteLodOffsets; BladeCullScatter atomically advances
+//   it per LOD to claim a write slot. Ends the frame equal to the END of each partition (never read by the
+//   shader — the shader always reads lodOffsets, the immutable START offsets).
+RWStructuredBuffer<uint>        lodCounts;
+RWStructuredBuffer<uint>        lodOffsets;
+RWStructuredBuffer<uint>        lodCursor;
+
+// The single packed visible-blade buffer (mobile #5): each element is (lod << LOD_SHIFT) | blade index.
+// Sized to bladeCap — the sum of all three LOD partitions can never exceed TotalBlades, so one bladeCap-
+// sized buffer covers every distribution (unlike three separately-capped buffers, which risk overflow).
+RWStructuredBuffer<uint>        visibleBlades;
+
+// Per-LOD indirect draw-args buffers — instanceCount (element index 1) is written by WriteLodOffsets,
+// replacing the old per-buffer CopyCounterValue (there is no per-LOD hidden Append counter anymore).
+RWStructuredBuffer<uint>        argsLod0;
+RWStructuredBuffer<uint>        argsLod1;
+RWStructuredBuffer<uint>        argsLod2;
+
+// Packing layout — MUST mirror GpuGrassLodTag.cs (C# test mirror) and the shader's unpack exactly.
+#define LOD_SHIFT  30
+#define INDEX_MASK 0x3FFFFFFFu
+// ── [END per-LOD partition bindings] ──────────────────────────────────────────
+
+// ─── BladeCullCount / BladeCullScatter shared bindings ───────────────────────
 // visibleChunkCount is read from the same count buffer WriteArgsB used (no CPU readback needed).
-// BladeCull reads visibleCount[0] as an upper-bound guard so out-of-range groups exit early.
+// Both kernels read visibleCount[0] as an upper-bound guard so out-of-range groups exit early.
 StructuredBuffer<BladeInstance> blades;             // all blade instances (sorted by chunk)
 StructuredBuffer<ChunkRange>    chunkRanges;        // one ChunkRange per chunk
 // visibleChunks is declared above as AppendStructuredBuffer for ChunkCull.
-// BladeCull reads visibleChunks as a plain StructuredBuffer — HLSL allows re-binding under a different
-// register name. However since HLSL forbids two names for the same slot in one kernel, we declare a
-// separate read view named visibleChunksRead.
+// The count/scatter kernels read visibleChunks as a plain StructuredBuffer — HLSL allows re-binding under a
+// different register name. However since HLSL forbids two names for the same slot in one kernel, we declare
+// a separate read view named visibleChunksRead.
 StructuredBuffer<uint>          visibleChunksRead;  // read-only view of the visibleChunks buffer
 
 // LOD bucketing thresholds (squared distances, passed from CPU — sourced from ScatterLayer.LodMaxDistances).
@@ -123,7 +167,7 @@ uint                            densityThreshold;   // 0..256; 256 = full densit
 // Phase 3) — just with a smaller modulus (1024) for a finer step.  DRY: no new hash.
 // LOD2_DENSITY_FAR_FRACTION = 0.4 ≈ keep 40% at maximum cull distance.
 //
-// LOD0 and LOD1 blades are UNAFFECTED — only blades that actually go to visibleLod2
+// LOD0 and LOD1 blades are UNAFFECTED — only blades that actually classify as LOD2
 // pass through the LOD2 branch and may be skipped here.
 #define LOD2_DENSITY_FAR_FRACTION 0.4
 // ── [END PHASE 5a bindings] ──────────────────────────────────────────────────
@@ -143,11 +187,6 @@ uint                            densityThreshold;   // 0..256; 256 = full densit
 //    (a real grass blade there has no visible head); they are left to clip-space culling / the
 //    distance reject below. Acceptable for a single-scalar sphere model.
 float                           bladeCullMargin;
-
-// Three separate AppendStructuredBuffers — HLSL has no array of AppendStructuredBuffer.
-AppendStructuredBuffer<uint>    visibleLod0;        // global blade indices for LOD 0
-AppendStructuredBuffer<uint>    visibleLod1;        // global blade indices for LOD 1
-AppendStructuredBuffer<uint>    visibleLod2;        // global blade indices for LOD 2
 
 // ─── ChunkCull kernel ────────────────────────────────────────────────────────
 [numthreads(64, 1, 1)]
@@ -312,9 +351,10 @@ void ChunkCull(uint3 id : SV_DispatchThreadID)
 
 // ─── WriteArgsB kernel ───────────────────────────────────────────────────────
 // Single-thread kernel; dispatch with (1,1,1) groups.
-// Reads the count written by CopyCount and fills DispatchIndirect args for Compute B.
+// Reads the count written by CopyCount and fills DispatchIndirect args for Compute B, and zeroes the
+// per-LOD count buffer that BladeCullCount is about to accumulate into.
 //
-// PHASE 4 DESIGN: BladeCull uses one thread GROUP per visible CHUNK (grid-stride within the
+// PHASE 4 DESIGN: BladeCullCount/Scatter use one thread GROUP per visible CHUNK (grid-stride within the
 // group over that chunk's blades). Therefore groupsX = visibleChunkCount directly — one group
 // per slot, not one group per batch-of-64. PHASE4_GROUP is 1u (not 64u) to express this.
 // The Phase 3 harness was updated accordingly: dispatchArgsB[0] == M (not ceil(M/64)).
@@ -327,36 +367,98 @@ void WriteArgsB(uint3 id : SV_DispatchThreadID)
     dispatchArgsB[0] = count;
     dispatchArgsB[1] = 1u;
     dispatchArgsB[2] = 1u;
+
+    // Zero the per-LOD counters before BladeCullCount accumulates into them this frame.
+    lodCounts[0] = 0u;
+    lodCounts[1] = 0u;
+    lodCounts[2] = 0u;
 }
 
-// ─── BladeCull kernel ────────────────────────────────────────────────────────
+// ─── Shared per-blade classification (BladeCullCount + BladeCullScatter) ─────
+// Both kernels dispatch over the IDENTICAL chunk/thread assignment and call this SAME deterministic
+// function, so the count pass and the scatter pass always agree exactly on which blades survive and which
+// LOD they land in — no drift, no dropped/duplicated blades (Guard 3).
+// Returns false when the blade should be dropped entirely (density skip, frustum, or beyond cull distance).
+bool ClassifyBlade(BladeInstance b, out uint lod)
+{
+    lod = 0;
+
+    // ── [PHASE 3] Adaptive density stable-hash skip ───────────────────
+    // Skip when (b.hash % 256) >= densityThreshold. Placed BEFORE the
+    // frustum test so culled blades incur zero further work (cheapest early-out).
+    if ((b.hash % 256u) >= densityThreshold)
+        return false;
+    // ── [END PHASE 3 density skip] ────────────────────────────────────
+
+    // ── Per-blade frustum test (point vs 6 planes) ────────────────────
+    // GeometryUtility convention: dot(n, p) + w >= 0 → inside.
+    float3 posWS = b.posWS;
+    [unroll]
+    for (int i = 0; i < 6; i++)
+    {
+        float4 plane = frustumPlanes[i];
+        // Pad by bladeCullMargin: treat the blade as a sphere of that radius at its root so a
+        // root-outside / head-inside blade survives (mirrors the chunk-AABB Y/lateral inflation).
+        if (dot(plane.xyz, posWS) + plane.w < -bladeCullMargin)
+            return false;
+    }
+
+    // ── Distance + LOD bucket ─────────────────────────────────────────
+    float3 d = posWS - camPosWS;
+    float sqrDist = dot(d, d);
+
+    // Beyond the overall max cull distance → skip entirely.
+    // maxCullSqrDistance <= 0 means "no cull" (matches GrassRenderer CPU contract: cull==0 → render all).
+    if (maxCullSqrDistance > 0.0 && sqrDist > maxCullSqrDistance)
+        return false;
+
+    if (sqrDist <= lod0MaxSqrDist)
+    {
+        lod = 0;
+        return true;
+    }
+    if (sqrDist <= lod1MaxSqrDist)
+    {
+        lod = 1;
+        return true;
+    }
+
+    // ── [PHASE 5a] LOD2 distance-ramped density falloff ───────────────
+    // Only blades that land in LOD2 (far field) are subject to the additional distance-ramped
+    // thinning. LOD0/LOD1 blades ALWAYS survive to their return above (unchanged from Phase 3 baseline).
+    lod = 2;
+    float lod2RangeInvSqr = (maxCullSqrDistance > lod1MaxSqrDist + 1e-3)
+        ? 1.0 / (maxCullSqrDistance - lod1MaxSqrDist) : 0.0;
+    float normalizedDist = saturate((sqrDist - lod1MaxSqrDist) * lod2RangeInvSqr);
+
+    // Distance-ramped keep-fraction: lerp(1.0, LOD2_DENSITY_FAR_FRACTION, t).
+    float keepFraction = lerp(1.0, LOD2_DENSITY_FAR_FRACTION, normalizedDist);
+
+    // Reuse the blade's stable hash (same field as Phase 3) with a 1024-step modulus for a finer-grained
+    // stochastic skip. Same-blades-every-frame → no shimmer.
+    uint lod2Hash = b.hash % 1024u;
+    if (lod2Hash >= (uint)(keepFraction * 1024.0))
+        return false; // skip this far-field blade
+
+    return true;
+}
+
+// ─── BladeCullCount kernel ────────────────────────────────────────────────────
 // Dispatched INDIRECTLY via DispatchComputeIndirect(dispatchArgsB) = [visibleChunkCount, 1, 1].
-// One thread GROUP per visible chunk; 64 threads per group (GLES3.1-safe, covers typical chunk
-// sizes without excessive loop iterations — a chunk of 256 blades needs 4 loops per thread).
-//
-// Per-thread:
-//   1. Map SV_GroupID.x → slot in visibleChunksRead → chunkId.
-//   2. Guard slot < visibleChunkCount (read from visibleCount buffer, no CPU readback).
-//   3. Grid-stride loop over that chunk's [start, start+count) blades:
-//      a. Per-blade frustum test (point vs 6 planes, GeometryUtility inward-normal convention).
-//      b. sqrDist bucketing → LOD 0 / 1 / 2.
-//      c. Append globalIndex to the correct AppendStructuredBuffer.
+// One thread GROUP per visible chunk; 64 threads per group. Classifies every blade and atomically
+// increments its LOD's counter — no data write yet (that happens in BladeCullScatter once the
+// per-LOD base offsets are known).
 [numthreads(64, 1, 1)]
-void BladeCull(uint3 groupId   : SV_GroupID,
-               uint3 threadId  : SV_GroupThreadID)
+void BladeCullCount(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID)
 {
     uint slot = groupId.x;
 
-    // Guard: this group maps to a visible-chunk slot. visibleCount[0] holds the count of
-    // surviving chunks from CopyCount. Read it to guard partial last groups (in practice
-    // DispatchIndirect already gives exact group count, but the guard is cheap + correct).
     uint visChunkCount = visibleCount.Load(0);
     if (slot >= visChunkCount)
         return;
 
     uint chunkId = visibleChunksRead[slot];
     ChunkRange r = chunkRanges[chunkId];
-
     uint tid = threadId.x;
 
     // Grid-stride loop: each thread processes blades at indices tid, tid+64, tid+128, ...
@@ -364,85 +466,71 @@ void BladeCull(uint3 groupId   : SV_GroupID,
     {
         uint globalIdx = r.start + k;
         BladeInstance b = blades[globalIdx];
-        float3 posWS = b.posWS;
 
-        // ── [PHASE 3] Adaptive density stable-hash skip ───────────────────
-        // Skip when (b.hash % 256) >= densityThreshold. Placed BEFORE the
-        // frustum test so culled blades incur zero further work (cheapest early-out).
-        // densityThreshold == 256 → all blades pass (full density, no overhead).
-        // The floor is enforced on the CPU side (GrassDensityController) so this
-        // never drops below ~62% density; no need for a GPU-side floor guard.
-        // Phase 5 will add LOD distance-ramped falloff AFTER this skip — do not
-        // merge the two knobs here; leave this block self-contained.
-        if ((b.hash % 256u) >= densityThreshold)
-            continue;
-        // ── [END PHASE 3 density skip] ────────────────────────────────────
-
-        // ── Per-blade frustum test (point vs 6 planes) ────────────────────
-        // GeometryUtility convention: dot(n, p) + w >= 0 → inside.
-        bool inFrustum = true;
-        [unroll]
-        for (int i = 0; i < 6; i++)
-        {
-            float4 plane = frustumPlanes[i];
-            // Pad by bladeCullMargin: treat the blade as a sphere of that radius at its root so a
-            // root-outside / head-inside blade survives (mirrors the chunk-AABB Y/lateral inflation).
-            if (dot(plane.xyz, posWS) + plane.w < -bladeCullMargin)
-            {
-                inFrustum = false;
-                break;
-            }
-        }
-        if (!inFrustum)
+        uint lod;
+        if (!ClassifyBlade(b, lod))
             continue;
 
-        // ── Distance + LOD bucket ─────────────────────────────────────────
-        float3 d = posWS - camPosWS;
-        float sqrDist = dot(d, d);
+        InterlockedAdd(lodCounts[lod], 1u);
+    }
+}
 
-        // Beyond the overall max cull distance → skip entirely.
-        // maxCullSqrDistance <= 0 means "no cull" (matches GrassRenderer CPU contract: cull==0 → render all).
-        if (maxCullSqrDistance > 0.0 && sqrDist > maxCullSqrDistance)
+// ─── WriteLodOffsets kernel ──────────────────────────────────────────────────
+// Single-thread kernel; dispatch with (1,1,1) groups. Turns the 3 per-LOD counts (exact, from
+// BladeCullCount) into prefix-sum base offsets, seeds the scatter cursor, and writes each LOD's
+// instanceCount directly into its indirect draw-args buffer (replacing the old per-LOD CopyCounterValue —
+// there is no longer a per-LOD hidden Append counter to copy from).
+[numthreads(1, 1, 1)]
+void WriteLodOffsets(uint3 id : SV_DispatchThreadID)
+{
+    uint c0 = lodCounts[0];
+    uint c1 = lodCounts[1];
+    uint c2 = lodCounts[2];
+
+    uint o0 = 0u;
+    uint o1 = c0;
+    uint o2 = c0 + c1;
+
+    lodOffsets[0] = o0; lodOffsets[1] = o1; lodOffsets[2] = o2;
+    lodCursor[0]  = o0; lodCursor[1]  = o1; lodCursor[2]  = o2;
+
+    // IndirectDrawIndexedArgs layout: [0]=indexCountPerInstance [1]=instanceCount [2]=startIndex
+    // [3]=baseVertexIndex [4]=startInstance. Only instanceCount changes per frame.
+    argsLod0[1] = c0;
+    argsLod1[1] = c1;
+    argsLod2[1] = c2;
+}
+
+// ─── BladeCullScatter kernel ─────────────────────────────────────────────────
+// SAME indirect dispatch args as BladeCullCount (dispatchArgsB is unchanged between the two — the visible
+// chunk set does not change mid-frame), so both passes iterate the IDENTICAL chunk/thread assignment.
+// Re-classifies each blade (deterministic — same inputs, same result as BladeCullCount) and scatter-writes
+// its packed (lod<<30 | index) into its LOD's contiguous partition of visibleBlades.
+[numthreads(64, 1, 1)]
+void BladeCullScatter(uint3 groupId   : SV_GroupID,
+                       uint3 threadId  : SV_GroupThreadID)
+{
+    uint slot = groupId.x;
+
+    uint visChunkCount = visibleCount.Load(0);
+    if (slot >= visChunkCount)
+        return;
+
+    uint chunkId = visibleChunksRead[slot];
+    ChunkRange r = chunkRanges[chunkId];
+    uint tid = threadId.x;
+
+    for (uint k = tid; k < r.count; k += 64u)
+    {
+        uint globalIdx = r.start + k;
+        BladeInstance b = blades[globalIdx];
+
+        uint lod;
+        if (!ClassifyBlade(b, lod))
             continue;
 
-        // Bucket into LOD 0, 1, or 2 by squared distance.
-        if (sqrDist <= lod0MaxSqrDist)
-        {
-            visibleLod0.Append(globalIdx);
-        }
-        else if (sqrDist <= lod1MaxSqrDist)
-        {
-            visibleLod1.Append(globalIdx);
-        }
-        else
-        {
-            // ── [PHASE 5a] LOD2 distance-ramped density falloff ───────────────
-            // Only blades in the LOD2 bucket (far field) are subject to the
-            // additional distance-ramped thinning.  LOD0/LOD1 blades ALWAYS reach
-            // their Append unconditionally (unchanged from Phase 3 baseline).
-            //
-            // Compute how far into the LOD2 zone this blade sits: 0.0 at the
-            // LOD1→LOD2 boundary, 1.0 at the overall cull radius.
-            float lod2RangeInvSqr = (maxCullSqrDistance > lod1MaxSqrDist + 1e-3)
-                ? 1.0 / (maxCullSqrDistance - lod1MaxSqrDist) : 0.0;
-            float normalizedDist = saturate((sqrDist - lod1MaxSqrDist) * lod2RangeInvSqr);
-
-            // Distance-ramped keep-fraction: lerp(1.0, LOD2_DENSITY_FAR_FRACTION, t).
-            // At t=0 (LOD boundary): keepFraction = 1.0 → all blades pass.
-            // At t=1 (cull radius):  keepFraction ≈ 0.4 → 40% of blades pass.
-            float keepFraction = lerp(1.0, LOD2_DENSITY_FAR_FRACTION, normalizedDist);
-
-            // Reuse the blade's stable hash (same field as Phase 3) with a 1024-step
-            // modulus for a finer-grained stochastic skip.  Same-blades-every-frame
-            // → no shimmer.  maxCullSqrDistance <= 0 guard: when cull is disabled
-            // the range is undefined, so fall through (lod2RangeInvSqr will be 0
-            // → normalizedDist=0 → keepFraction=1.0 → all pass).
-            uint lod2Hash = b.hash % 1024u;
-            if (lod2Hash >= (uint)(keepFraction * 1024.0))
-                continue; // skip this far-field blade
-            // ── [END PHASE 5a LOD2 falloff] ──────────────────────────────────
-
-            visibleLod2.Append(globalIdx);
-        }
+        uint writeSlot;
+        InterlockedAdd(lodCursor[lod], 1u, writeSlot);
+        visibleBlades[writeSlot] = (lod << LOD_SHIFT) | (globalIdx & INDEX_MASK);
     }
 }

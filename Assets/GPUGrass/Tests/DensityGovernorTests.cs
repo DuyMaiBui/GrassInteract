@@ -47,7 +47,11 @@ namespace GPUGrass.Tests
             for (int i = 0; i < 30; i++) g.Tick(SLOW_DT, TARGET_FPS, FLOOR);
             float thinned = g.Density;
 
-            for (int i = 0; i < 60; i++) g.Tick(FAST_DT, TARGET_FPS, FLOOR);
+            // The governor smooths frame time over a 0.5 s EMA (SMOOTH_WINDOW_SEC). Coming out of sustained
+            // 50 ms frames, the smoothed signal needs ~180 fast (4 ms) ticks just to fall below the headroom
+            // threshold before density can walk back up — 60 ticks (0.24 s) never crosses it, so density stays
+            // pinned at the floor. Feed enough fast frames for the EMA to actually recover.
+            for (int i = 0; i < 400; i++) g.Tick(FAST_DT, TARGET_FPS, FLOOR);
             Assert.Greater(g.Density, thinned, "Frames with headroom must restore density back up.");
         }
 
