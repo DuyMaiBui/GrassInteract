@@ -226,8 +226,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: GPUGrass::GPUGrass.GpuGrassController
   terrain: {fileID: 195091183}
-  config: {fileID: 11400000, guid: 965da80ce9ce449fc9d246308b992fe7, type: 2}
-  bake: {fileID: 11400000, guid: 63c12f19c8b4f4e9aa76329f88bc1e48, type: 2}
+  config: {fileID: 11400000, guid: f31c85d81e5c3e04f89ba4978b7392af, type: 2}
+  bake: {fileID: 11400000, guid: 1f9accdb2ba0c6343b56bb0c14378641, type: 2}
 --- !u!1 &266778859
 GameObject:
   m_ObjectHideFlags: 0
@@ -358,13 +358,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 266778859}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.17178853, y: 0.68592185, z: -0.17178853, w: 0.68592185}
-  m_LocalPosition: {x: -13.6, y: 41.4, z: 61.2}
+  m_LocalRotation: {x: 0.04033312, y: 0.70595556, z: -0.04033312, w: 0.70595556}
+  m_LocalPosition: {x: -1.5, y: 1.7, z: 61.1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 28.121, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 6.54, y: 90, z: 0}
 --- !u!1 &675489995
 GameObject:
   m_ObjectHideFlags: 0
@@ -397,8 +397,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: GPUGrass::GPUGrass.GpuGrassController
   terrain: {fileID: 675489998}
-  config: {fileID: 11400000, guid: 965da80ce9ce449fc9d246308b992fe7, type: 2}
-  bake: {fileID: 11400000, guid: 740244de215ec4c46a394ddf74854dc4, type: 2}
+  config: {fileID: 11400000, guid: f31c85d81e5c3e04f89ba4978b7392af, type: 2}
+  bake: {fileID: 11400000, guid: 63fb134461a0f58449f625af4d6d92b6, type: 2}
 --- !u!154 &675489997
 TerrainCollider:
   m_ObjectHideFlags: 0
@@ -474,6 +474,19 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!134 &1075902630
+PhysicsMaterial:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 
+  serializedVersion: 2
+  m_DynamicFriction: 0.6
+  m_StaticFriction: 0.6
+  m_Bounciness: 0
+  m_FrictionCombine: 0
+  m_BounceCombine: 0
 --- !u!1 &1160932622
 GameObject:
   m_ObjectHideFlags: 0
@@ -581,8 +594,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: GPUGrass::GPUGrass.GpuGrassController
   terrain: {fileID: 1160932624}
-  config: {fileID: 11400000, guid: 965da80ce9ce449fc9d246308b992fe7, type: 2}
-  bake: {fileID: 11400000, guid: 4cc558513727c45b79018af4ca75949d, type: 2}
+  config: {fileID: 11400000, guid: f31c85d81e5c3e04f89ba4978b7392af, type: 2}
+  bake: {fileID: 11400000, guid: b0a5af6517a0de24a883cd7c55cdd581, type: 2}
 --- !u!1 &1298366853
 GameObject:
   m_ObjectHideFlags: 0
@@ -789,8 +802,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: GPUGrass::GPUGrass.GpuGrassController
   terrain: {fileID: 1907583559}
-  config: {fileID: 11400000, guid: 965da80ce9ce449fc9d246308b992fe7, type: 2}
-  bake: {fileID: 11400000, guid: 9037050dc8c48421ab0c682c7f75f0e7, type: 2}
+  config: {fileID: 11400000, guid: f31c85d81e5c3e04f89ba4978b7392af, type: 2}
+  bake: {fileID: 11400000, guid: 8c32a6c0a40f62047a6eb56a30e77953, type: 2}
 --- !u!154 &1907583558
 TerrainCollider:
   m_ObjectHideFlags: 0
@@ -798,7 +811,7 @@ TerrainCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1907583556}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 1075902630}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
