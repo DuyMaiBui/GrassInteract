@@ -113,3 +113,23 @@ UITemplate's package migration system can overwrite `Packages/manifest.json` on 
 **Symptom**: You edit a `com.theone.*` package version in `Packages/manifest.json`, but the version reverts after Unity reloads.
 **Cause**: `Assets/UITemplate/Editor/ProjectMigration/MigrationModules/PackageMigration/Resources/PackageMigrationConfig.json` contains a `PackagesToAdd` map that is treated as the migration source of truth.
 **Fix**: When bumping a `com.theone.*` package version, update both `Packages/manifest.json` and the matching `PackagesToAdd` entry in `PackageMigrationConfig.json`. Manifest-only edits are not durable.
+
+---
+
+## G10: `[CsvOptional]` on an Auto-Property Fails with CS0592
+
+Field-targeted CSV attributes (e.g. TheOne's `[CsvOptional]`) cannot decorate an auto-property directly. On a CSV blueprint record exposing data via an auto-property, `[CsvOptional]` raises **CS0592** (`Attribute 'CsvOptional' is only valid on field declarations`) because the attribute's `AttributeUsage` targets fields, and the auto-property's backing field is not the declaration the attribute lands on.
+
+```csharp
+// ❌ CS0592 — attribute lands on the property, which is not a field
+[CsvOptional]
+public string IconKey { get; private set; }
+
+// ✅ field: target forwards the attribute to the compiler-generated backing field
+[field: CsvOptional]
+public string IconKey { get; private set; }
+```
+
+**Rule**: When applying any field-targeted CSV attribute to a record member exposed as a property, use the `[field: …]` attribute target. Same applies to any other field-only attribute (`[SerializeField]`, custom CSV markers) on an auto-property.
+**Detection**: Compile error CS0592 naming the attribute as field-only.
+**Fix**: Prefix the attribute with `field:` — `[field: CsvOptional]`.

@@ -2,10 +2,10 @@
 name: t1k:cook
 description: "Implement features end-to-end: plan, code, test, review via registry agents. Use for 'implement X', 'build Y feature', 'add Z functionality'. Handles full workflow."
 keywords: [implement, build, feature, add, create, develop, end-to-end]
-argument-hint: "[task|plan-path] [--interactive|--fast|--parallel|--auto|--no-test|--tdd]"
+argument-hint: "[task|plan-path] [--interactive|--fast|--parallel|--auto|--yolo|--no-test|--tdd]"
 effort: high
 tools: [Read, Glob, Grep, Bash, Write, Edit, MultiEdit, Task, Agent, WebFetch, WebSearch, TodoWrite, AskUserQuestion, Skill]
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
@@ -41,17 +41,18 @@ Pick by intent; keep loading minimal.
 | Skip research; you trust the spec | `--fast` (still requires plan step) |
 | Multiple unrelated features at once | `--parallel` (sub-agents on disjoint files) |
 | Test-driven: tests first, then code | `--tdd` (incompatible with `--parallel` / `--no-test`) |
+| Maximum autonomy — run fully automated, never stop to ask | `--yolo` (auto + defer every question to one end-of-run batch; never bypasses test/review/artifact gates) |
 
 ## Usage
 ```
 /t1k:cook <natural language task OR plan path>
 ```
 
-**IMPORTANT:** If no flag is provided, the skill uses `interactive` mode by default.
-
-**Optional flags:** `--interactive` (default) | `--fast` (skip research) | `--parallel` (multi-agent) | `--no-test` | `--auto` (auto-approve LOW-RISK steps only) | `--tdd` (test-driven: write tests first, implement, verify)
+**Optional flags** (no flag → `interactive`): `--interactive` (default) | `--fast` (skip research) | `--parallel` (multi-agent) | `--no-test` | `--auto` (auto-approve LOW-RISK steps only) | `--yolo` (maximum autonomy — auto + defer every question to the end) | `--tdd` (test-driven: write tests first, implement, verify)
 
 **Auto mode contract:** `--auto` is NOT "AI does whatever it wants." `--auto` runs when there is enough evidence (5 artifacts validated by the artifact-gate hook) AND risk is in the allowed zone (`risk-gate.json` `highRisk: false`). High-risk changes always stop for human approval before finalize/commit/ship, even in auto mode. Full rules: `references/artifact-gate-rules.md`.
+
+**Yolo mode contract:** `--yolo` is `--auto` plus "never stop to ask" — it makes the most conservative reasonable assumption at every policy/human-decision gate, logs it, and surfaces ALL deferred decisions in one batch at the end before any irreversible finalize. It NEVER bypasses correctness gates (100% test pass, artifact-gate, mandatory `t1k-code-reviewer`, no-side-effects proofs, runtime-smoke). Full doctrine: `references/yolo-mode.md`.
 
 ## Agent Routing
 Follow protocol: `skills/t1k-cook/references/routing-protocol.md` — role: `implementer`
@@ -89,7 +90,7 @@ flowchart TD
     B -->|Yes| F[Load Plan]
     B -->|No| C{Mode?}
     C -->|fast| D[Scout → Plan → Code]
-    C -->|interactive/auto| SC[Scout Codebase — HARD-GATE-SCOUT-FIRST]
+    C -->|interactive/auto/yolo| SC[Scout Codebase — HARD-GATE-SCOUT-FIRST]
     SC --> SR[Summarize Findings to User]
     SR --> RQ{Exact requirements captured?<br/>output, acceptance, scope, constraints, touchpoints<br/>HARD-GATE-EXACT-REQUIREMENTS}
     RQ -->|No| SR
@@ -111,7 +112,7 @@ flowchart TD
 
 ## Smart Intent Detection
 
-Mode from input: `plan.md`/`phase-*.md` path → **code** · "fast"/"quick" → **fast** · "trust me"/"auto" → **auto** (low-risk auto-approve, stop on high-risk) · 3+ features/"parallel" → **parallel** · "no test"/"skip test" → **no-test** · "tdd"/"test first" → **tdd** · default → **interactive**. Full detection logic: `references/intent-detection.md`.
+Mode from input: `plan.md`/`phase-*.md` path → **code** · "fast"/"quick" → **fast** · "trust me"/"auto" → **auto** (low-risk auto-approve, stop on high-risk) · "yolo" → **yolo** (full autonomy, defer every question to one end-of-run batch) · 3+ features/"parallel" → **parallel** · "no test"/"skip test" → **no-test** · "tdd"/"test first" → **tdd** · default → **interactive**. Full detection logic: `references/intent-detection.md`.
 
 ## Workflow
 
@@ -127,6 +128,7 @@ Mode from input: `plan.md`/`phase-*.md` path → **code** · "fast"/"quick" → 
 |------|----------|---------|--------------|
 | interactive | yes | yes | User approval at each step |
 | auto | yes | yes | Auto only if all 5 artifacts PASS AND `risk-gate.json` `highRisk: false`. Score alone NEVER auto-approves. |
+| yolo | yes | yes | Like `auto`, but never stops to ask: high-risk + every clarifying question is recorded and deferred to one end-of-run batch. Artifact-gated approval + correctness gates still enforced. |
 | fast | no | yes | User approval at each step |
 | parallel | optional | yes | User approval at each step |
 | no-test | yes | no | User approval at each step |
@@ -143,6 +145,8 @@ Review processes: `references/review-cycle.md`
 - `--tdd + --no-test`: REFUSE with error: "TDD mode inherently requires the test suite; `--no-test` is contradictory. Remove one of the flags."
 - `--tdd + --parallel` is unsupported and will error. Do not attempt to combine them.
 - `--auto + --interactive`: existing guard, unchanged.
+- `--yolo + --interactive`: REFUSE with error: "Yolo is maximum-autonomy and interactive stops at every gate — they are contradictory. Pick one."
+- `--yolo` implies `--auto` (it is a strict superset); if both are passed, treat as `--yolo`. `--yolo + --tdd` and `--yolo + --parallel` are ALLOWED (yolo governs gate-deferral, not execution ordering); `--tdd + --parallel` stays refused regardless of `--yolo`.
 - `--parallel` **contract-first gate** (`rules/contract-first-integration.md`): before spawning parallel implementers whose outputs meet at a shared boundary (API ↔ client, producer ↔ consumer, two modules), DEFINE the integration contract — exact path/method, payload field names + types + **casing**, enums, success/error envelope, null semantics — and embed it **verbatim** in every implementer's brief (or point all at the SSOT types/schema file). Per-side typecheck cannot catch a contract mismatch; the post-implement `t1k-code-reviewer` MUST assert both sides honor the contract.
 
 ## Artifact Gate (harness for the review + finalize stages)
@@ -183,6 +187,7 @@ Artifact-gate-specific:
 ## References
 
 - `references/intent-detection.md` — detection rules and routing logic
+- `references/yolo-mode.md` — `--yolo` doctrine: defer-every-question protocol, deferred-decisions log, end-of-run batch
 - `references/workflow-steps.md` — detailed step definitions for all modes
 - `references/review-cycle.md` — interactive and auto review processes
 - `references/subagent-patterns.md` — subagent invocation patterns

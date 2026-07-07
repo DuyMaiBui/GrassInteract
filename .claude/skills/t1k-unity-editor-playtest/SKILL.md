@@ -4,7 +4,7 @@ description: "Runtime MCP validation — spawn, movement, combat, rendering chec
 effort: low
 argument-hint: "[demo-name] [--quick|--full|--compare]"
 keywords: [playtest, testing, QA, feedback]
-version: 2.4.0
+version: 2.4.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: editor

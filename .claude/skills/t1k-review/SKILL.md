@@ -5,7 +5,7 @@ keywords: [review, audit, adversarial, red-team, pr, coverage, quality]
 argument-hint: "[#PR | COMMIT | --pending | codebase [parallel] | adversarial]"
 effort: high
 tools: [Read, Glob, Grep, Bash, Task, Agent, AskUserQuestion, Skill]
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

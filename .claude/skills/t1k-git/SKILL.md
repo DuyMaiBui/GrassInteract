@@ -4,7 +4,7 @@ description: "Git operations with conventional commits. Stage, commit, push, PR,
 keywords: [git, commit, push, branch, pull-request, stage, merge, issue-link, fixes, closes]
 argument-hint: "cm|cp|pr|merge [args]"
 effort: low
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
@@ -67,7 +67,7 @@ Then run each discovered script (short-circuit on first failure):
 - User explicitly passed `--skip-lint`: skip with a warning in output.
 - Staged diff is 100% docs-only (all `*.md` / `docs/**`): skip — content rules only.
 
-**Rationale:** Over the span of PR #79 (2026-04-21), three CI rounds were lost to biome format violations that `bun run lint` would have caught in 3 seconds locally. Running lint before commit costs a few seconds; skipping it costs a full CI cycle + a fix-up commit that pollutes the PR history.
+**Rationale:** Running lint before commit costs a few seconds; skipping it costs a full CI cycle + a fix-up commit that pollutes the PR history. (Three CI rounds once lost to biome format violations `bun run lint` would have caught locally — [references/incident-trail.md](references/incident-trail.md).)
 
 ### Step 3: Split Decision
 Split commits if: different types mixed, multiple scopes, FILES > 10 unrelated.
@@ -117,7 +117,7 @@ A repo's wiki is a **separate git repo** (`<repo>.wiki.git`) that lives OUTSIDE 
 1. Comment on the issue with the wiki page revision URL: `https://github.com/<owner>/<repo>/wiki/<Page>/<commit-sha>` (private-repo links require auth to open).
 2. OR reference `#N` from a **main-repo** commit/PR (the only place keywords are honored) when the related code lands.
 
-**Evidence:** StickmanForge `#8` — wiki commit `8942519` carried `Refs ...#8` in its message but produced zero cross-reference on the issue timeline (`commit_id: null` on every event); the issue had to be closed manually. (2026-06-04)
+**Evidence:** a wiki commit carrying `Refs ...#N` produced zero cross-reference on the issue timeline (`commit_id: null` on every event); the issue had to be closed manually. (Detail: [references/incident-trail.md](references/incident-trail.md).)
 
 ## Force-Push Safeguard
 
@@ -146,7 +146,7 @@ In a TheOneKit kit the shipped product **is** the `.claude/` payload — skill `
 
 **Test before choosing `docs`:** does the edited file land in a consumer's `.claude/` on `t1k modules update`? Yes (path contains `/.claude/`, or it's a `SKILL.md` / agent `.md` / rule `.md`) → `fix`/`feat`. No (README/`docs/`/`plans/`) → `docs`.
 
-**Bug trail (2026-06-08):** theonekit-unity sat unreleased after three skill-body edits committed as `docs(animation):` / `docs(tof):` (#206/#195/#208); the litmotion + tof skill improvements never reached consumers until a `fix(animation,tof):` trigger commit forced the release.
+**Bug trail:** a kit once sat unreleased after three skill-body edits committed as `docs(...)`; the improvements never reached consumers until a `fix(...)` trigger commit forced the release. (Detail: [references/incident-trail.md](references/incident-trail.md).)
 
 ## Commit Scopes in Modular Kits — Must Map to Real Modules
 
@@ -165,7 +165,7 @@ TheOneKit's release pipeline (`parse-commits.cjs` in `theonekit-release-action`)
 - Use the owning module name as scope: `fix(t1k-base): ...` when editing `t1k-handoff` (since `t1k-handoff` is in `t1k-base`)
 - OR use a meta-scope when the fix is kit-wide: `feat(modules): ...`
 
-**Bug trail:** `theonekit-core` main was stuck at `modules-20260417-1213` for 3 commits (2026-04-17 → 2026-04-18) because `feat(modules):` wasn't recognized (before theonekit-release-action#6). Unsticking required force-moving the `v2` tag and a subsequent core commit to trigger the fixed release pipeline.
+**Bug trail:** a kit's main once stuck for 3 commits because `feat(modules):` wasn't recognized (before a release-action fix). Unsticking required force-moving the `v2` tag plus a subsequent commit to trigger the fixed pipeline. (Detail: [references/incident-trail.md](references/incident-trail.md).)
 
 ## Contribution Scoring
 

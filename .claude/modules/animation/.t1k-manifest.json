@@ -1,9 +1,9 @@
 {
   "module": "animation",
-  "version": "2.5.0",
+  "version": "2.5.3",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-16T13:13:24.364Z",
+  "generatedAt": "2026-07-06T10:42:04.905Z",
   "files": {
     "skills": [
       "t1k-unity-animation-core/SKILL.md",
@@ -13,6 +13,7 @@
       "t1k-unity-animation-litmotion/references/advanced-guide.md",
       "t1k-unity-animation-litmotion/references/configuration-guide.md",
       "t1k-unity-animation-litmotion/references/core-api-guide.md",
+      "t1k-unity-animation-litmotion/references/dotween-animation-component-migration.md",
       "t1k-unity-animation-litmotion/references/dotween-migration-guide.md",
       "t1k-unity-animation-litmotion/references/incidents.md",
       "t1k-unity-animation-litmotion/references/project-utilities.md"
@@ -23,5 +24,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:681964d774702828ede04c45ac503cf9b70b5dfd72d8e97786d59e6a785a0dc5"
+  "checksum": "sha256:3de46f521abd78a7439004fa7595aae7831406084eaf5553a9158e3a132e69a5"
 }

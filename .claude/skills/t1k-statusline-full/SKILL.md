@@ -4,7 +4,7 @@ description: "Install TheOneKit's canonical statusline GLOBALLY to ~/.claude/ so
 keywords: [statusline, status line, full statusline, install statusline globally, global statusline, 5h timer, weekly quota, context bar]
 effort: low
 argument-hint: "[--from <.claude/hooks dir>]"
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

@@ -5,7 +5,7 @@ keywords: [test, run-tests, coverage, compile, flaky, failing, unit]
 argument-hint: "[context] OR compile OR coverage OR --flaky OR --diff"
 effort: medium
 tools: [Read, Glob, Grep, Bash, Task, Agent]
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

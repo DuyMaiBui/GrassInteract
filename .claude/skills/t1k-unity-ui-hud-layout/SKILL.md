@@ -3,7 +3,7 @@ name: t1k:unity:ui:hud-layout
 description: Unity HUD layout discipline — zone-based design, LayoutGroup recipes per zone, modal vs HUD canvas separation, FloatingLayer/OverlayLayer patterns, anti-pattern catalog. Use when designing or refactoring runtime game HUDs (>3 widgets in a single RectTransform).
 effort: medium
 keywords: [HUD layout, screen overlap, widget anchor, RectTransform stack, zone, LayoutGroup, FloatingLayer, OverlayLayer, HUD zoning, widget overlap]
-version: 2.6.0
+version: 2.6.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui
@@ -148,7 +148,7 @@ tooltipPanel.SetActive(true);
    - `GridZone` exists as empty placeholder while `GridPanel` (the actual grid with cells) sits at the SAME hierarchy level. The zone label is dead architecture; future zone-based layout logic won't apply.
    - Fix: reparent content INTO its zone (`transform.SetParent(gridZone, worldPositionStays=false)`). Then the zone owns the rect and any layout responsiveness applies.
    - Symptom: zone hierarchy looks correct in inspector but `childCount == 0`. Verify EVERY zone has its content children; an empty zone is almost always wrong.
-   - Discovered: BackpackCrawler 2026-05-15 (commit `a2b20439`) — zone scaffold was built but GridPanel/SynergyInfoBtn were never reparented in.
+   - Discovered in a demo — zone scaffold was built but GridPanel/SynergyInfoBtn were never reparented in.
 
 9. **Peripheral widgets anchored to canvas-root with arbitrary anchor%** (e.g. anchor.y=0.4)
    - LeftHand/RightHand hand-display sprites were anchored to canvas at `anchorMin/Max=(0, 0.4)`. At 40% of canvas height in a portrait HUD, they land DIRECTLY on top of StatsLeftZone content (which fills top-down from the BottomPanel's top edge). Visible result: hand sprite covers stat text.
@@ -221,7 +221,7 @@ tooltipPanel.SetActive(true);
     - **Rule: the HUD view's match-key MUST equal the ECS wallet's `CurrencyId` int — NOT the raw row/config index.** Register via the currency-id mapping helper (e.g. `ChaosForgeCurrencyConstants.ToCurrencyIdValue(rawKey)`), not the raw key.
     - Subtlety: the ICON lookup may legitimately stay on the raw index (e.g. `CurrencyTypeToSpriteName` switches on row index for the sprite path) while the VALUE match-key uses the `CurrencyId` int. Two different keys for two different purposes on the same widget — don't unify them by accident.
     - Diagnostic: wallet buffer shows correct amounts in the entity inspector but the TMP text never changes → check that `view`'s registered key matches `(int)WalletEntry.CurrencyId`, not the authoring/config index.
-    - Discovered: ChaosForge 2026-05-30 (commit `0976633d`) — top bar froze at "0" after realm select because views were registered with raw 0/1/2 instead of `Custom0..2` = 100/101/102. Applies to ANY HUD that bridges a custom-currency ECS wallet to uGUI views.
+    - Discovered in a demo — top bar froze at "0" after realm select because views were registered with raw 0/1/2 instead of `Custom0..2` = 100/101/102. Applies to ANY HUD that bridges a custom-currency ECS wallet to uGUI views.
 
 ## Reference Files
 
@@ -240,6 +240,6 @@ tooltipPanel.SetActive(true);
 
 - Unity 6 uGUI research report: `plans/reports/researcher-260515-1338-ugui-hud-best-practices.md`
 - BackpackCrawler retrospective: `plans/reports/brainstorm-260515-1337-backpackcrawler-ui-visual-overlap.md`
-- BackpackCrawler post-refactor audit (2026-05-15): anti-patterns 8-11 added from a second-pass MCP-driven RectTransform audit that revealed zone-refactor regression bugs
+- Post-refactor demo audit: anti-patterns 8-11 added from a second-pass MCP-driven RectTransform audit that revealed zone-refactor regression bugs
 - Unity Learn — UI optimization tips (multi-canvas batching)
 - Unity Manual — uGUI Auto Layout (LayoutGroup performance characteristics)

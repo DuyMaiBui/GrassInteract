@@ -47,7 +47,7 @@ LOOP:
      → AskUserQuestion: "Approve with noted issues" / "Abort workflow"
 ```
 
-## Auto-Handling Cycle (for auto modes)
+## Auto-Handling Cycle (for auto modes — `auto` and `yolo`)
 
 ```
 cycle = 0
@@ -63,7 +63,10 @@ LOOP:
      → cycle++, LOOP
 
   4. ELSE IF critical_count > 0 AND cycle >= 3:
-     → ESCALATE TO USER
+     → auto: ESCALATE TO USER now
+     → yolo: record to deferred-decisions log, surface in end-of-run batch.
+       A critical-blocked change is a correctness failure — yolo still does NOT
+       finalize/commit it past this point (see yolo-mode.md).
 
   5. ELSE (no critical, score < 9.5):
      → Approve with warnings logged, PROCEED

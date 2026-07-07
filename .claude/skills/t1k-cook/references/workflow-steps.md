@@ -18,7 +18,7 @@ All modes share core steps with mode-specific variations.
 3. If mode=code: detect plan path, set active plan
 4. Use `TaskCreate` to create workflow step tasks (with dependencies if complex)
 
-**Output:** `✓ Step 0: Mode [interactive|auto|fast|parallel|no-test|code] - [detection reason]`
+**Output:** `✓ Step 0: Mode [interactive|auto|yolo|fast|parallel|no-test|code] - [detection reason]`
 
 ## Step 0.5: Drift Check — Recently-Merged Overlapping Work (MANDATORY before Step 1)
 
@@ -79,7 +79,7 @@ gh pr list --repo <owner>/<repo> --state merged --search "<issue-number>" --limi
 ### [Review Gate 1] Post-Research (skip if auto mode)
 - Present research summary to user
 - Use `AskUserQuestion` to ask: "Proceed to planning?" / "Request more research" / "Abort"
-- **Auto mode:** Skip this gate
+- **Auto / Yolo mode:** Skip this gate (Yolo: if the gate would have asked anything, record it to the deferred-decisions log per `yolo-mode.md`)
 
 ## Step 2: Planning
 
@@ -107,7 +107,7 @@ gh pr list --repo <owner>/<repo> --state merged --search "<issue-number>" --limi
   - "Approve": continue to implementation
   - "Abort": stop the workflow
   - "Other": revise the plan based on user's feedback
-- **Auto mode:** Skip this gate
+- **Auto / Yolo mode:** Skip this gate (Yolo: if the gate would have asked anything, record it to the deferred-decisions log per `yolo-mode.md`)
 
 ## Step 3: Implementation
 
@@ -138,7 +138,7 @@ If this phase's changeset includes any of `**/*.unity`, `**/*.prefab`, `**/*.ass
 - Unity: delegate to `t1k-unity-editor-playtest --quick` (Checks 1–3) → paste `read_console(filter: "Error")` output from Play Mode.
 - Cocos: delegate to `t1k-cocos-runtime-smoke` (if installed) → paste preview-build runtime console.
 - Other engines: see `references/runtime-smoke-gate.md`.
-- If runtime is unreachable (MCP down, no Editor connection): STOP and escalate via `AskUserQuestion`. Do NOT declare done.
+- If runtime is unreachable (MCP down, no Editor connection): STOP and escalate via `AskUserQuestion`. Do NOT declare done. (Yolo: an unreachable runtime is an unverifiable-correctness blocker, not a policy question — yolo still STOPS here and surfaces it; it does not assume-and-proceed past a correctness gate.)
 
 The Step 3 sub-agent prompt MUST inject the runtime-smoke clause from `references/runtime-smoke-gate.md` § "Sub-agent prompt injection" when scene/prefab edits occurred. Reporting only edit-mode console for a scene/prefab change is a workflow violation (ref: The1Studio/theonekit-core#176).
 
@@ -147,7 +147,7 @@ The Step 3 sub-agent prompt MUST inject the runtime-smoke clause from `reference
 ### [Review Gate 3] Post-Implementation (skip if auto mode)
 - Present implementation summary (files changed, key changes)
 - Use `AskUserQuestion` to ask: "Proceed to testing?" / "Request implementation changes" / "Abort"
-- **Auto mode:** Skip this gate
+- **Auto / Yolo mode:** Skip this gate (Yolo: if the gate would have asked anything, record it to the deferred-decisions log per `yolo-mode.md`)
 
 ## Step 4: Testing (skip if no-test mode)
 
@@ -162,7 +162,7 @@ The Step 3 sub-agent prompt MUST inject the runtime-smoke clause from `reference
 ### [Review Gate 4] Post-Testing (skip if auto mode)
 - Present test results summary
 - Use `AskUserQuestion` to ask: "Proceed to code review?" / "Request test fixes" / "Abort"
-- **Auto mode:** Skip this gate
+- **Auto / Yolo mode:** Skip this gate (Yolo: if the gate would have asked anything, record it to the deferred-decisions log per `yolo-mode.md`)
 
 ## Step 5: Code Review
 
@@ -174,10 +174,10 @@ The Step 3 sub-agent prompt MUST inject the runtime-smoke clause from `reference
 - Interactive cycle (max 3): see `review-cycle.md`
 - Requires user approval
 
-**Auto:**
+**Auto / Yolo:**
 - Auto-approve if score≥9.5 AND 0 critical
 - Auto-fix critical (max 3 cycles)
-- Escalate to user after 3 failed cycles
+- After 3 failed cycles: Auto escalates to user immediately; Yolo records the unresolved review to the deferred-decisions log and surfaces it in the end-of-run batch (it still does NOT ship a critical-blocked change — the no-side-effects correctness gate holds)
 
 **Fast:**
 - Simplified review, no fix loop
@@ -220,8 +220,10 @@ only change the Status column cell, preserve table structure.
 
 **CRITICAL:** Step 6 is INCOMPLETE without spawning all 3 subagents. DO NOT skip subagent delegation.
 
-**Auto mode:** Continue to next phase automatically, start from **Step 3**.
+**Auto / Yolo mode:** Continue to next phase automatically, start from **Step 3**.
 **Others:** Ask user before next phase
+
+**Yolo — end-of-run batch (after the FINAL phase, before the commit offer):** if the deferred-decisions log has any entries, surface them all at once via a single `AskUserQuestion` (or a clearly-labelled "Deferred decisions" report section if `AskUserQuestion` is unavailable) so the user can correct any assumption before the irreversible finalize. High-risk finalize actions (push / PR / ship) recorded during the run are presented here for explicit go-ahead — they are never executed silently. Empty log → state "no deferred decisions" and proceed to the commit offer. See `yolo-mode.md`.
 
 **Output:** `✓ Step 6: Finalized - 3 subagents invoked - Full-plan sync-back completed - Committed`
 
@@ -232,13 +234,14 @@ Legend: `[R]` = Review Gate (human approval required)
 ```
 interactive: 0 → 1 → [R] → 2 → [R] → 3 → [R] → 4 → [R] → 5(user) → 6
 auto:        0 → 1 → 2 → 3 → 4 → 5(auto) → 6 → next phase (NO stops)
+yolo:        0 → 1 → 2 → 3 → 4 → 5(auto) → 6 → next phase (NO stops; every deferred question batched at end-of-run before commit)
 fast:        0 → skip → 2(fast) → [R] → 3 → [R] → 4 → [R] → 5(simple) → 6
 parallel:    0 → 1? → [R] → 2(parallel) → [R] → 3(multi-agent) → [R] → 4 → [R] → 5(user) → 6
 no-test:     0 → 1 → [R] → 2 → [R] → 3 → [R] → skip → 5(user) → 6
 code:        0 → skip → skip → 3 → [R] → 4 → [R] → 5(user) → 6
 ```
 
-**Key difference:** `auto` mode is the ONLY mode that skips all review gates.
+**Key difference:** `auto` and `yolo` are the only modes that skip all review gates. `yolo` additionally never stops to ask mid-flow — it records each would-be question and batches them at the end of the run (`yolo-mode.md`).
 
 ## Critical Rules
 
@@ -275,6 +278,7 @@ After Step 3.V passes → continue to Step 4 (full test run, no-op if already gr
 - `--tdd + --no-test`: REFUSE. TDD mode inherently requires the test suite; `--no-test` is contradictory.
 - `--tdd + --fast`: ALLOWED. Fast mode skips research but preserves TDD ordering within Step 3.
 - `--tdd + --auto`: ALLOWED. Auto mode skips review gates but still runs TDD within each phase.
+- `--tdd + --yolo`: ALLOWED. Yolo defers gates/questions but still runs TDD ordering within each phase; the red→green→verify steps are correctness gates and are never skipped.
 
 ### Example Invocations
 

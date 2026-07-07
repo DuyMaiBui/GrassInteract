@@ -39,6 +39,7 @@ Schemas live at `.claude/schemas/workflow-artifact-*.schema.json`.
 - Hard stages (`ship`, `push`, `pr`, `deploy`) require **all 5 artifacts** + `decision: PASS` (review) + `decision: PASS` (adversarial).
 - `PASS_WITH_RISK` may continue on soft stages with the risk surfaced; on hard stages it blocks.
 - Auto mode + `highRisk: true` → human approval required even though `--auto` is set.
+- Yolo mode + `highRisk: true` → do NOT block mid-flow: reversible work proceeds, but the irreversible finalize (commit / push / pr / ship) is recorded to the deferred-decisions log and surfaced in the end-of-run batch for explicit go-ahead — never executed silently. Correctness gates (5 artifacts PASS, no critical) are never bypassed in either mode. See `yolo-mode.md`.
 - Artifact generation fails → retry once → escalate. **Never bypass.**
 
 ## Hook behavior

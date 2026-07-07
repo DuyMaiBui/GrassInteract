@@ -114,7 +114,7 @@ LSequence.Create()
 | `.SetLoops(3, LoopType.Yoyo)` | `.WithLoops(3, LoopType.Yoyo)` |
 | `.OnComplete(() => ...)` | `.WithOnComplete(() => ...)` |
 | `.OnUpdate(() => ...)` | Use `.Bind(x => { ...; })` |
-| `.SetUpdate(true)` | `.WithScheduler(MotionScheduler.UnscaledUpdate)` |
+| `.SetUpdate(true)` | `.WithScheduler(MotionScheduler.UpdateIgnoreTimeScale)` |
 | `.From()` | Swap start/end: `LMotion.Create(end, start, dur)` |
 | `.Kill()` | `handle.Cancel()` |
 | `.Complete()` | `handle.Complete()` |
@@ -252,7 +252,7 @@ See [project-utilities.md](project-utilities.md) for the full implementation.
 4. Replace `DOTween.Sequence()` → `LSequence.Create()...Run()`
 5. Replace `.Kill()` → `handle.Cancel()`, store `MotionHandle`
 6. Add `.AddTo(gameObject)` OR manual `.Cancel()` in `OnDisable()` for lifecycle management
-7. Replace `.SetUpdate(true)` → `.WithScheduler(MotionScheduler.UnscaledUpdate)`
+7. Replace `.SetUpdate(true)` → `.WithScheduler(MotionScheduler.UpdateIgnoreTimeScale)`
 8. Remove DOTween Pro package from manifest.json
 9. Delete `Resources/DOTweenSettings.asset`
 10. Replace `DOVirtual.DelayedCall(...)` with the async pattern above (or the `.RunWithoutBinding()` workaround if you must keep callbacks)

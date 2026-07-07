@@ -4,7 +4,7 @@ description: "Validate TheOneKit registry integrity across 20+ checks. Use for '
 keywords: [validate, health, integrity, check, registry, broken, diagnose]
 argument-hint: "[fix]"
 effort: medium
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base
@@ -61,6 +61,7 @@ Run all checks in sequence. Full check list: `references/checks.md`
 - **Global install core-only (#48):** `$HOME/.claude/metadata.json` should contain ONLY `core` under `.kits`. Engine-specific kits (unity, designer, cocos, react-native, web, nakama) belong PER-PROJECT in the project's `.claude/`, not globally. Mixing engine kits globally causes activation bleed (irrelevant skills auto-load), stale-install drift, and orphaned files. Runs `scripts/check-global-core-only.cjs`. WARN level; fix: `t1k uninstall --global --kit <name>` for each non-core kit listed.
 - **Multimodal setup (#49):** When `t1k-extended` is installed AND `skills/t1k-extended-multimodal/SKILL.md` is present: validates GEMINI_API_KEY (WARN), MINIMAX_API_KEY (WARN, optional), python3 ≥ 3.10 (FAIL), and `github:The1Studio/human-mcp#v2.15.1` resolvability (WARN — freshness signal via `npm view`; install hint points to fork). Runs `hooks/doctor-check-49-multimodal-setup.cjs`. FAIL level for missing python3; WARN for missing API keys / MCP.
 - **Stale-backup folders inside auto-scanned dirs (#50):** Detects quarantine subdirectories (`.stale-backup-*`, `.zombies-*`, `.backup-*`, `.archive-*`, `.old`, `.deprecated`, `.trash`) sitting INSIDE Claude Code's auto-scanned folders (`agents/`, `skills/`, `rules/`, `hooks/`, `commands/`). Dot-prefix does NOT hide them — the `/agents` UI and skill discovery walk into them and surface their contents as live registrations (zombie entries). Scans BOTH global `~/.claude/` and project `.claude/`. Runs `scripts/check-stale-backup-folders.cjs`. WARN level; fix: move the quarantine folder OUTSIDE the auto-scanned dir (`mv ~/.claude/agents/.stale-backup-* ~/.claude/.stale-backup-*`) or `rm -rf` after verification. See [`rules/naming-convention.md`](../../rules/naming-convention.md) § Violation handling for the canonical guidance.
+- **Agent budget calibration (#51):** Scans `.claude/agents/*.md` for budget-checkpoint + `maxTurns` calibration per [`rules/agent-completion-discipline.md`](../../rules/agent-completion-discipline.md). Flags: (a) a FLAT-token checkpoint in the body (a literal like `150K`/`150,000`/`200K` not tied to the agent's `model:` window — should be window-relative, ~75%@200K / ~55%@1M); (b) a tool-heavy agent (has `Bash` and/or `Task`/`Agent` in `tools:`, i.e. can mutate/orchestrate) with NO budget checkpoint in the body at all; (c) under-sized `maxTurns` for the task class (tool-heavy agent at `maxTurns < 50` — multi-PR/refactor/MCP-validation work hits the turn cap before tokens, #528: `t1k-kit-developer` 45→90). Runs `scripts/check-agent-budget-calibration.cjs`. WARN level; fix: make the checkpoint window-relative and size `maxTurns` to the task per the rule.
 
 See `references/frontmatter-recommendations.md` for recommended values and output format.
 

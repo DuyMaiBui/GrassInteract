@@ -24,7 +24,7 @@ triggers:
   - DrawMeleeHumanoid
   - DrawRangerHumanoid
 keywords: [placeholder, greybox, prototype, POC, demo, primitives, URP, validation]
-version: 2.5.0
+version: 2.5.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
@@ -63,7 +63,7 @@ Primitives + colored materials get you 60% of the way. For the remaining 40% —
 
 **Always pair an editor generator with the demo so visuals can be regenerated idempotently.** Designers should never hand-paint placeholders.
 
-### The 3-generator pattern (canonical: ChaosForge demo, 2026-05-25)
+### The 3-generator pattern
 
 | Generator | What it makes | Output path | Naming |
 |---|---|---|---|
@@ -81,7 +81,7 @@ Each generator is a static Editor class with a `[MenuItem]` entry. Re-runnable. 
 
 Concrete rule: if a UI cell has an `Image` component but no `sprite` assigned, the engine renders a white square. White squares are a 100%-reliable visual TELL that icon-wiring is incomplete. Audit any demo for white squares before declaring UI done.
 
-Symptoms of the anti-pattern (all real bugs found in ChaosForge 2026-05-25):
+Symptoms of the anti-pattern (real bugs found in demos):
 
 1. **Lock-emoji → "LOCKED" red text fallback.** Emoji had no font fallback in TMP; was replaced with red text. Correct fix: generate a red padlock sprite, not a text fallback.
 2. **Realm-card modifier rows showing "+50% XpGainMult" with a white-square Image before each row.** The Image cells were placed in scene-setup with no sprite assignment; runtime renders them blank. Each `RealmModifierType` (XpGainMult, DropRateMult, EnemyHpMult, EnemyDamageMult, CurrencyDropMult, etc.) needs a dedicated icon sprite.
@@ -95,7 +95,7 @@ Symptoms of the anti-pattern (all real bugs found in ChaosForge 2026-05-25):
 
 - **Silhouette readability** — a stickman silhouette reads as "human" instantly; a colored quad reads as "thing". Crucial for unit-type recognition under combat conditions.
 - **Rarity affordance** — rarity-tinted item icons (Common grey → Legendary gold) communicate value at a glance without tooltip text.
-- **No placeholder squares in HUD** — currency icons fill the empty square slots in top HUD so the player can read `[Gold 47] [Gem 3]` not `[square 47] [square 3]`. This was a real bug found in ChaosForge wow-battle (2026-05-25 user screenshot).
+- **No placeholder squares in HUD** — currency icons fill the empty square slots in top HUD so the player can read `[Gold 47] [Gem 3]` not `[square 47] [square 3]`. This was a real bug found in a demo HUD.
 - **No item-text overflow in equipment grids** — item icons in equipment cells avoid the "LRRR / Eeee / Caaa" character-per-line wrap bug when long item names hit narrow cells. Replace TMP_Text labels with Image sprites resolved by item-id convention. Real ChaosForge bug, same date.
 
 ### Procedural sprite generator pattern (paste-and-adapt)
@@ -258,7 +258,7 @@ If Agent is absent from both active scope and the deferred-tools listing, bail p
 
     **Symptom:** the UI looks correct, the button visually highlights on press (because `Button.Selectable` machinery still runs from the Image's raycast), but `onClick.AddListener(...)` never fires. Manually invoking the handler from code (`view.InvokeTapForTests()` in EditMode tests) works perfectly — only the live tap is broken. EditMode tests pass; live demo is silently dead.
 
-    **Originating incident (2026-05-25 ChaosForge BLOCKER):** `RealmCardView.HandleTap` never ran on live realm-card taps because the card's `ModifiersLabel` TMP (anchored 0.06-0.51 vertically, covering the bottom half of the card) defaulted `raycastTarget=true` and intercepted every click in that region. The Editor builder's `CreateLabel` helper used by every label, close-X, lock icon, and button text also forgot to disable raycastTarget, so the bug was latent in dozens of buttons across the demo. EditMode tests bypassed `Button.onClick` via an `InvokeTapForTests()` test helper — they passed for weeks while the live tap was broken. Manual `EntityManager.SetComponentEnabled<CombatSpawnRequest>(player, true)` made enemies spawn (proving the spawner + publisher + bake were all correct) — only the click path was broken.
+    **Real-world failure pattern:** a card's `HandleTap` never ran on live taps because a label TMP (anchored 0.06-0.51 vertically, covering the bottom half of the card) defaulted `raycastTarget=true` and intercepted every click in that region. The Editor builder's `CreateLabel` helper used by every label, close-X, lock icon, and button text also forgot to disable raycastTarget, so the bug was latent in dozens of buttons across the demo. EditMode tests bypassed `Button.onClick` via an `InvokeTapForTests()` test helper — they passed for weeks while the live tap was broken. Manual `EntityManager.SetComponentEnabled<CombatSpawnRequest>(player, true)` made enemies spawn (proving the spawner + publisher + bake were all correct) — only the click path was broken.
 
     **Fix — helper-level (preferred):** make `CreateLabel` set `tmp.raycastTarget = false` by default. Decorative labels are non-interactive; callers that genuinely need raycast (rare: rich-text hyperlink, click-on-text widget) opt in explicitly. One-line fix wipes out the entire class of bugs.
 

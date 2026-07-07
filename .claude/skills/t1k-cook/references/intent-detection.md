@@ -14,6 +14,7 @@ Detect user intent from natural language and route to appropriate workflow.
 ```
 FUNCTION detectMode(input):
   # Priority 1: Explicit flags (override all)
+  IF input contains "--yolo": RETURN "yolo"   # superset of --auto; check first
   IF input contains "--fast": RETURN "fast"
   IF input contains "--parallel": RETURN "parallel"
   IF input contains "--auto": RETURN "auto"
@@ -29,7 +30,10 @@ FUNCTION detectMode(input):
   IF keywords contains ["fast", "quick", "rapidly", "asap"]:
     RETURN "fast"
 
-  IF keywords contains ["trust me", "auto", "yolo", "just do it"]:
+  IF keywords contains ["yolo"]:
+    RETURN "yolo"
+
+  IF keywords contains ["trust me", "auto", "just do it"]:
     RETURN "auto"
 
   IF keywords contains ["no test", "skip test", "without test"]:
@@ -62,14 +66,15 @@ Detect multiple features from natural language:
 |------|---------------|-----------|--------------|--------------|---------------|
 | interactive | ✗ | ✗ | **Yes (stops)** | ✗ | ✗ |
 | auto | ✗ | ✗ | **No (skips)** | ✓ (score≥9.5) | ✓ (all phases) |
+| yolo | ✗ | ✗ | **No (defers to end)** | ✓ (artifact-gated) | ✓ (all phases) |
 | fast | ✓ | ✗ | Yes (stops) | ✗ | ✗ |
 | parallel | Optional | ✗ | Yes (stops) | ✗ | ✓ |
 | no-test | ✗ | ✓ | Yes (stops) | ✗ | ✗ |
 | code | ✓ | ✗ | Yes (stops) | Per plan | Per plan |
 
 **Review Gates:** Human approval checkpoints between major steps (see `workflow-steps.md`).
-- All modes EXCEPT `auto` stop at review gates for human approval.
-- `auto` mode is the only mode that runs continuously without stopping.
+- All modes EXCEPT `auto` and `yolo` stop at review gates for human approval.
+- `auto` and `yolo` run continuously without stopping. `yolo` additionally defers every clarifying question (requirements, mid-flow ambiguity, high-risk approval) to a single end-of-run batch instead of asking up front — see `yolo-mode.md`.
 
 ## Examples
 
@@ -94,9 +99,12 @@ Detect multiple features from natural language:
 
 "/t1k:cook implement dashboard trust me"
 → Mode: auto ("trust me" keyword, NO STOPS)
+
+"/t1k:cook implement the whole milestone --yolo"
+→ Mode: yolo (NO STOPS; every question deferred to one end-of-run batch)
 ```
 
-**Note:** Only `--auto` flag or "trust me"/"auto"/"yolo" keywords enable continuous execution.
+**Note:** `--auto`/`--yolo` flags or "trust me"/"auto"/"just do it"/"yolo" keywords enable continuous execution. `--yolo` (or the bare "yolo" keyword) additionally defers every clarifying question to a single end-of-run batch.
 
 ## Conflict Resolution
 

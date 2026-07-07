@@ -1,9 +1,9 @@
 {
   "module": "t1k-base",
-  "version": "2.20.0",
+  "version": "2.21.2",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-15T09:19:20.153Z",
+  "generatedAt": "2026-07-06T07:27:30.512Z",
   "files": {
     "skills": [
       "t1k-ask/SKILL.md",
@@ -36,6 +36,7 @@
       "t1k-cook/references/subagent-injection-protocol.md",
       "t1k-cook/references/subagent-patterns.md",
       "t1k-cook/references/workflow-steps.md",
+      "t1k-cook/references/yolo-mode.md",
       "t1k-debug/SKILL.md",
       "t1k-debug/references/defense-in-depth.md",
       "t1k-debug/references/frontend-verification.md",
@@ -60,6 +61,7 @@
       "t1k-doctor/references/fix-mode.md",
       "t1k-doctor/references/frontmatter-recommendations.md",
       "t1k-doctor/references/mcp-requirements.md",
+      "t1k-doctor/scripts/check-agent-budget-calibration.cjs",
       "t1k-doctor/scripts/check-auto-pipelines-prereq.cjs",
       "t1k-doctor/scripts/check-claude-md-bloat.cjs",
       "t1k-doctor/scripts/check-context-budget.cjs",
@@ -99,6 +101,7 @@
       "t1k-fix/references/workflow-types.md",
       "t1k-fix/references/workflow-ui.md",
       "t1k-git/SKILL.md",
+      "t1k-git/references/incident-trail.md",
       "t1k-help/SKILL.md",
       "t1k-help/references/execution-context.md",
       "t1k-help/references/session-lifecycle.md",
@@ -193,5 +196,5 @@
       "scripts/t1k-issue-claim.cjs"
     ]
   },
-  "checksum": "sha256:970926ee7f6c059fce65cb9d3be47fe13f5dad369b6bc8e39a85e074eeeef230"
+  "checksum": "sha256:3c0e7c893dfea847956af12841ed6d7f6ea9fd83fa32a3f3590bc10d8e79f6d3"
 }

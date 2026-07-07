@@ -1,9 +1,9 @@
 {
   "module": "base",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "kit": "theonekit-unity",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-16T13:13:24.382Z",
+  "generatedAt": "2026-07-06T10:42:04.931Z",
   "files": {
     "skills": [
       "t1k-unity-base-addressables/SKILL.md",
@@ -30,6 +30,7 @@
       "t1k-unity-base-game-patterns/references/game-systems.md",
       "t1k-unity-base-game-patterns/references/mobile-optimization.md",
       "t1k-unity-base-game-patterns/references/mobile-setup.md",
+      "t1k-unity-base-game-patterns/references/vcontainer-registration-override.md",
       "t1k-unity-base-input-system/SKILL.md",
       "t1k-unity-base-input-system/references/bindings-processors-interactions.md",
       "t1k-unity-base-input-system/references/device-management-testing.md",
@@ -41,6 +42,7 @@
       "t1k-unity-base-localization/references/enable-checklist.md",
       "t1k-unity-base-mcp-skill/.unity-mcp-skill-sync",
       "t1k-unity-base-mcp-skill/SKILL.md",
+      "t1k-unity-base-mcp-skill/references/editor-availability-precheck.md",
       "t1k-unity-base-mcp-skill/references/error-recovery-guide.md",
       "t1k-unity-base-mcp-skill/references/incidents.md",
       "t1k-unity-base-mcp-skill/references/tools-batch-packages.md",
@@ -98,5 +100,5 @@
     "fragments": [],
     "other": []
   },
-  "checksum": "sha256:7852f86c1d89c7ed749a434d282b64376e7f79e16ca5e02801cb4a1c2006b09c"
+  "checksum": "sha256:240dc7fe042b9a495c0566c7cc394fbd36a987b7ea5b190cc7de4c823f5e264a"
 }

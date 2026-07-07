@@ -119,3 +119,67 @@ public sealed class MoveCommand : ICommand
     public void Undo() => _target.position = _from;
 }
 ```
+
+## Procedural Dynamic Mesh (polyline tube / rope / trail)
+
+For geometry that follows a polyline and is **rebuilt every frame** (ropes, tubes, trails, cables), prefer a **single dynamic `Mesh`** over instancing N built-in primitives. Spawning `Graphics.RenderMeshInstanced` of `N` cylinders along the path is both heavier and visually broken — each cylinder is a full primitive (~3000 verts for a typical segment count) and adjacent segments leave gaps at the corners.
+
+A single tube mesh sweeping mitered rings along the path is ~210 verts for the same path and has no corner gaps, because consecutive rings share a continuous surface.
+
+```csharp
+public sealed class TubeMeshBuilder
+{
+    readonly Mesh _mesh;
+    readonly Vector3[] _verts;
+    readonly int[] _indices;
+
+    public TubeMeshBuilder(int maxPoints, int radialSegments)
+    {
+        _mesh = new Mesh { name = "Tube" };
+        _mesh.MarkDynamic(); // tells Unity the buffers change frequently — avoids reallocations
+        _verts   = new Vector3[maxPoints * radialSegments];
+        _indices = new int[(maxPoints - 1) * radialSegments * 6];
+    }
+
+    // Rebuild for `count` path points; only the used range is uploaded.
+    public Mesh Build(IReadOnlyList<Vector3> path, int count, float radius, int radialSegments)
+    {
+        // Parallel-transport frame: carry the previous ring's normal forward instead of
+        // recomputing from an arbitrary up-vector, so the tube does not TWIST along bends.
+        Vector3 normal = ComputeInitialNormal(path[0], path[1]);
+        int vi = 0, ii = 0;
+        for (int p = 0; p < count; p++)
+        {
+            Vector3 tangent = Tangent(path, p, count);
+            normal = Vector3.ProjectOnPlane(normal, tangent).normalized; // re-orthogonalize, no recompute
+            Vector3 binormal = Vector3.Cross(tangent, normal);
+            for (int s = 0; s < radialSegments; s++)
+            {
+                float a = (float)s / radialSegments * Mathf.PI * 2f;
+                _verts[vi++] = path[p] + (Mathf.Cos(a) * normal + Mathf.Sin(a) * binormal) * radius;
+            }
+            // ... fill _indices for the quad strip between ring p-1 and p ...
+        }
+
+        // Bounded overloads upload ONLY the used range — no per-frame GC and no stale tail.
+        _mesh.SetVertices(_verts, 0, vi);
+        _mesh.SetIndices(_indices, 0, ii, MeshTopology.Triangles, 0);
+        _mesh.RecalculateBounds();
+        return _mesh;
+    }
+}
+```
+
+**Per-instance texture without material instancing.** When several tubes share one material but need different textures (e.g. team-colored ropes), override `_BaseMap` via a `MaterialPropertyBlock` on the renderer — this stays on the SRP-batcher fast path and creates no material instances:
+
+```csharp
+var mpb = new MaterialPropertyBlock();
+mpb.SetTexture("_BaseMap", instanceTexture);
+meshRenderer.SetPropertyBlock(mpb);
+```
+
+**Key points**
+- `MarkDynamic()` once at creation; reuse the same `Mesh` + arrays every frame.
+- Use the bounded `SetVertices(array, start, length)` / `SetIndices(array, start, length, ...)` overloads so a shrinking path does not leave a stale tail and no new array is allocated per frame.
+- Mitered rings + a **parallel-transport frame** (carry the previous normal forward, re-orthogonalize against the new tangent) avoid the twist you get from re-deriving the frame from a fixed up-vector at each point.
+- Per-instance texture → `MaterialPropertyBlock` `_BaseMap`, never a new material.

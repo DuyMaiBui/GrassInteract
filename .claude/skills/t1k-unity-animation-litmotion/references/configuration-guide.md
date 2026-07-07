@@ -82,7 +82,7 @@ Control when the motion updates:
 
 **Unscaled time (DOTween `SetUpdate(true)` replacement):**
 ```csharp
-.WithScheduler(MotionScheduler.UnscaledUpdate)   // ignores Time.timeScale
+.WithScheduler(MotionScheduler.UpdateIgnoreTimeScale)   // ignores Time.timeScale
 ```
 
 ## Common Recipes
@@ -118,4 +118,4 @@ LMotion.Create(1f, 1.2f, 0.5f)
 - `PlaybackSpeed = -1` only works if motion has remaining time
 - `WithDelay` with `EveryLoop` adds delay to EVERY iteration including the first
 - Callbacks allocate a delegate — use sparingly in hot paths
-- `MotionScheduler.UnscaledUpdate` is the replacement for DOTween's `.SetUpdate(true)`
+- `MotionScheduler.UpdateIgnoreTimeScale` is the replacement for DOTween's `.SetUpdate(true)` (LitMotion 2.x — there is **no** `UnscaledUpdate` member; other phases follow the same `<Phase>IgnoreTimeScale` / `<Phase>Realtime` naming)

@@ -2,8 +2,8 @@
 name: t1k:unity:base:game-patterns
 description: Unity MonoBehaviour game patterns — object pooling, state machines, command pattern, ScriptableObjects, save systems, scene management, input handling.
 effort: medium
-keywords: [game patterns, design patterns, architecture, unity]
-version: 2.5.0
+keywords: [game patterns, design patterns, architecture, unity, wheel-friction, sidewaysFriction, friction cache, vcontainer, registration override, circular dependency]
+version: 2.5.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
@@ -25,11 +25,12 @@ protected: false
 
 | Task | Reference |
 |------|-----------|
-| Object pooling, state machines, command | [Core Patterns](references/core-patterns.md) |
+| Object pooling, state machines, command, procedural dynamic mesh | [Core Patterns](references/core-patterns.md) |
 | ScriptableObjects, config, save systems | [Data & Persistence](references/data-persistence.md) |
 | Scene management, input, coroutine alternatives | [Systems](references/game-systems.md) |
 | Project hierarchy, scene architecture, canvas config | [Mobile Setup](references/mobile-setup.md) |
 | Player settings, quality/physics/audio, perf budgets | [Mobile Optimization](references/mobile-optimization.md) |
+| VContainer registration override, circular dependency | [VContainer Registration Override](references/vcontainer-registration-override.md) |
 
 > Note: `System.Linq` is forbidden in runtime code (GC alloc). Use `foreach` in runtime; `System.Linq` only in editor/tests.
 
@@ -77,6 +78,9 @@ public abstract class GameState { public abstract UniTask Enter(); public abstra
 - **Unity fake null**: Never use `??` or `is null` with `UnityEngine.Object` — Unity overrides `==` to detect destroyed objects, but `??`/`is null` bypasses this and treats destroyed objects as non-null
 - **Coroutine on disabled GO**: `StartCoroutine()` throws if the MonoBehaviour or its GameObject is inactive. Check `gameObject.activeInHierarchy` before starting
 - **ScriptableObject shared in builds**: SO assets are shared instances — mutating fields at runtime affects all references. Clone with `Instantiate()` if per-instance data is needed
+- **Per-frame polyline geometry (rope/tube/trail)**: build ONE dynamic `Mesh` (`MarkDynamic()` + bounded `SetVertices`/`SetIndices(array, start, length)` overloads, mitered rings with a parallel-transport frame to avoid twist) — do NOT `Graphics.RenderMeshInstanced` N built-in cylinders (~3000 vs ~210 verts, and primitives leave gaps at corners). Per-instance texture → `MaterialPropertyBlock` `_BaseMap`, not a material instance. See [Core Patterns → Procedural Dynamic Mesh](references/core-patterns.md)
+- **Wheel friction cache poisoned by `Awake` grip multiply**: Multiplying `WheelCollider.sidewaysFriction.stiffness` in code at `Awake` (a grip multiplier) BEFORE a later lazily-populated friction-default cache (e.g. `CarVehicle.CacheDefaultFriction`) runs poisons that cache — it captures the already-inflated value as the "default" baseline, so runtime zone/upgrade friction multipliers then scale off the wrong baseline (e.g. 1.5x too high). **Fix (SSOT):** author the baseline grip on the `WheelCollider` **prefab** (single source of truth) and remove the `Awake` code-side multiply. If a runtime multiplier knob is genuinely required, capture the defaults (call the cache) BEFORE any code-side multiply. Prefab-SSOT is preferred.
+- **VContainer duplicate registration ≠ last-wins**: two `RegisterInstance`/`Register<T>()` calls for the same concrete type do NOT override — VContainer throws `VContainerException: Conflict implementation type` at container build (boot crash). Library-default + consumer-override needs `IContainerBuilder.Exists` guard on the library side AND the consumer registering BEFORE calling the library's `Register*` extension. See [VContainer Registration Override](references/vcontainer-registration-override.md) for the ordering pattern and the circular-dependency (`VContainerException: Circular dependency detected!`) fix via SignalBus.
 
 ## Related Skills
 

@@ -4,7 +4,7 @@ description: "Resolve ambiguous references from prior conversation by scanning r
 keywords: [resolve, context, fork, brief, reference, ambiguous, plan, above, previous]
 argument-hint: "<ambiguous-reference-text> [--for <skill-or-agent>]"
 effort: low
-version: 2.20.0
+version: 2.21.2
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-base

@@ -5,7 +5,7 @@ t1k-adapter:
   engine: unity
   capabilities: [modules, classes]
   priority: 90
-version: 2.15.1
+version: 2.17.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

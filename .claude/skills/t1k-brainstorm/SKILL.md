@@ -5,7 +5,7 @@ keywords: [ideas, options, approach, explore, alternatives, ideation]
 argument-hint: "[topic or problem]"
 effort: medium
 tools: [Read, Glob, Grep, Bash, Write, Edit, Task, Agent, AskUserQuestion, Skill]
-version: 2.15.1
+version: 2.17.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

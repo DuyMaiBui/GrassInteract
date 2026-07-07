@@ -420,7 +420,7 @@
       ]
     },
     "unity": {
-      "version": "modules-20260616-1313",
+      "version": "modules-20260706-1042",
       "installedAt": "2026-06-09T07:07:01.429Z",
       "files": [
         {
@@ -1518,7 +1518,7 @@
       ]
     },
     "core": {
-      "version": "modules-20260615-0919",
+      "version": "modules-20260706-0727",
       "installedAt": "2026-06-09T07:07:32.681Z",
       "files": [
         {
@@ -4507,43 +4507,43 @@
   "schemaVersion": 3,
   "installedModules": {
     "base": {
-      "version": "2.5.0",
+      "version": "2.5.1",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "animation": {
-      "version": "2.5.0",
+      "version": "2.5.3",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "audio": {
-      "version": "2.4.0",
+      "version": "2.4.1",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "editor": {
-      "version": "2.4.0",
+      "version": "2.4.1",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "ui": {
-      "version": "2.6.0",
+      "version": "2.6.1",
       "kit": "theonekit-unity",
       "repository": "The1Studio/theonekit-unity",
       "installedAt": "2026-06-09T07:07:01.475Z"
     },
     "t1k-base": {
-      "version": "2.20.0",
+      "version": "2.21.2",
       "kit": "theonekit-core",
       "repository": "The1Studio/theonekit-core",
       "installedAt": "2026-06-09T07:07:32.811Z"
     },
     "t1k-extended": {
-      "version": "2.15.1",
+      "version": "2.17.1",
       "kit": "theonekit-core",
       "repository": "The1Studio/theonekit-core",
       "installedAt": "2026-06-09T07:07:32.811Z"

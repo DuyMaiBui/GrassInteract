@@ -1,9 +1,9 @@
 {
   "module": "t1k-extended",
-  "version": "2.15.1",
+  "version": "2.17.1",
   "kit": "theonekit-core",
   "generatedBy": "release-action",
-  "generatedAt": "2026-06-15T09:19:20.194Z",
+  "generatedAt": "2026-07-06T07:27:30.562Z",
   "files": {
     "skills": [
       "t1k-architecture/SKILL.md",
@@ -18,6 +18,7 @@
       "t1k-architecture/references/tool-and-extension-internals.md",
       "t1k-brainstorm/SKILL.md",
       "t1k-clickup/SKILL.md",
+      "t1k-clickup/references/mcp-validation-gotchas.md",
       "t1k-clickup/references/patterns.md",
       "t1k-extended-multimodal/.env.example",
       "t1k-extended-multimodal/SKILL.md",
@@ -61,6 +62,7 @@
       "t1k-game-arch/references/testing-strategy.md",
       "t1k-game-arch/references/unity-patterns.md",
       "t1k-handoff/SKILL.md",
+      "t1k-handoff/scripts/handoff-save-guard.cjs",
       "t1k-human-writing/SKILL.md",
       "t1k-human-writing/references/ai-tells-catalog.md",
       "t1k-human-writing/references/email-playbook.md",
@@ -160,8 +162,11 @@
       "t1k-mcp-manager.md",
       "t1k-researcher.md"
     ],
-    "hooks": [],
+    "hooks": [
+      "human-writing-reminder.cjs"
+    ],
     "rules": [
+      "docker-volume-discipline.md",
       "image-analysis-routing.md",
       "parallel-teammate-git-index-race.md",
       "teammate-cleanup-after-done.md"
@@ -172,5 +177,5 @@
       "scripts/resolve_env.py"
     ]
   },
-  "checksum": "sha256:53395b50a345acd6a9820e78f7f79373edb027d2484934e7685ec636da7af687"
+  "checksum": "sha256:24e773e0090b181b7e67167a5c3fdc79f9debc2759f227b92c76c3229830e763"
 }

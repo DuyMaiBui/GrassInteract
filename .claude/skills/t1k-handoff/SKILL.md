@@ -4,7 +4,7 @@ description: "Save and resume session context for handoffs between sessions or d
 keywords: [handoff, session, resume, transfer, context, save, restore]
 argument-hint: "save|resume|list [date-slug|--global]"
 effort: medium
-version: 2.15.1
+version: 2.17.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended
@@ -107,11 +107,30 @@ Location: {active-plan-dir}/HANDOFF.md | .claude/handoffs/{date}-{slug}.md | $HO
    - Else: if a `.claude/` dir exists in project scope → save to `.claude/handoffs/{YYMMDD}-{slug}.md`.
    - Else (global-only mode, no project) → save to `$HOME/.claude/handoffs/{YYMMDD}-{slug}.md`.
 4. Synthesize key decisions from recent conversation (last 20 exchanges mentioning architecture, choice, decided, rejected).
-5. Ensure the parent dir exists before writing: `mkdir -p "$(dirname <save-path>)"` (Bash). The resolved target (`{plan-dir}/HANDOFF.md`, `.claude/handoffs/`, or `$HOME/.claude/handoffs/`) may not exist yet — Write fails on a missing parent dir. If `mkdir -p` fails, fall back to `$HOME/.claude/handoffs/{YYMMDD}-{slug}.md` (its parent is created the same way).
-6. Write the markdown file; include the final `Location:` line in the header so future `resume` can find it unambiguously.
-7. Report: `saved to {absolute-path} ({chosen-scope})`, summary of what was captured.
+
+<HARD-GATE-HANDOFF-MKDIR>
+5. **Create the parent dir via the guard script — do NOT hand-roll `mkdir -p` (it was skipped in #536/#527).** Run, BEFORE any Write:
+   ```bash
+   node "$(dirname "$0")/scripts/handoff-save-guard.cjs" prepare "<save-path>" "$HOME/.claude/handoffs/{YYMMDD}-{slug}.md"
+   ```
+   (or the absolute skill path `.claude/skills/t1k-handoff/scripts/handoff-save-guard.cjs`). The script `mkdir -p`s the parent of `<save-path>`, confirms it is writable, and prints `OK <path>` on success. If the primary parent can't be created it falls back to the `$HOME` path and prints `OK <fallback>`. On `FAIL` (exit 2) it could create NEITHER — surface the failure and STOP; do NOT Write or report "saved". **Write to exactly the path the script printed after `OK`** (it may be the fallback, not your primary).
+</HARD-GATE-HANDOFF-MKDIR>
+
+6. Write the markdown file to the `OK <path>` returned in step 5; include the final `Location:` line in the header so future `resume` can find it unambiguously.
+
+<HARD-GATE-HANDOFF-VERIFY>
+7. **Verify the write landed via the guard script (MANDATORY — do NOT skip; do NOT substitute a bare `test -f`).** After Write, run:
+   ```bash
+   node "$(dirname "$0")/scripts/handoff-save-guard.cjs" verify "<save-path>"
+   ```
+   It asserts the file exists AND is a non-empty regular file. `OK <path>` (exit 0) → safe to report saved. `FAIL` (exit 2, e.g. `file-not-found` / `empty-file`) → the Write claimed success but no usable file is on disk: **do NOT report "saved"** — surface the failure, then retry ONCE against the fallback `$HOME/.claude/handoffs/{YYMMDD}-{slug}.md` (re-run step 5 `prepare`, re-Write, re-`verify`). Only a `verify`-confirmed file may be reported as saved.
+</HARD-GATE-HANDOFF-VERIFY>
+
+8. Report: `saved to {absolute-path} ({chosen-scope})`, summary of what was captured. The `{absolute-path}` MUST be the path the step 7 `verify` returned `OK` for — never a path you only intended to write.
 
 Slug is auto-generated from the active plan name or current task, lowercased, max 30 chars. Not used when saving to `{plan-dir}/HANDOFF.md` (filename is fixed).
+
+The two `<HARD-GATE-HANDOFF-*>` blocks above are machine-readable contracts (see `rules/workflow-gates.md`): steps 5 and 7 MUST go through `scripts/handoff-save-guard.cjs`, never a hand-rolled `mkdir -p` / `test -f` (those were the prose steps that got skipped in #536 and #527, producing false "saved" claims with no file on disk).
 
 ## resume Workflow
 
@@ -198,6 +217,7 @@ Do NOT delete — archive only.
 - **Large conversation history**: Only synthesize decisions from the last 20 AI turns — do not dump full history.
 - **resume doesn't restore tool state**: It provides context text only — the AI must re-read relevant files itself.
 - **CLI path-transformer**: The CLI installer's `global-path-transformer.ts` rewrites `.claude/` → `$HOME/.claude/` for globally-installed skill copies. The companion PR in theonekit-cli adds this skill to the transformer's skip list so the project-scoped paths above survive installation. If you see `$HOME/` rewrites in the user-scope SKILL.md, pull the latest CLI release.
+- **Save guard is deterministic, not prose**: parent-dir creation and post-write verification run through `scripts/handoff-save-guard.cjs` (`prepare` / `verify`), NOT hand-rolled `mkdir -p` / `test -f`. The script exits 2 on any failure so a missing/empty file can never be reported as "saved" (#536). Resolve the script via the SKILL.md dir; when globally installed it lives at `$HOME/.claude/skills/t1k-handoff/scripts/handoff-save-guard.cjs`.
 
 ## Memory Anti-Pattern Guards (E9)
 

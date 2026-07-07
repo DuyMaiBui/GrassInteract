@@ -4,7 +4,7 @@ description: Unity C# code conventions — naming, no-hardcoded-values, shared c
 effort: high
 context: fork
 keywords: [code conventions, coding standards, naming, style]
-version: 2.5.0
+version: 2.5.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: base
@@ -150,3 +150,4 @@ protected: false
 - **Assembly definition naming has a hard 64-char path limit on Windows** — long namespaces hit this in CI before any developer notices.
 - **`#region` blocks are an anti-pattern in modern C#** — prefer extracting to partial classes; conventions should call this out explicitly.
 - **Demo/Test/Temp/Placeholder namespace ban needs a CI hook** — 20/22 audited demos violated CLAUDE.md "no Demo/Test/Temp/Placeholder in production names" (260520-R3); enforcement via `.editorconfig` alone is insufficient. Add a grep-based CI gate that fails on `namespace.*Demo` in production assemblies (not test asmdefs). Source: review-260520-round3-production.md §R3P2
+- **`UniTask.Preserve()` supports only SEQUENTIAL re-awaits, not concurrent pre-completion awaiters** — a second awaiter registering before the task completes throws `InvalidOperationException: Already continuation registered`. For a run-once/await-by-many-concurrently gate (e.g. a lazy cache warm-up hit by a parallel `WhenAll` key-load), back the gate with a `System.Threading.Tasks.Task` via `.AsTask()` (multi-awaiter safe) or use UniTask's `AsyncLazy` — never a shared `Preserve()`d UniTask.

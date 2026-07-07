@@ -93,6 +93,19 @@ Follow protocol: `skills/t1k-modules/references/module-detection-protocol.md` �
 | 18 | Agent maxTurns presence | Every agent `.md` has `maxTurns:` in frontmatter |
 | 19 | Skill effort presence | Every skill `SKILL.md` has `effort:` in frontmatter (low/medium/high) |
 | 20 | Agent model appropriateness | Implementer/t1k-debugger agents should use `inherit` or `opus`; utility agents (git, docs) should use `sonnet` |
+| 51 | Agent budget calibration | Per `rules/agent-completion-discipline.md`: budget checkpoints must be window-relative, not flat tokens; tool-heavy agents must carry one; `maxTurns` sized to task class |
+
+**Check #51 details (`scripts/check-agent-budget-calibration.cjs`):**
+
+Scans every `.claude/agents/*.md`. An agent is "tool-heavy" when its `tools:` frontmatter includes `Bash`, `Task`, or `Agent` (it can mutate or orchestrate). Flags, at WARN level (exit 0 always):
+
+| Sub-check | Trigger | Fix |
+|---|---|---|
+| (a) Flat-token checkpoint | Body contains a literal token threshold (`150K` / `150,000` / `200K`) with no window-relative anchoring | Make it relative to the agent's `model:` window (~75%@200K / ~55%@1M) |
+| (b) Missing checkpoint | Tool-heavy agent body has no budget/checkpoint language at all | Add the window-relative + ~80%-`maxTurns` checkpoint |
+| (c) Under-sized maxTurns | Tool-heavy agent with `maxTurns < 50` | Size to task class — multi-PR/refactor/MCP-validation work hits the turn cap before tokens (#528: `t1k-kit-developer` 45→90) |
+
+Window-relative anchoring is recognized by phrases like `window-relative`, `% of … window`, `relative to … budget`, `maxTurns`, or a citation of `agent-completion-discipline`. Read-only discovery agents (no `Bash`/`Task`/`Agent`) are exempt from (b) and (c). SSOT for the policy: `rules/agent-completion-discipline.md`. Resolves core#530 (fleet calibration); motivated by core#528.
 
 ## Cross-Platform Checks (#30)
 

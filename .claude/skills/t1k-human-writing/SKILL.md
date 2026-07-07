@@ -4,7 +4,7 @@ description: "Write emails, posts, and messages that read as human — not AI-ge
 keywords: [human writing, sound human, not like AI, AI-generated, ChatGPT tells, AI slop, humanize, email voice, post voice, message voice, anti-AI, de-AI, write naturally, em dash, delve, engagement bait, broetry, sycophancy, hedging, register switching, lint draft, rewrite draft]
 argument-hint: "guide <email|post|message> | lint <draft-file-or-pasted-text>"
 effort: medium
-version: 2.15.1
+version: 2.17.1
 origin: theonekit-core
 repository: The1Studio/theonekit-core
 module: t1k-extended

@@ -4,7 +4,7 @@ description: LitMotion zero-alloc tween library for Unity — LMotion.Create, Bi
 effort: high
 context: fork
 keywords: [litmotion, tween, animation, zero-allocation]
-version: 2.5.0
+version: 2.5.3
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: animation
@@ -60,6 +60,7 @@ Reference for [LitMotion](https://github.com/annulusgames/LitMotion) — a zero-
 | Configuration (Ease, Loops, Delay, Callbacks) | [configuration-guide.md](references/configuration-guide.md) |
 | Advanced (Sequence, Punch/Shake, TMP, Custom) | [advanced-guide.md](references/advanced-guide.md) |
 | DOTween Pro → LitMotion Migration | [dotween-migration-guide.md](references/dotween-migration-guide.md) |
+| `DOTweenAnimation` (component) → `LitMotionAnimation` (component) Migration | [dotween-animation-component-migration.md](references/dotween-animation-component-migration.md) |
 | Project Utilities (Path, EaseMapper, Callbacks) | [project-utilities.md](references/project-utilities.md) |
 
 ---

@@ -4,7 +4,7 @@ description: Author new generic Unity UI screen/popup prefabs as VARIANTS of UIB
 effort: low
 keywords: [ui prefab, screen prefab, popup prefab, prefab variant, UIBaseScreen, UIBasePopup, Background, Content, Foreground, Timeline_Grp, SafeArea, anchor pivot, responsive ui, FlexibleLayoutGroupVer2, RootUI, gdk core, common ui, generic ui, unity mcp, content children, field-driven, layout image]
 argument-hint: "[screen-name] [layout-image-path] (both optional)"
-version: 2.6.0
+version: 2.6.1
 origin: theonekit-unity
 repository: The1Studio/theonekit-unity
 module: ui
@@ -65,7 +65,7 @@ Pick exactly one base — never start from an empty Canvas, never duplicate the 
    `mcp__UnityMCP__manage_gameobject(action="create", name="<ScreenName>", prefab_path="<base-path>")`
 2. Attach the View MonoBehaviour:
    `mcp__UnityMCP__manage_gameobject(action="modify", target="<ScreenName>", search_method="by_name", components_to_add=["<FullyQualified.ViewType>"])`
-3. **Check capability** for variant save: does `mcp__UnityMCP__manage_prefabs.create_from_gameobject` accept a `variant` parameter? **As of 2026-05-28: NO** — the action's schema has only `unlink_if_instance`, which produces a STANDALONE prefab, not a variant. Until upstream `The1Studio/unity-mcp` adds the flag, skip step 4 and go to Track B.
+3. **Check capability** for variant save: does `mcp__UnityMCP__manage_prefabs.create_from_gameobject` accept a `variant` parameter? **Currently: NO** — the action's schema has only `unlink_if_instance`, which produces a STANDALONE prefab, not a variant. Until upstream `The1Studio/unity-mcp` adds the flag, skip step 4 and go to Track B.
 4. **(Future, when MCP adds variant support)** `mcp__UnityMCP__manage_prefabs(action="create_from_gameobject", target="<ScreenName>", prefab_path="<target>", variant=true)`.
 
 ### Track B — Minimal-YAML variant (current reality)
@@ -282,7 +282,7 @@ Parse the View class for `[SerializeField]` and `[field: SerializeField]` declar
 
 ### 9.2 Widget-type → child template mapping
 
-For each field, create a child GameObject using this table. **ALWAYS include `UnityEngine.RectTransform` in `components_to_add` — never let MCP default to plain `Transform`**, which is invalid under a Canvas. (Verified 2026-05-28: `create_child` without explicit `components_to_add` ships a plain `Transform`.)
+For each field, create a child GameObject using this table. **ALWAYS include `UnityEngine.RectTransform` in `components_to_add` — never let MCP default to plain `Transform`**, which is invalid under a Canvas. (Verified against unity-mcp@beta: `create_child` without explicit `components_to_add` ships a plain `Transform`.)
 
 | Field type | `components_to_add` (mandatory order) | Default placement (applied via §9.2.5) |
 |---|---|---|
@@ -298,7 +298,7 @@ For each field, create a child GameObject using this table. **ALWAYS include `Un
 
 If a field has `[Header("Background")]` / `[Header("Foreground")]` attribute, override the parent from `Content` to that layer.
 
-**`create_child`'s `parent_path` argument is IGNORED** (verified 2026-05-28) — every child lands at the prefab root regardless. Workaround: omit `parent_path`, then issue a separate `modify_contents(target: "<ChildName>", parent: "<LayerName>")` call to re-parent under the correct layer (`Content` / `Background` / `Foreground`). See §10 for the exact pattern.
+**`create_child`'s `parent_path` argument is IGNORED** (verified against unity-mcp@beta) — every child lands at the prefab root regardless. Workaround: omit `parent_path`, then issue a separate `modify_contents(target: "<ChildName>", parent: "<LayerName>")` call to re-parent under the correct layer (`Content` / `Background` / `Foreground`). See §10 for the exact pattern.
 
 ### 9.2.5 Apply RectTransform AFTER create_child (MANDATORY)
 
@@ -324,13 +324,13 @@ mcp__UnityMCP__manage_prefabs(
 )
 ```
 
-**Property name form is mandatory flat-axis** — `m_AnchorMin.x` and `m_AnchorMin.y` as SEPARATE keys. The Vector2 object form `m_AnchorMin: {x:0, y:0}` returns `Unsupported SerializedPropertyType: Vector2` (verified 2026-05-28). Same flat-axis rule for `m_AnchorMax`, `m_Pivot`, `m_AnchoredPosition`, `m_SizeDelta`.
+**Property name form is mandatory flat-axis** — `m_AnchorMin.x` and `m_AnchorMin.y` as SEPARATE keys. The Vector2 object form `m_AnchorMin: {x:0, y:0}` returns `Unsupported SerializedPropertyType: Vector2` (verified against unity-mcp@beta). Same flat-axis rule for `m_AnchorMax`, `m_Pivot`, `m_AnchoredPosition`, `m_SizeDelta`.
 
 **Verification:** the response includes `transform.position` reflecting `anchoredPosition` — quick sanity check. For deeper verify, call `get_hierarchy` and confirm the child path is `<Root>/Content/<ChildName>`.
 
 ### 9.3 Wire references on the View component (direct YAML — MCP gap workaround)
 
-**MCP `modify_contents(component_properties)` cannot wire in-prefab object references today** (verified 2026-05-28 against The1Studio/unity-mcp@beta). The resolver at `ComponentOps.cs:719` routes `{"name":...}` payloads through `ResolveSceneObjectByName` which hardcodes scene-only lookup (`ComponentOps.cs:875`); the loaded prefab root from `ManagePrefabs.ModifyContents:617` is never forwarded into the resolver. `GameObjectLookup` only falls back to `PrefabStageUtility.GetCurrentPrefabStage()` when a prefab is OPEN in Prefab Mode (`GameObjectLookup.cs:164,292`) — an in-memory `LoadPrefabContents` is invisible to that fallback. All three payload forms (`name` / `instanceID` / `path`) return scene-scoped errors on the prefab-asset path.
+**MCP `modify_contents(component_properties)` cannot wire in-prefab object references today** (verified against The1Studio/unity-mcp@beta). The resolver at `ComponentOps.cs:719` routes `{"name":...}` payloads through `ResolveSceneObjectByName` which hardcodes scene-only lookup (`ComponentOps.cs:875`); the loaded prefab root from `ManagePrefabs.ModifyContents:617` is never forwarded into the resolver. `GameObjectLookup` only falls back to `PrefabStageUtility.GetCurrentPrefabStage()` when a prefab is OPEN in Prefab Mode (`GameObjectLookup.cs:164,292`) — an in-memory `LoadPrefabContents` is invisible to that fallback. All three payload forms (`name` / `instanceID` / `path`) return scene-scoped errors on the prefab-asset path.
 
 Use the **direct YAML edit** path below. It preserves the variant link (no Prefab-Mode-collapse risk) and works against any MCP version.
 
@@ -509,7 +509,7 @@ Gates relevant to §9 (see §8 for the full list):
 
 ## 10. MCP Tool Capability Matrix
 
-Quick-reference status as of **2026-05-28** against The1Studio/unity-mcp@beta. Re-test before assuming a row is still accurate.
+Quick-reference status against The1Studio/unity-mcp@beta. Re-test before assuming a row is still accurate.
 
 | Operation | MCP call | Status | Notes |
 |---|---|---|---|
@@ -542,12 +542,12 @@ Authoring of `.prefab` assets for generic Unity UI screens / popups OUTSIDE TheO
 
 - **Layout-image text decorations are auto-spawned even without a `[SerializeField]` field.** Text inside a field-driven button (e.g. "Level 999" inside `BtnPlay`) becomes a nested `<Button>/Label` TMP child (§9.4.B); standalone text (e.g. "Normal" caption above a pill) becomes a `Txt<Name>` child under `Content` (§9.4.C). Both get full RT placement per §9.2.5 + `m_text` content from the image. They are NOT wired to the View script — the Presenter never touches them, they are purely visual. User can later promote to `[SerializeField]` if interactivity is added. Without this, image-driven UIs ship with empty buttons and missing labels.
 - **TMP serialized text property is `m_text`, NOT `text` or `m_Text`.** Verified against existing TMP prefabs (e.g. `titlePopup1.prefab`). The `text` form is the runtime C# property (`TMP_Text.text`); the `m_Text` form (capitalised M) is wrong. MCP `modify_contents(component_properties={"TMPro.TextMeshProUGUI": {"m_text": "<value>"}})` is the only working form.
-- **`create_child` ignores `parent_path`.** Verified 2026-05-28: regardless of the value passed, the new child lands at the prefab root. Always follow with a separate `modify_contents(target: "<ChildName>", parent: "<LayerName>")` call to re-parent.
+- **`create_child` ignores `parent_path`.** Verified against unity-mcp@beta: regardless of the value passed, the new child lands at the prefab root. Always follow with a separate `modify_contents(target: "<ChildName>", parent: "<LayerName>")` call to re-parent.
 - **`create_child` defaults to plain `Transform`.** Without explicit `components_to_add`, the new GameObject ships with `UnityEngine.Transform` — invalid under a Canvas. ALWAYS pass `components_to_add: ["UnityEngine.RectTransform", …]` for UI children. Recovery: `modify_contents(target, components_to_add: ["UnityEngine.RectTransform"])` replaces the Transform in-place because RectTransform inherits.
 - **RectTransform Vector2 properties need flat-axis form.** MCP rejects `m_AnchorMin: {x:0, y:1}` with `Unsupported SerializedPropertyType: Vector2`. Use separate keys `m_AnchorMin.x` and `m_AnchorMin.y`. Same for `m_AnchorMax`, `m_Pivot`, `m_AnchoredPosition`, `m_SizeDelta`.
-- **Headless field-wiring via `modify_contents(component_properties)` does NOT work for in-prefab object references.** Verified 2026-05-28: ALL three payload forms — `{"name":...}`, `{"instanceID":...}`, `{"path":...}` — fail with scene-scoped errors when targeting children inside a prefab ASSET (not a Prefab Stage). Root cause: `ComponentOps.SetObjectReference:719` routes name lookups through `ResolveSceneObjectByName` which hardcodes scene search at `ComponentOps.cs:875`; the prefab root loaded by `ManagePrefabs.ModifyContents:617` via `PrefabUtility.LoadPrefabContents` is never forwarded into the resolver. `GameObjectLookup` only falls back to `PrefabStageUtility.GetCurrentPrefabStage()` when a prefab is OPEN in Prefab Mode (`GameObjectLookup.cs:164,292`) — an in-memory load is invisible to that fallback. **Workaround: direct YAML edit of `<field>: {fileID: <ComponentFileID>}` on the View's MonoBehaviour block** (§9.3 Track A). Preserves variant link, works against any MCP version. Track B (Prefab Mode + `manage_components.set_property`) does work but collapses Track-B variants to standalone — use only if you accept losing the variant link.
+- **Headless field-wiring via `modify_contents(component_properties)` does NOT work for in-prefab object references.** Verified against unity-mcp@beta: ALL three payload forms — `{"name":...}`, `{"instanceID":...}`, `{"path":...}` — fail with scene-scoped errors when targeting children inside a prefab ASSET (not a Prefab Stage). Root cause: `ComponentOps.SetObjectReference:719` routes name lookups through `ResolveSceneObjectByName` which hardcodes scene search at `ComponentOps.cs:875`; the prefab root loaded by `ManagePrefabs.ModifyContents:617` via `PrefabUtility.LoadPrefabContents` is never forwarded into the resolver. `GameObjectLookup` only falls back to `PrefabStageUtility.GetCurrentPrefabStage()` when a prefab is OPEN in Prefab Mode (`GameObjectLookup.cs:164,292`) — an in-memory load is invisible to that fallback. **Workaround: direct YAML edit of `<field>: {fileID: <ComponentFileID>}` on the View's MonoBehaviour block** (§9.3 Track A). Preserves variant link, works against any MCP version. Track B (Prefab Mode + `manage_components.set_property`) does work but collapses Track-B variants to standalone — use only if you accept losing the variant link.
 - **Children without §9.2.5 position step stack at center.** `create_child` does NOT set anchor/pivot/sizeDelta/anchoredPosition. The two-step pattern (`create_child` → `modify_contents(component_properties.RectTransform)`) is MANDATORY, not advisory.
-- **`create_from_gameobject` produces a STANDALONE prefab, not a variant.** MCP schema has no `variant` flag (verified 2026-05-28). Use §1 Track B minimal-YAML. Silent-failure symptom: result starts with `--- !u!1 &<id>\nGameObject:` instead of `--- !u!1001 &<id>\nPrefabInstance:`.
+- **`create_from_gameobject` produces a STANDALONE prefab, not a variant.** MCP schema has no `variant` flag (verified against unity-mcp@beta). Use §1 Track B minimal-YAML. Silent-failure symptom: result starts with `--- !u!1 &<id>\nGameObject:` instead of `--- !u!1001 &<id>\nPrefabInstance:`.
 - **Prefab-Mode save collapses a Track B variant to standalone.** If you instantiate the Track B variant in scene Prefab Mode, add structural changes (new children), then `close_prefab_stage`, Unity rewrites the file as a fully-fleshed `!u!1 GameObject` prefab — `m_SourcePrefab` is gone. Workaround: skip Prefab Mode for structural changes. Use `mcp__UnityMCP__manage_prefabs.modify_contents(create_child=[...], component_properties=...)` directly against the asset path — it preserves variant overrides.
 - **Addressables group name is project-specific.** Never hardcode — detect via §7.1 grep, then `AskUserQuestion` if undetermined.
 - **Skeleton prefab without children → runtime NullReferenceException.** Skipping §9 leaves `[SerializeField]` refs unwired. §9 is MANDATORY, not advisory.
